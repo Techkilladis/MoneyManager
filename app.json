@@ -23,7 +23,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./modules/notification-detection/plugin.js"
     ]
   }
 }

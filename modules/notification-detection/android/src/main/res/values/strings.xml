@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_listener_service_name">Money Manager UPI Notification Listener</string>
+    <string name="module_name">MoneyManagerNotificationDetection</string>
+</resources>

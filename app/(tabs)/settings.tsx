@@ -1,5 +1,5 @@
 // Settings Screen
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Linking, Platform, ScrollView } from 'react-native';
 import { 
   Screen, 
@@ -14,16 +14,33 @@ import {
   Button,
   Badge
 } from '@/design/primitives';
-import { transactionService } from '@/services';
+import { services } from '@/services';
 import Constants from 'expo-constants';
 
 export default function SettingsScreen() {
-  const openNotificationSettings = async () => {
-    if (Platform.OS === 'android') {
-      try {
+  const [notificationAccessEnabled, setNotificationAccessEnabled] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+
+  const checkNotificationAccess = async () => {
+    try {
+      const enabled = await services.notification.isNotificationAccessEnabled();
+      setNotificationAccessEnabled(enabled);
+    } catch (error) {
+      console.error('Failed to check notification access:', error);
+      setNotificationAccessEnabled(false);
+    } finally {
+      setCheckingAccess(false);
+    }
+  };
+
+  const openNotificationAccessSettings = async () => {
+    try {
+      await services.notification.openNotificationAccessSettings();
+    } catch (error) {
+      console.error('Failed to open notification access settings:', error);
+      // Fallback to general settings
+      if (Platform.OS === 'android') {
         await Linking.openSettings();
-      } catch (e) {
-        console.error('Failed to open settings:', e);
       }
     }
   };
@@ -35,6 +52,10 @@ export default function SettingsScreen() {
       console.error('Failed to open app settings:', e);
     }
   };
+
+  useEffect(() => {
+    checkNotificationAccess();
+  }, []);
 
   const version = Constants.expoConfig?.version || '1.0.0';
   const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';
@@ -105,11 +126,12 @@ export default function SettingsScreen() {
                 </Footnote>
               </View>
               <Button 
-                variant="secondary" 
+                variant={notificationAccessEnabled ? "secondary" : "primary"} 
                 size="small" 
-                onPress={openNotificationSettings}
+                onPress={openNotificationAccessSettings}
+                disabled={checkingAccess}
               >
-                Open Settings
+                {notificationAccessEnabled ? 'Enabled' : 'Enable Access'}
               </Button>
             </Row>
             <Divider inset />
@@ -117,7 +139,7 @@ export default function SettingsScreen() {
               <View style={{ flex: 1 }}>
                 <BodyEmphasis>Current Status</BodyEmphasis>
                 <Footnote color="rgba(0,0,0,0.38)" style={{ marginTop: 2 }}>
-                  Setup will be available in a later phase
+                  {checkingAccess ? 'Checking...' : notificationAccessEnabled ? 'Notification access is enabled' : 'Notification access is disabled. Tap "Enable Access" to grant permission.'}
                 </Footnote>
               </View>
             </Row>

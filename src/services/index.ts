@@ -6,6 +6,7 @@ import { memberRepository } from '../database/repositories/memberRepository';
 import { formatCurrency, formatDate, formatRelativeDate, FormattedTransaction, HomeData } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
+import { notificationDetectionService } from './notificationDetection';
 
 export const transactionService = {
   // Initialize database
@@ -222,4 +223,5 @@ export const services = {
   transaction: transactionService,
   category: categoryService,
   member: memberService,
+  notification: notificationDetectionService,
 };
