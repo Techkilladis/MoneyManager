@@ -7,7 +7,10 @@
 
 import { merchantRepository } from '../database/repositories/merchantRepository';
 import { merchantMemoryRepository } from '../database/repositories/merchantMemoryRepository';
+import { categoryRepository } from '../database/repositories/categoryRepository';
+import { memberRepository } from '../database/repositories/memberRepository';
 import { normalizeMerchantFull } from './merchantNormalization';
+import { classifyWithAI } from './aiValidation';
 import { MerchantMemorySource, MerchantMemoryConfidence } from '../database/schema';
 
 export interface ClassificationSuggestion {
@@ -74,7 +77,7 @@ function calculateConfidence(
  * 1. USER_EXPLICIT_CHOICE (explicit categoryId/memberId passed in)
  * 2. USER_MERCHANT_MEMORY (user's historical choices for this merchant)
  * 3. SYSTEM_RULE (generic category rules - not implemented yet)
- * 4. AI_SUGGESTION (not implemented in Phase 5)
+ * 4. AI_SUGGESTION (local AI fallback)
  * 5. NONE
  */
 export async function getClassificationSuggestion(
@@ -140,7 +143,62 @@ export async function getClassificationSuggestion(
     };
   }
   
-  // Step 5: No suggestion available
+  // Step 5: Try AI fallback (only if no strong memory exists)
+  try {
+    // Build AI input
+    const [categories, members] = await Promise.all([
+      categoryRepository.getAll(),
+      memberRepository.getAll(),
+    ]);
+    
+    // Get relevant merchant memory for context
+    const memories = await merchantMemoryRepository.getByMerchantId(merchant.id);
+    const relevantMemory = memories.map(m => ({
+      categoryId: m.categoryId,
+      categoryName: m.categoryId ? categories.find(c => c.id === m.categoryId)?.name || null : null,
+      memberId: m.memberId,
+      memberName: m.memberId ? members.find(mem => mem.id === m.memberId)?.name || null : null,
+      source: m.source,
+      confidence: m.confidence,
+      usageCount: m.usageCount,
+    }));
+    
+    const aiSuggestion = await classifyWithAI({
+      merchantName: input.merchant,
+      normalizedMerchant: normalizedKey,
+      canonicalMerchant: canonicalName,
+      amountPaise: input.amountPaise,
+      sourceApp: input.sourceEventId ? undefined : undefined, // Could be passed from pending transaction
+      transactionTime: input.sourceEventId ? undefined : undefined,
+      availableCategories: categories.map(c => ({ id: c.id, name: c.name })),
+      availableMembers: members.map(m => ({ id: m.id, name: m.name })),
+      relevantMemory,
+      recentPatterns: [], // Could be populated from recent user confirmations
+    });
+    
+    if (aiSuggestion) {
+      return {
+        suggestion: {
+          categoryId: aiSuggestion.categoryId,
+          memberId: aiSuggestion.memberId,
+          confidence: aiSuggestion.confidence,
+          source: 'AI_SUGGESTED',
+          merchantId: merchant.id,
+          merchantName: merchant.canonicalName,
+        },
+        merchant: {
+          id: merchant.id,
+          canonicalName: merchant.canonicalName,
+          normalizedKey: merchant.normalizedKey,
+        },
+      };
+    }
+  } catch (error) {
+    // AI failure should not break the flow - just log and continue
+    console.warn('[Classification] AI fallback failed:', error);
+  }
+  
+  // Step 6: No suggestion available
   return {
     suggestion: null,
     merchant: {

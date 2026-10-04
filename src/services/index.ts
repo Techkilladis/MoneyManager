@@ -18,6 +18,18 @@ export const transactionService = {
   async initialize(): Promise<void> {
     await initializeDatabase();
     await seedDevelopmentData();
+    // Register mock AI provider for development (deferred to avoid circular dependency)
+    // Use setTimeout with require for CommonJS compatibility
+    setTimeout(() => {
+      try {
+        const { providerRegistry } = require('./aiClassificationProvider');
+        const { mockLocalAIProvider } = require('./mockAIProvider');
+        providerRegistry.register(mockLocalAIProvider);
+        providerRegistry.initializeAll();
+      } catch (error) {
+        console.warn('[transactionService] AI provider registration failed:', error);
+      }
+    }, 0);
     // Recovery: Handle CONFIRMED transactions that weren't consumed from native
     await this.recoverUnconsumedEvents();
   },
