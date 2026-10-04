@@ -28,15 +28,22 @@ export interface FormattedTransaction {
   note: string | null;
   status: 'PENDING' | 'CONFIRMED' | 'EDITED' | 'CANCELLED';
   sourceApp: string | null;
+  sourceEventId: string | null;  // NEW
+  sourceType: string | null;     // NEW
+  is_pending_capture: number;    // NEW: 1 = captured UPI event awaiting review
+  is_dismissed: number;          // NEW: 1 = dismissed (rejected/ignored)
+  dismissed_at: number | null;   // NEW: Timestamp when dismissed
 }
 
-// Home screen data
+// Home screen data - separated confirmed vs pending
 export interface HomeData {
-  totalSpending: number;        // In paise
+  totalSpending: number;              // CONFIRMED spending only (paise)
   totalSpendingFormatted: string;
   pendingCount: number;
-  recentTransactions: FormattedTransaction[];
-  pendingTransactions: FormattedTransaction[];
+  pendingTotal: number;               // PENDING total (paise)
+  pendingTotalFormatted: string;
+  recentTransactions: FormattedTransaction[];  // CONFIRMED only
+  pendingTransactions: FormattedTransaction[]; // PENDING only
 }
 
 // Date formatting utilities

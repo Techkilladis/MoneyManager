@@ -1,11 +1,12 @@
-// Transactions Screen
-import React, { useEffect, useState, useCallback } from 'react';
-import { ScrollView, RefreshControl, View, TextInput, Keyboard, FlatList, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+// Transactions Screen - Premium Transaction List
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { ScrollView, RefreshControl, View, TextInput, Keyboard, FlatList, TouchableOpacity, Alert, StyleSheet, Platform } from 'react-native';
 import { 
   Screen, 
   Section, 
   Card, 
   Row, 
+  Column,
   BodyEmphasis, 
   Body, 
   Footnote, 
@@ -14,14 +15,21 @@ import {
   EmptyState,
   Input,
   DisplayLarge,
-  Button
+  Button,
+  Title2,
+  Caption1,
+  Caption2,
+  Micro,
+  Title1,
+  SectionHeader,
+  ListItem,
+  TextPrimitive,
 } from '@/design/primitives';
 import { transactionService, categoryService, memberService } from '@/services';
 import { FormattedTransaction } from '@/domain/transaction';
 import { useRouter } from 'expo-router';
 import { formatDateForInput, formatDate } from '@/utils/date';
-import { SelectRow } from '@/components/forms';
-import { colors, typography, radius } from '@/design/tokens';
+import { colors, spacing, radius, shadows, typography } from '@/design/tokens';
 
 export default function TransactionsScreen() {
   const router = useRouter();
@@ -108,6 +116,7 @@ export default function TransactionsScreen() {
         endDate,
         limit: LIMIT,
         offset: newOffset,
+        is_pending_capture: 0, // Exclude pending captures from normal transaction list
       });
       
       if (isRefresh || !isLoadMore) {
@@ -158,7 +167,7 @@ export default function TransactionsScreen() {
   if (loading && transactions.length === 0) {
     return (
       <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Body color="rgba(0,0,0,0.38)">Loading transactions…</Body>
+        <Body color={colors.textTertiary}>Loading transactions…</Body>
       </Screen>
     );
   }
@@ -184,14 +193,17 @@ export default function TransactionsScreen() {
         key={tx.id}
         onPress={() => router.push(`/transaction/${tx.id}`)}
         activeOpacity={0.9}
-        style={{ paddingVertical: 12 }}
+        style={{ paddingVertical: spacing[3] }}
       >
         <Row justify="space-between" align="center">
-          <View style={{ flex: 1 }}>
-            <Row gap={8} align="center" style={{ marginBottom: 4 }}>
-              <BodyEmphasis>{tx.merchant}</BodyEmphasis>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Row gap={spacing[2]} align="center" style={{ marginBottom: spacing[1], flexWrap: 'wrap' }}>
+              <BodyEmphasis numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</BodyEmphasis>
               {tx.category && (
-                <Badge variant={tx.status === 'PENDING' ? 'pending' : 'success'} size="small">
+                <Badge 
+                  variant={tx.status === 'PENDING' ? 'pending' : tx.status === 'CONFIRMED' ? 'success' : 'neutral'} 
+                  size="small"
+                >
                   {tx.category.name}
                 </Badge>
               )}
@@ -199,24 +211,31 @@ export default function TransactionsScreen() {
                 <Badge variant="pending" size="small">Pending</Badge>
               )}
             </Row>
-            <Row gap={8} align="center">
-              <Footnote color="rgba(0,0,0,0.38)">{date}</Footnote>
-              <Footnote color="rgba(0,0,0,0.38)">{time}</Footnote>
+            <Row gap={spacing[2]} align="center">
+              <Caption2 color={colors.textTertiary}>{date}</Caption2>
+              <Caption2 color={colors.textTertiary}>{time}</Caption2>
               {tx.member && (
                 <>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.2)' }} />
-                  <Footnote color="rgba(0,0,0,0.38)">{tx.member.name}</Footnote>
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textQuaternary }} />
+                  <Caption2 color={colors.textTertiary}>{tx.member.name}</Caption2>
                 </>
               )}
               {tx.note && (
                 <>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.2)' }} />
-                  <Footnote color="rgba(0,0,0,0.38)">{tx.note}</Footnote>
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textQuaternary }} />
+                  <Caption2 color={colors.textTertiary} numberOfLines={1} ellipsizeMode="tail">{tx.note}</Caption2>
                 </>
               )}
             </Row>
           </View>
-          <BodyEmphasis style={{ textAlign: 'right', marginLeft: 16 }}>{tx.amount}</BodyEmphasis>
+          <Column align="flex-end" style={{ marginLeft: spacing[4] }}>
+            <BodyEmphasis style={{ textAlign: 'right' }}>{tx.amount}</BodyEmphasis>
+            {tx.status === 'PENDING' && (
+              <Micro color={colors.accent} style={{ textAlign: 'right', marginTop: 1 }}>
+                Pending
+              </Micro>
+            )}
+          </Column>
         </Row>
         {showDivider && <Divider inset />}
       </TouchableOpacity>
@@ -235,91 +254,102 @@ export default function TransactionsScreen() {
 
   return (
     <Screen>
-      <Section paddedHorizontal style={{ paddingTop: 8, paddingBottom: 4 }}>
+      <Section paddedHorizontal style={{ paddingTop: spacing[2], paddingBottom: spacing[3] }}>
         <Row justify="space-between" align="center">
-          <DisplayLarge style={{ letterSpacing: -0.8 }}>Transactions</DisplayLarge>
+          <Title1>Transactions</Title1>
           <Button variant="primary" size="small" onPress={() => router.push('/transactions/new')}>
-            Add
+            <TextPrimitive variant="micro">+</TextPrimitive>
+            <TextPrimitive variant="buttonSmall">New</TextPrimitive>
           </Button>
         </Row>
       </Section>
 
       {/* Filter Bar */}
-      <Section paddedHorizontal style={{ paddingBottom: 8 }}>
-        <Row gap={8} align="center">
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              hasActiveFilters && styles.filterChipActive,
-            ]}
+      <Section paddedHorizontal style={{ paddingBottom: spacing[2] }}>
+        <Row gap={spacing[2]} align="center">
+          <Button
+            variant={hasActiveFilters ? 'primary' : 'subtle'}
+            size="small"
             onPress={() => setShowFilters(!showFilters)}
+            fullWidth={false}
           >
-            <Body style={[
-              styles.filterChipText,
-              hasActiveFilters && styles.filterChipTextActive,
-            ]}>
-              Filters {hasActiveFilters && '•'}
-            </Body>
-          </TouchableOpacity>
+            <TextPrimitive variant="micro">🔍</TextPrimitive>
+            <TextPrimitive variant="buttonSmall">Filters</TextPrimitive>
+            {hasActiveFilters && (
+              <Badge variant="indigo" size="small" dot style={{ marginLeft: spacing[1] }}>
+                <Micro>Active</Micro>
+              </Badge>
+            )}
+          </Button>
           
           {showFilters && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <Row gap={6}>
+              <Row gap={spacing[2]}>
                 {/* Category Filter */}
                 {categories.length > 0 && (
-                  <SelectRow
-                    label="Category"
-                    value={categoryFilter}
-                    options={[{ id: '', label: 'All', color: undefined }, ...categories.map(c => ({ id: c.id, label: c.label, color: c.color || undefined }))]}
-                    onPress={() => Alert.alert('Category', 'Select category', [
-                      { text: 'All', onPress: () => setCategoryFilter(null) },
-                      ...categories.map(c => ({
-                        text: c.label,
-                        onPress: () => setCategoryFilter(c.id),
-                      })),
-                    ])}
-                    editable
-                    style={{ width: 140 }}
-                  />
+                  <View style={{ width: 140 }}>
+                    <BodyEmphasis style={{ marginBottom: spacing[2] }}>Category</BodyEmphasis>
+                    <Button 
+                      variant={categoryFilter ? 'secondary' : 'subtle'} 
+                      size="small"
+                      fullWidth
+                      onPress={() => Alert.alert('Category', 'Select category', [
+                        { text: 'All', onPress: () => setCategoryFilter(null) },
+                        ...categories.map(c => ({
+                          text: c.label,
+                          onPress: () => setCategoryFilter(c.id),
+                        })),
+                      ])}
+                    >
+                      <TextPrimitive variant="buttonSmall">
+                        {categoryFilter ? categories.find(c => c.id === categoryFilter)?.label || 'Category' : 'All'}
+                      </TextPrimitive>
+                    </Button>
+                  </View>
                 )}
                 
                 {/* Member Filter */}
                 {members.length > 0 && (
-                  <SelectRow
-                    label="Member"
-                    value={memberFilter}
-                    options={[{ id: '', label: 'All', color: undefined }, ...members.map(m => ({ id: m.id, label: m.label, color: m.color || undefined }))]}
-                    onPress={() => Alert.alert('Member', 'Select member', [
-                      { text: 'All', onPress: () => setMemberFilter(null) },
-                      ...members.map(m => ({
-                        text: m.label,
-                        onPress: () => setMemberFilter(m.id),
-                      })),
-                    ])}
-                    editable
-                    style={{ width: 140 }}
-                  />
+                  <View style={{ width: 140 }}>
+                    <BodyEmphasis style={{ marginBottom: spacing[2] }}>Member</BodyEmphasis>
+                    <Button 
+                      variant={memberFilter ? 'secondary' : 'subtle'} 
+                      size="small"
+                      fullWidth
+                      onPress={() => Alert.alert('Member', 'Select member', [
+                        { text: 'All', onPress: () => setMemberFilter(null) },
+                        ...members.map(m => ({
+                          text: m.label,
+                          onPress: () => setMemberFilter(m.id),
+                        })),
+                      ])}
+                    >
+                      <TextPrimitive variant="buttonSmall">
+                        {memberFilter ? members.find(m => m.id === memberFilter)?.label || 'Member' : 'All'}
+                      </TextPrimitive>
+                    </Button>
+                  </View>
                 )}
                 
                 {/* Date Filter */}
-                <SelectRow
-                  label="Date"
-                  value={dateFilterPreset}
-                  options={[
-                    { id: 'today', label: 'Today' },
-                    { id: 'this_week', label: 'This Week' },
-                    { id: 'this_month', label: 'This Month' },
-                    { id: 'custom', label: 'Custom' },
-                  ]}
-                  onPress={() => Alert.alert('Date Range', 'Select date range', [
-                    { text: 'Today', onPress: () => { setDateFilterPreset('today'); setCustomDateRange(null); } },
-                    { text: 'This Week', onPress: () => { setDateFilterPreset('this_week'); setCustomDateRange(null); } },
-                    { text: 'This Month', onPress: () => { setDateFilterPreset('this_month'); setCustomDateRange(null); } },
-                    { text: 'Custom', onPress: () => { setDateFilterPreset('custom'); } },
-                  ])}
-                  editable
-                  style={{ width: 130 }}
-                />
+                <View style={{ width: 130 }}>
+                  <BodyEmphasis style={{ marginBottom: spacing[2] }}>Date</BodyEmphasis>
+                  <Button 
+                    variant="secondary" 
+                    size="small"
+                    fullWidth
+                    onPress={() => Alert.alert('Date Range', 'Select date range', [
+                      { text: 'Today', onPress: () => { setDateFilterPreset('today'); setCustomDateRange(null); } },
+                      { text: 'This Week', onPress: () => { setDateFilterPreset('this_week'); setCustomDateRange(null); } },
+                      { text: 'This Month', onPress: () => { setDateFilterPreset('this_month'); setCustomDateRange(null); } },
+                      { text: 'Custom', onPress: () => { setDateFilterPreset('custom'); } },
+                    ])}
+                  >
+                    <TextPrimitive variant="buttonSmall">
+                      {dateFilterPreset === 'today' ? 'Today' : dateFilterPreset === 'this_week' ? 'This Week' : dateFilterPreset === 'this_month' ? 'This Month' : 'Custom'}
+                    </TextPrimitive>
+                  </Button>
+                </View>
               </Row>
             </ScrollView>
           )}
@@ -327,12 +357,13 @@ export default function TransactionsScreen() {
       </Section>
 
       {/* Search */}
-      <Section paddedHorizontal style={{ paddingBottom: 12 }}>
+      <Section paddedHorizontal style={{ paddingBottom: spacing[3] }}>
         <Input
           placeholder="Search transactions…"
           value={searchQuery}
           onChangeText={onSearchChange}
           dark={false}
+          leftIcon={<TextPrimitive variant="micro" color={colors.textTertiary}>🔍</TextPrimitive>}
         />
       </Section>
 
@@ -341,26 +372,26 @@ export default function TransactionsScreen() {
         renderItem={({ item, index }) => renderTransactionRow(item, index, index === transactions.length - 1)}
         keyExtractor={(item) => item.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#0071e3']} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.accent]} />
         }
         onEndReached={onEndReached}
         onEndReachedThreshold={0.1}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: spacing[25] }}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           transactions.length === 0 ? (
-            <Section paddedHorizontal style={{ paddingTop: 48, paddingBottom: 48 }}>
+            <Section paddedHorizontal style={{ paddingTop: spacing[16], paddingBottom: spacing[16] }}>
               <EmptyState
                 title={searchQuery ? 'No matches found' : 'No transactions yet'}
-                subtitle={searchQuery 
-                  ? 'Try adjusting your search' 
+                subtitle={searchQuery
+                  ? 'Try adjusting your search or filters'
                   : 'Transactions will appear here once added'}
                 action={{
                   label: 'Add Transaction',
                   onPress: () => router.push('/transactions/new')
                 }}
-                style={{ paddingVertical: 32 }}
+                style={{ paddingVertical: spacing[12] }}
               />
             </Section>
           ) : null
@@ -368,8 +399,8 @@ export default function TransactionsScreen() {
       />
       
       {hasMore && loading && (
-        <Section paddedHorizontal style={{ paddingVertical: 16, alignItems: 'center' }}>
-          <Body color="rgba(0,0,0,0.38)">Loading more…</Body>
+        <Section paddedHorizontal style={{ paddingVertical: spacing[4], alignItems: 'center' }}>
+          <Body color={colors.textTertiary}>Loading more…</Body>
         </Section>
       )}
     </Screen>
@@ -378,8 +409,8 @@ export default function TransactionsScreen() {
 
 const styles = StyleSheet.create({
   filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderDefault,
@@ -396,6 +427,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   filterChipTextActive: {
-    color: colors.textOnDark,
+    color: colors.textOnAccent,
   },
 });

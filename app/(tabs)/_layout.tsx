@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, spacing, radius, typography } from '@/design/tokens';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -9,31 +10,34 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#0071e3',
-        tabBarInactiveTintColor: 'rgba(0, 0, 0, 0.48)',
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textTertiary,
         tabBarStyle: {
-          height: 49 + (insets.bottom || 0),
+          height: 56 + (insets.bottom || 0),
           paddingBottom: insets.bottom || 0,
-          backgroundColor: '#f5f5f7',
+          paddingHorizontal: spacing[4],
+          backgroundColor: colors.surface,
           borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: 'rgba(0, 0, 0, 0.08)',
+          borderTopColor: colors.dividerLight,
           ...(Platform.OS === 'ios' ? {
             shadowColor: '#000',
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: 0.05,
-            shadowRadius: 8,
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.04,
+            shadowRadius: 12,
           } : {
-            elevation: 8,
+            elevation: 4,
           }),
         },
         tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '400',
-          fontFamily: 'system-ui',
-          letterSpacing: -0.2,
+          fontSize: typography.size.caption2,
+          fontWeight: typography.weight.medium,
+          fontFamily: typography.fontFamily.primary,
+          letterSpacing: typography.letterSpacing.caption,
+          marginTop: spacing[1],
         },
         tabBarItemStyle: {
-          paddingVertical: 4,
+          paddingVertical: spacing[2],
+          paddingHorizontal: spacing[1],
         },
       }}
     >
@@ -43,7 +47,7 @@ export default function TabLayout() {
           title: 'Home',
           tabBarIcon: ({ focused, color, size }) => (
             <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
-              <HomeIcon focused={focused} color={color} size={size} />
+              <HomeIcon focused={focused} color={focused ? colors.accent : colors.textTertiary} size={size * 0.55} />
             </View>
           ),
         }}
@@ -54,7 +58,7 @@ export default function TabLayout() {
           title: 'Transactions',
           tabBarIcon: ({ focused, color, size }) => (
             <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
-              <TransactionsIcon focused={focused} color={color} size={size} />
+              <TransactionsIcon focused={focused} color={focused ? colors.accent : colors.textTertiary} size={size * 0.55} />
             </View>
           ),
         }}
@@ -65,7 +69,7 @@ export default function TabLayout() {
           title: 'Settings',
           tabBarIcon: ({ focused, color, size }) => (
             <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
-              <SettingsIcon focused={focused} color={color} size={size} />
+              <SettingsIcon focused={focused} color={focused ? colors.accent : colors.textTertiary} size={size * 0.55} />
             </View>
           ),
         }}
@@ -74,34 +78,11 @@ export default function TabLayout() {
   );
 }
 
-// Simple icon components using React Native primitives
+// Apple/Linear inspired icon components
 function HomeIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
-  const iconSize = size * 0.6;
-  return (
-    <View
-      style={{
-        width: iconSize,
-        height: iconSize,
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
-      <View
-        style={{
-          width: iconSize * 0.7,
-          height: iconSize * 0.7,
-          borderWidth: focused ? 2.5 : 2,
-          borderColor: color,
-          borderRadius: 4,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-    </View>
-  );
-}
-
-function TransactionsIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
-  const iconSize = size * 0.6;
+  const iconSize = size * 0.7;
+  const strokeWidth = focused ? 2.5 : 1.5;
+  
   return (
     <View
       style={{
@@ -114,40 +95,35 @@ function TransactionsIcon({ focused, color, size }: { focused: boolean; color: s
       <View
         style={{
           width: iconSize * 0.75,
-          height: iconSize * 0.55,
-          borderWidth: focused ? 2.5 : 2,
+          height: iconSize * 0.75,
+          borderWidth: strokeWidth,
           borderColor: color,
-          borderRadius: 2,
+          borderRadius: radius.small,
+          transform: [{ rotate: '45deg' }],
         }}
-      >
+      />
+      {focused && (
         <View
           style={{
             position: 'absolute',
-            left: iconSize * 0.1,
-            right: iconSize * 0.1,
-            top: iconSize * 0.15,
-            height: 1,
+            bottom: iconSize * 0.05,
+            left: '50%',
+            marginLeft: -2,
+            width: 4,
+            height: 4,
+            borderRadius: 2,
             backgroundColor: color,
           }}
         />
-        <View
-          style={{
-            position: 'absolute',
-            left: iconSize * 0.1,
-            right: iconSize * 0.1,
-            top: iconSize * 0.3,
-            height: 1,
-            backgroundColor: color,
-            opacity: 0.6,
-          }}
-        />
-      </View>
+      )}
     </View>
   );
 }
 
-function SettingsIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
-  const iconSize = size * 0.6;
+function TransactionsIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
+  const iconSize = size * 0.7;
+  const strokeWidth = focused ? 2.5 : 1.5;
+  
   return (
     <View
       style={{
@@ -159,9 +135,71 @@ function SettingsIcon({ focused, color, size }: { focused: boolean; color: strin
     >
       <View
         style={{
-          width: iconSize * 0.7,
-          height: iconSize * 0.7,
-          borderWidth: focused ? 2.5 : 2,
+          width: iconSize * 0.8,
+          height: iconSize * 0.55,
+          borderWidth: strokeWidth,
+          borderColor: color,
+          borderRadius: radius.micro,
+        }}
+      >
+        <View
+          style={{
+            position: 'absolute',
+            left: iconSize * 0.1,
+            right: iconSize * 0.1,
+            top: iconSize * 0.18,
+            height: 1.5,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.5,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: iconSize * 0.1,
+            right: iconSize * 0.1,
+            top: iconSize * 0.38,
+            height: 1.5,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.4,
+          }}
+        />
+        {focused && (
+          <View
+            style={{
+              position: 'absolute',
+              left: iconSize * 0.1,
+              right: iconSize * 0.1,
+              top: iconSize * 0.58,
+              height: 1.5,
+              backgroundColor: color,
+              opacity: 0.3,
+            }}
+          />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function SettingsIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
+  const iconSize = size * 0.7;
+  const strokeWidth = focused ? 2.5 : 1.5;
+  
+  return (
+    <View
+      style={{
+        width: iconSize,
+        height: iconSize,
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
+    >
+      <View
+        style={{
+          width: iconSize * 0.75,
+          height: iconSize * 0.75,
+          borderWidth: strokeWidth,
           borderColor: color,
           borderRadius: iconSize * 0.35,
         }}
@@ -174,7 +212,7 @@ function SettingsIcon({ focused, color, size }: { focused: boolean; color: strin
             borderRadius: iconSize * 0.1,
             backgroundColor: color,
             top: iconSize * 0.08,
-            left: iconSize * 0.25,
+            left: iconSize * 0.275,
           }}
         />
         <View
@@ -185,8 +223,23 @@ function SettingsIcon({ focused, color, size }: { focused: boolean; color: strin
             backgroundColor: color,
             top: iconSize * 0.1,
             right: iconSize * 0.12,
+            opacity: focused ? 1 : 0.6,
           }}
         />
+        {focused && (
+          <View
+            style={{
+              position: 'absolute',
+              width: iconSize * 0.15,
+              height: iconSize * 0.15,
+              borderRadius: iconSize * 0.075,
+              borderWidth: 1.5,
+              borderColor: color,
+              bottom: iconSize * 0.08,
+              right: iconSize * 0.08,
+            }}
+          />
+        )}
       </View>
     </View>
   );

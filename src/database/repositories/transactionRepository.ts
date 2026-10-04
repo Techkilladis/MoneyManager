@@ -1,6 +1,6 @@
 // Transaction Repository
 import { openDatabase, mapTransactionRow, formatCurrency, parseCurrency, generateId, now, runInTransaction } from '../db';
-import { Transaction, TransactionStatus } from '../schema';
+import { Transaction, TransactionStatus, SourceType } from '../schema';
 
 export interface CreateTransactionInput {
   amountPaise: number;
@@ -15,6 +15,11 @@ export interface CreateTransactionInput {
   notificationId?: string | null;
   rawNotification?: string | null;
   parserMetadata?: string | null;
+  sourceEventId?: string | null;   // NEW: For idempotency
+  sourceType?: SourceType | null;  // NEW: Event source type
+  is_pending_capture?: number;     // NEW: 1 = captured UPI event awaiting review
+  is_dismissed?: number;           // NEW: 1 = dismissed (rejected/ignored)
+  dismissed_at?: number | null;    // NEW: Timestamp when dismissed
 }
 
 export interface UpdateTransactionInput {
@@ -24,6 +29,8 @@ export interface UpdateTransactionInput {
   memberId?: string | null;
   note?: string | null;
   status?: TransactionStatus;
+  is_dismissed?: number;           // NEW
+  dismissed_at?: number | null;    // NEW
 }
 
 export interface TransactionFilters {
@@ -35,6 +42,7 @@ export interface TransactionFilters {
   search?: string;
   limit?: number;
   offset?: number;
+  is_pending_capture?: number;    // NEW
 }
 
 export const transactionRepository = {
@@ -49,8 +57,10 @@ export const transactionRepository = {
         id, amountPaise, currency, merchant, transactionTimestamp,
         categoryId, memberId, note, status, sourceApp,
         notificationId, rawNotification, parserMetadata,
+        sourceEventId, sourceType,
+        is_pending_capture, is_dismissed, dismissed_at,  -- NEW
         createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.amountPaise,
@@ -65,6 +75,11 @@ export const transactionRepository = {
         input.notificationId || null,
         input.rawNotification || null,
         input.parserMetadata || null,
+        input.sourceEventId || null,
+        input.sourceType || null,
+        input.is_pending_capture || 0,    // NEW
+        input.is_dismissed || 0,          // NEW
+        input.dismissed_at || null,       // NEW
         timestamp,
         timestamp,
       ]
@@ -89,12 +104,23 @@ export const transactionRepository = {
     return row ? mapTransactionRow(row) : null;
   },
   
-  // Get transaction by notification ID (for deduplication)
+  // Get transaction by notification ID (for deduplication - legacy)
   async getByNotificationId(notificationId: string): Promise<Transaction | null> {
     const database = await openDatabase();
     const row = await database.getFirstAsync(
       'SELECT * FROM transactions WHERE notificationId = ?',
       [notificationId]
+    );
+    
+    return row ? mapTransactionRow(row) : null;
+  },
+  
+  // NEW: Get transaction by sourceEventId (for idempotency)
+  async getBySourceEventId(sourceEventId: string): Promise<Transaction | null> {
+    const database = await openDatabase();
+    const row = await database.getFirstAsync(
+      'SELECT * FROM transactions WHERE sourceEventId = ?',
+      [sourceEventId]
     );
     
     return row ? mapTransactionRow(row) : null;
@@ -130,6 +156,14 @@ export const transactionRepository = {
     if (input.status !== undefined) {
       updates.push('status = ?');
       values.push(input.status);
+    }
+    if (input.is_dismissed !== undefined) {
+      updates.push('is_dismissed = ?');
+      values.push(input.is_dismissed);
+    }
+    if (input.dismissed_at !== undefined) {
+      updates.push('dismissed_at = ?');
+      values.push(input.dismissed_at);
     }
     
     if (updates.length === 0) {
@@ -178,6 +212,10 @@ export const transactionRepository = {
       conditions.push('status = ?');
       values.push(filters.status);
     }
+    if (filters.is_pending_capture !== undefined) {
+      conditions.push('is_pending_capture = ?');
+      values.push(filters.is_pending_capture);
+    }
     if (filters.startDate) {
       conditions.push('transactionTimestamp >= ?');
       values.push(filters.startDate);
@@ -208,12 +246,27 @@ export const transactionRepository = {
     return this.list({ limit, status: 'CONFIRMED' });
   },
   
-  // Get pending transactions
+  // Get pending transactions (awaiting review) - only pending captures that are not dismissed
   async getPending(): Promise<Transaction[]> {
     const database = await openDatabase();
     const rows = await database.getAllAsync(
-      'SELECT * FROM transactions WHERE status = ? ORDER BY transactionTimestamp DESC',
-      ['PENDING']
+      `SELECT * FROM transactions 
+       WHERE status = 'PENDING' 
+       AND is_pending_capture = 1 
+       AND is_dismissed = 0
+       ORDER BY transactionTimestamp DESC`
+    );
+    
+    return rows.map(mapTransactionRow);
+  },
+  
+  // Get dismissed pending transactions
+  async getDismissed(): Promise<Transaction[]> {
+    const database = await openDatabase();
+    const rows = await database.getAllAsync(
+      `SELECT * FROM transactions 
+       WHERE is_dismissed = 1
+       ORDER BY dismissed_at DESC`
     );
     
     return rows.map(mapTransactionRow);
@@ -297,6 +350,10 @@ export const transactionRepository = {
       conditions.push('status = ?');
       values.push(filters.status);
     }
+    if (filters.is_pending_capture !== undefined) {
+      conditions.push('is_pending_capture = ?');
+      values.push(filters.is_pending_capture);
+    }
     if (filters.startDate) {
       conditions.push('transactionTimestamp >= ?');
       values.push(filters.startDate);
@@ -333,8 +390,10 @@ export const transactionRepository = {
             id, amountPaise, currency, merchant, transactionTimestamp,
             categoryId, memberId, note, status, sourceApp,
             notificationId, rawNotification, parserMetadata,
+            sourceEventId, sourceType,
+            is_pending_capture, is_dismissed, dismissed_at,  -- NEW
             createdAt, updatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             input.amountPaise,
@@ -349,6 +408,11 @@ export const transactionRepository = {
             input.notificationId || null,
             input.rawNotification || null,
             input.parserMetadata || null,
+            input.sourceEventId || null,
+            input.sourceType || null,
+            input.is_pending_capture || 0,
+            input.is_dismissed || 0,
+            input.dismissed_at || null,
             timestamp,
             timestamp,
           ]
@@ -358,5 +422,27 @@ export const transactionRepository = {
       
       return count;
     });
+  },
+  
+  // NEW: Create transaction with idempotency check
+  async createWithIdempotency(input: CreateTransactionInput): Promise<{ transaction: Transaction; isNew: boolean }> {
+    // If sourceEventId provided, check for existing
+    if (input.sourceEventId) {
+      const existing = await this.getBySourceEventId(input.sourceEventId);
+      if (existing) {
+        return { transaction: existing, isNew: false };
+      }
+    }
+    
+    // Also check notificationId for legacy deduplication
+    if (input.notificationId) {
+      const existing = await this.getByNotificationId(input.notificationId);
+      if (existing) {
+        return { transaction: existing, isNew: false };
+      }
+    }
+    
+    const transaction = await this.create(input);
+    return { transaction, isNew: true };
   },
 };

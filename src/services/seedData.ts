@@ -4,6 +4,7 @@
 import { transactionRepository } from '../database/repositories/transactionRepository';
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
+import { SourceType } from '../database/schema';
 
 export async function seedDevelopmentData(): Promise<void> {
   console.log('[Seed] Starting development data seed...');
@@ -34,7 +35,7 @@ export async function seedDevelopmentData(): Promise<void> {
   const day = 24 * 60 * 60 * 1000;
   
   const sampleTransactions = [
-    // Recent transactions (last 7 days)
+    // Recent transactions (last 7 days) - CONFIRMED
     {
       amountPaise: 35000, // ₹350.00
       merchant: 'Swiggy',
@@ -45,6 +46,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'PhonePe',
       notificationId: 'sample-notif-1',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 24000, // ₹240.00
@@ -56,6 +63,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Google Pay',
       notificationId: 'sample-notif-2',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 64900, // ₹649.00
@@ -67,6 +80,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Paytm',
       notificationId: 'sample-notif-3',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 125000, // ₹1,250.00
@@ -78,6 +97,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Google Pay',
       notificationId: 'sample-notif-4',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 85000, // ₹850.00
@@ -89,6 +114,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'BHIM',
       notificationId: 'sample-notif-5',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 45000, // ₹450.00
@@ -100,6 +131,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'PhonePe',
       notificationId: 'sample-notif-6',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 120000, // ₹1,200.00
@@ -111,6 +148,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Paytm',
       notificationId: 'sample-notif-7',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 32000, // ₹320.00
@@ -122,6 +165,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Google Pay',
       notificationId: 'sample-notif-8',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 180000, // ₹1,800.00
@@ -133,6 +182,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'PhonePe',
       notificationId: 'sample-notif-9',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 59900, // ₹599.00
@@ -144,8 +199,15 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'CONFIRMED' as const,
       sourceApp: 'Google Pay',
       notificationId: 'sample-notif-10',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
-    // Some pending transactions
+    // PENDING transactions - explicitly marked as SEED_DATA for testing
+    // These have is_pending_capture = 1 to identify them as UPI capture events awaiting review
     {
       amountPaise: 15000, // ₹150.00
       merchant: 'Metro Recharge',
@@ -156,6 +218,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'PENDING' as const,
       sourceApp: 'Google Pay',
       notificationId: 'sample-notif-pending-1',
+      sourceEventId: 'seed-pending-1',
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 1,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
     {
       amountPaise: 8500, // ₹85.00
@@ -167,6 +235,12 @@ export async function seedDevelopmentData(): Promise<void> {
       status: 'PENDING' as const,
       sourceApp: 'PhonePe',
       notificationId: 'sample-notif-pending-2',
+      sourceEventId: 'seed-pending-2',
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 1,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
     },
   ];
   
@@ -175,6 +249,10 @@ export async function seedDevelopmentData(): Promise<void> {
     // Check if already exists
     if (tx.notificationId) {
       const existing = await transactionRepository.getByNotificationId(tx.notificationId);
+      if (existing) continue;
+    }
+    if (tx.sourceEventId) {
+      const existing = await transactionRepository.getBySourceEventId(tx.sourceEventId);
       if (existing) continue;
     }
     

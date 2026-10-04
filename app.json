@@ -24,7 +24,8 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      "./modules/notification-detection/plugin.js"
+      "./modules/notification-detection/plugin.js",
+      "expo-asset"
     ]
   }
 }
