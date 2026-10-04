@@ -12,6 +12,8 @@ import { notificationDetectionService } from './notificationDetection';
 import { openDatabase } from '../database/db';
 import { getClassificationSuggestion, recordClassification, recordCorrection, ClassificationSuggestion, getMerchantMemoryStats, shouldPrefill, getPrefillMode } from './classification';
 import { normalizeMerchantFull } from './merchantNormalization';
+import * as budgetService from './budget';
+import * as analyticsService from './analytics';
 
 export const transactionService = {
   // Initialize database
@@ -447,4 +449,6 @@ export const services = {
   notification: notificationDetectionService,
   classification: classificationService,
   merchant: merchantService,
+  budget: budgetService,
+  analytics: analyticsService,
 };

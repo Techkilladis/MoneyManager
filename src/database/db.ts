@@ -2,7 +2,7 @@
 // Using Expo SQLite (expo-sqlite for SDK 52)
 
 import * as SQLite from 'expo-sqlite';
-import { schema, SCHEMA_VERSION, generateId, now, Transaction, Category, Member, Merchant, MerchantMemory } from './schema';
+import { schema, SCHEMA_VERSION, generateId, now, Transaction, Category, Member, Merchant, MerchantMemory, Budget } from './schema';
 
 // Database instance
 let db: SQLite.SQLiteDatabase | null = null;
@@ -29,6 +29,8 @@ export async function initializeDatabase(): Promise<void> {
   // Phase 5: Create merchant tables
   await database.execAsync(schema.createMerchantsTable);
   await database.execAsync(schema.createMerchantMemoryTable);
+  // Phase 7: Create budgets table
+  await database.execAsync(schema.createBudgetsTable);
   
   // Create indexes
   for (const indexSql of schema.createIndexes) {
@@ -36,6 +38,10 @@ export async function initializeDatabase(): Promise<void> {
   }
   // Phase 5: Create merchant indexes
   for (const indexSql of schema.createMerchantIndexes) {
+    await database.execAsync(indexSql);
+  }
+  // Phase 7: Create budget indexes
+  for (const indexSql of schema.createBudgetIndexes) {
     await database.execAsync(indexSql);
   }
   
@@ -75,6 +81,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase): Promise<void> {
       // Migration v3 -> v4: Create merchant and merchant_memory tables
       console.log('[Database] Running migration v3 -> v4');
       await runMigrationV3ToV4(database);
+    }
+    
+    if (currentVersion < 5) {
+      // Migration v4 -> v5: Create budgets table
+      console.log('[Database] Running migration v4 -> v5');
+      await runMigrationV4ToV5(database);
     }
     
     // Update user_version
@@ -138,6 +150,21 @@ async function runMigrationV3ToV4(database: SQLite.SQLiteDatabase): Promise<void
     console.log('[Database] Phase 5 merchant tables created/verified');
   } catch (error) {
     console.error('[Database] Migration v3 -> v4 failed:', error);
+  }
+}
+
+// Phase 7: Migration v4 -> v5 - Create budgets table
+async function runMigrationV4ToV5(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Tables are created with IF NOT EXISTS in initializeDatabase, so just verify they exist
+  // and create indexes if needed
+  try {
+    await database.execAsync(schema.createBudgetsTable);
+    for (const indexSql of schema.createBudgetIndexes) {
+      await database.execAsync(indexSql);
+    }
+    console.log('[Database] Phase 7 budgets table created/verified');
+  } catch (error) {
+    console.error('[Database] Migration v4 -> v5 failed:', error);
   }
 }
 
@@ -291,5 +318,20 @@ export function mapMerchantMemoryRow(row: any): MerchantMemory {
     lastUsedAt: row.last_used_at,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+export function mapBudgetRow(row: any): Budget {
+  return {
+    id: row.id,
+    name: row.name,
+    categoryId: row.category_id,
+    amountPaise: row.amount_paise,
+    periodType: row.period_type,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

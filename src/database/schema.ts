@@ -73,8 +73,34 @@ export interface MerchantMemory {
 export type MerchantMemorySource = 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED';
 export type MerchantMemoryConfidence = 'LOW' | 'MEDIUM' | 'HIGH';
 
-// Database Schema Version - INCREMENTED FOR PHASE 5
-export const SCHEMA_VERSION = 4;
+// Phase 7: Budget
+export interface Budget {
+  id: string;
+  name: string;
+  categoryId: string;
+  amountPaise: number;
+  periodType: BudgetPeriodType;
+  periodStart: number; // Unix timestamp (inclusive)
+  periodEnd: number;   // Unix timestamp (exclusive)
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type BudgetPeriodType = 'MONTHLY' | 'WEEKLY' | 'CUSTOM';
+
+export interface BudgetWithSpending {
+  budget: Budget;
+  spentPaise: number;
+  remainingPaise: number;
+  percentageUsed: number; // 0-100
+  status: BudgetStatus;
+}
+
+export type BudgetStatus = 'HEALTHY' | 'WARNING' | 'EXCEEDED';
+
+// Database Schema Version - INCREMENTED FOR PHASE 7
+export const SCHEMA_VERSION = 5;
 
 // SQL Statements
 export const schema = {
@@ -219,6 +245,35 @@ export const schema = {
   // Migration from v3 to v4 - add merchant and merchant_memory tables
   migrateV3ToV4: `
     -- Migration v3 -> v4: Create merchant and merchant_memory tables
+    -- Tables are created with IF NOT EXISTS, so this is idempotent for fresh installs
+  `,
+
+  // Phase 7: Budget table
+  createBudgetsTable: `
+    CREATE TABLE IF NOT EXISTS budgets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      amount_paise INTEGER NOT NULL CHECK (amount_paise > 0),
+      period_type TEXT NOT NULL CHECK (period_type IN ('MONTHLY', 'WEEKLY', 'CUSTOM')),
+      period_start INTEGER NOT NULL,
+      period_end INTEGER NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+    );
+  `,
+
+  createBudgetIndexes: [
+    'CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category_id);',
+    'CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_start, period_end);',
+    'CREATE INDEX IF NOT EXISTS idx_budgets_active ON budgets(is_active);',
+  ],
+
+  // Migration from v4 to v5 - add budgets table
+  migrateV4ToV5: `
+    -- Migration v4 -> v5: Create budgets table
     -- Tables are created with IF NOT EXISTS, so this is idempotent for fresh installs
   `,
 } as const;
