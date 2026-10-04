@@ -30,6 +30,12 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Model files (large, not committed to git)
+*.gguf
+*.ggml
+*.bin
+models/
+
 # local env files
 .env*.local
 
