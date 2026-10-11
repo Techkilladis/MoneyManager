@@ -20,7 +20,7 @@ data class NormalizedNotification(
     val bigText: String?,
     val subText: String?,
     val postTime: Long,
-    val when: Long?,
+    val whenTime: Long?,
     val extras: Bundle?
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
@@ -31,37 +31,24 @@ data class NormalizedNotification(
         bigText = parcel.readString(),
         subText = parcel.readString(),
         postTime = parcel.readLong(),
-        when = if (parcel.readInt() == 1) parcel.readLong() else null,
+        whenTime = if (parcel.readInt() == 1) parcel.readLong() else null,
         extras = parcel.readBundle()
-    ) : Parcelable {
-        override fun writeToParcel(dest: Parcel, flags: Int) {
-            dest.writeString(notificationId)
-            dest.writeString(packageName)
-            dest.writeString(title)
-            dest.writeString(text)
-            dest.writeString(bigText)
-            dest.writeString(subText)
-            dest.writeLong(postTime)
-            dest.writeInt(if (when != null) 1 else 0)
-            when?.let { dest.writeLong(it) }
-            dest.writeBundle(extras)
-        }
+    )
 
-        override fun describeContents(): Int = 0
-
-        companion object {
-            @JvmField
-            val CREATOR: Parcelable.Creator<NormalizedNotification> = object : Parcelable.Creator<NormalizedNotification> {
-                override fun createFromParcel(parcel: Parcel): NormalizedNotification {
-                    return NormalizedNotification(parcel)
-                }
-
-                override fun newArray(size: Int): Array<NormalizedNotification?> {
-                    return arrayOfNulls(size)
-                }
-            }
-        }
+    override fun writeToParcel(dest: Parcel, flags: Int) {
+        dest.writeString(notificationId)
+        dest.writeString(packageName)
+        dest.writeString(title)
+        dest.writeString(text)
+        dest.writeString(bigText)
+        dest.writeString(subText)
+        dest.writeLong(postTime)
+        dest.writeInt(if (whenTime != null) 1 else 0)
+        whenTime?.let { dest.writeLong(it) }
+        dest.writeBundle(extras)
     }
+
+    override fun describeContents(): Int = 0
 
     companion object {
         /**
@@ -78,9 +65,20 @@ data class NormalizedNotification(
                 bigText = extras?.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString(),
                 subText = extras?.getCharSequence(android.app.Notification.EXTRA_SUB_TEXT)?.toString(),
                 postTime = sbn.postTime,
-                when = if (sbn.notification.when > 0) sbn.notification.when else null,
+                whenTime = if (sbn.notification.`when` > 0) sbn.notification.`when` else null,
                 extras = extras
             )
+        }
+
+        @JvmField
+        val CREATOR: Parcelable.Creator<NormalizedNotification> = object : Parcelable.Creator<NormalizedNotification> {
+            override fun createFromParcel(parcel: Parcel): NormalizedNotification {
+                return NormalizedNotification(parcel)
+            }
+
+            override fun newArray(size: Int): Array<NormalizedNotification?> {
+                return arrayOfNulls(size)
+            }
         }
     }
 }

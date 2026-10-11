@@ -1,23 +1,32 @@
 # Money Manager - Project Status
 
-## Current Phase: PHASE 1 — APP SHELL + LOCAL DATABASE FOUNDATION (COMPLETED)
+## Current Phase: PHASE 6 — ANALYTICS-FIRST REDESIGN & AI REMOVAL (COMPLETED)
 
 ## Completed Work
-- ✅ Clean Expo SDK 52 project created at `C:\Users\suriy\money-manager\MoneyManagerExpo52`
+- ✅ Clean Expo SDK 52 project at `C:\Users\suriy\money-manager\MoneyManagerExpo52`
 - ✅ Dependencies locked to correct versions:
   - Expo 52.0.49
   - React Native 0.76.9
   - React 18.3.1
   - TypeScript 5.5.x
   - expo-status-bar 2.0.1
-- ✅ `npx expo-doctor` passes (18/18 checks)
-- ✅ `npx expo prebuild --clean` executed successfully
+  - react-native-svg 15.8.0
+  - react-native-gifted-charts 1.4.81 (pins gifted-charts-core 0.1.83)
+  - expo-linear-gradient 14.0.2
+- ✅ `npx tsc --noEmit` passes (0 errors)
+- ✅ `npx expo-doctor` passes (16/18 checks, 2 non-blocking transitive dep warnings)
+- ✅ `npx expo prebuild --clean` executes successfully
 - ✅ Android native project generated in `android/`
 - ✅ Git repository initialized with Phase 0 commit
-- ✅ Phase 1 implementation completed:
+- ✅ Phase 1 implementation completed
+- ✅ Phase 2 (Transaction Domain) completed
+- ✅ Phase 3 (Native Notification System) completed
+- ✅ Phase 4 (Idempotency & Recovery) completed
+- ✅ Phase 5 (Merchant Memory & Classification) completed
+- ✅ Phase 6 (Analytics-First Redesign & AI Removal) completed
 
 ### 1. Navigation ✅
-- Expo Router with bottom tabs (Home, Transactions, Settings)
+- Expo Router with bottom tabs (Home, Transactions, Analytics, Settings)
 - Proper type-safe navigation structure
 - Custom tab icons with Apple-inspired design
 
@@ -42,88 +51,104 @@
 - Pull-to-refresh support
 - Empty states
 
-### 5. Settings Screen ✅
+### 5. Analytics Screen ✅ (NEW)
+- **Header with Period Selector**: 7D, 1M, 3M, 6M, 1Y, Custom range
+- **Spending Summary Cards**: Total spending, Avg per day, Transaction count, Avg transaction
+- **Category Distribution Donut Chart**: Interactive, shows percentages, legend with colors
+- **Spending Trend Line Chart**: Daily totals, area fill, animated
+- **Category Comparison Horizontal Bar Chart**: Sorted by spending, shows values
+- **Monthly Spending Vertical Bar Chart**: Last 12 months, current month highlighted
+- **Top Merchants**: Top 5 with amounts, counts, percentages
+- **Member Breakdown**: Horizontal bar chart by member, unassigned shown separately
+- **Budget Progress**: Integrated with existing budget service, progress bars with status
+- **Insights**: Monthly comparison, top category, top merchant, recurring merchants
+- **Empty States**: Polished empty state when no data
+
+### 6. Settings Screen ✅
 - Data & Storage section (local database status, export, clear data)
-- Permissions section (UPI Notification Access - placeholder for future)
+- Permissions section (UPI Notification Access)
 - App info (version, platform, Expo SDK)
 - Privacy section (local-first statement)
 - About section
 
-### 6. SQLite Database ✅
+### 7. SQLite Database ✅
 - Expo SQLite (expo-sqlite for SDK 52)
-- Schema with transactions, categories, members tables
+- Schema with transactions, categories, members, merchants, merchant_memory, budgets tables
 - Proper indexes for performance
-- Schema version tracking
+- Schema version tracking (v5)
 - Idempotent initialization
 
-### 7. Database Schema ✅
-- **Transactions**: id, amountPaise (INTEGER), currency, merchant, transactionTimestamp, categoryId, memberId, note, status, sourceApp, notificationId, rawNotification, parserMetadata, createdAt, updatedAt
+### 8. Database Schema ✅
+- **Transactions**: id, amountPaise (INTEGER), currency, merchant, transactionTimestamp, categoryId, memberId, note, status, sourceApp, notificationId, rawNotification, parserMetadata, sourceEventId, sourceType, is_pending_capture, is_dismissed, dismissed_at, createdAt, updatedAt
 - **Categories**: id, name, icon, color, sortOrder, createdAt, updatedAt
 - **Members**: id, name, color, isDefault, createdAt, updatedAt
+- **Merchants**: id, canonicalName, normalizedKey, createdAt, updatedAt
+- **Merchant Memory**: id, merchantId, categoryId, memberId, source, confidence, usageCount, lastUsedAt, createdAt, updatedAt
+- **Budgets**: id, name, categoryId, amountPaise, periodType, periodStart, periodEnd, isActive, createdAt, updatedAt
 
-### 8. Money Representation ✅
+### 9. Money Representation ✅
 - All monetary values stored as integer paise (₹125.50 = 12550)
 - formatCurrency() utility for display
 - parseCurrency() utility for input
 
-### 9. Transaction Status ✅
+### 10. Transaction Status ✅
 - Explicit status enum: PENDING, CONFIRMED, EDITED, CANCELLED
 - Type-safe status handling throughout
 
-### 10. Categories ✅
+### 11. Categories ✅
 - 11 seeded categories: Food, Travel, Shopping, Bills, Entertainment, Health, Education, Subscriptions, Family, Personal, Miscellaneous
 - Icons and colors assigned
 - Sorted by sortOrder
 
-### 11. Members ✅
+### 12. Members ✅
 - 5 seeded members: Self, Dad, Mom, Brother, Friend
 - Colors assigned
 - Extensible for custom members
 
-### 12. Data Access Architecture ✅
+### 13. Data Access Architecture ✅
 - Layered: UI → Services → Repositories → SQLite
 - Repository pattern for each entity
 - Type-safe row mappers
 - Proper error handling
 
-### 13. Initialization ✅
+### 14. Initialization ✅
 - Database opens/creates on app start
 - Tables created if not exist
 - Default categories seeded if missing
 - Default members seeded if missing
 - Idempotent - safe to run repeatedly
 
-### 14. Sample Data ✅
+### 15. Sample Data ✅
 - 12 sample transactions for development
 - Mix of confirmed and pending
 - Various categories and members
 - Different source apps (Google Pay, PhonePe, Paytm, BHIM)
 - Clearly fake data for UI demonstration
 
-### 15. Domain Types ✅
+### 16. Domain Types ✅
 - Strict TypeScript types
-- Transaction, Category, Member models
+- Transaction, Category, Member, Merchant, Budget models
 - FormattedTransaction for UI
 - HomeData for home screen
 - Helper functions (formatDate, formatRelativeDate, getStatusLabel, getStatusVariant)
 
-### 16. Error Handling ✅
+### 17. Error Handling ✅
 - Database operations handle errors
 - UI shows fallback states (loading, error, empty)
 - No silent failures
 
-### 17. Home Data ✅
+### 18. Home Data ✅
 - Queries database for total spending (confirmed transactions)
 - Pending transaction count
 - Recent transactions (last 5)
 - Uses paise internally, converts at presentation
 
-### 18. Transaction Data Flow ✅
+### 19. Transaction Data Flow ✅
 - SQLite → Repository → Service → React Hook → Screen → UI Components
 - React native state management (useState, useEffect)
 - No complex state management libraries
 
-### 19. File Organization ✅
+### 20. File Organization ✅
 ```
 app/
   _layout.tsx
@@ -131,6 +156,7 @@ app/
     _layout.tsx
     index.tsx (Home)
     transactions.tsx
+    analytics.tsx (NEW)
     settings.tsx
 
 src/
@@ -144,22 +170,30 @@ src/
       transactionRepository.ts
       categoryRepository.ts
       memberRepository.ts
+      merchantRepository.ts
+      merchantMemoryRepository.ts
+      budgetRepository.ts
       index.ts
   domain/
     transaction.ts
   services/
     index.ts
     seedData.ts
+    notificationDetection.ts
+    classification.ts
+    merchantNormalization.ts
+    budget.ts
+    analytics.ts
 ```
 
-### 20. Migration Strategy ✅
-- Schema version constant (SCHEMA_VERSION = 1)
+### 21. Migration Strategy ✅
+- Schema version constant (SCHEMA_VERSION = 5)
 - Clear initialization mechanism
 - Ready for future migrations
 
-### 21. Testing ✅
+### 22. Testing ✅
 - TypeScript compilation passes (0 errors)
-- Expo doctor passes (18/18 checks)
+- Expo doctor passes (16/18, 2 non-blocking transitive dep warnings)
 - Database initialization tested
 - Category seeding verified
 - Member seeding verified
@@ -167,108 +201,134 @@ src/
 - Amount formatting works
 - Home screen renders
 - Transactions screen renders
+- Analytics screen renders
 - Settings screen renders
 
-### 22. Android Validation ✅
-- expo-doctor passes
+### 23. Android Validation ✅
+- expo-doctor passes (16/18)
 - TypeScript compilation passes
 - prebuild generates Android project
 - Note: Android build has gradle configuration issues (environment-specific), but code is correct
 
-### 23. Git ✅
-- Phase 0 commit exists
-- Phase 1 changes ready to commit
+### 24. AI Removal ✅
+- Removed `modules/local-ai/` (llama.cpp, Kotlin JNI, model assets)
+- Removed `src/services/localAIProvider.ts`, `mockAIProvider.ts`, `aiValidation.ts`, `aiClassificationProvider.ts`
+- Removed AI Assessment dev screen and tab
+- Simplified classification service to deterministic merchant memory only
+- Removed `AI_SUGGESTED` source from merchant memory (kept CHECK constraint for backward compat)
+- App launches without AI initialization
+- Quick Capture suggestions work via deterministic merchant memory
 
-### 24. Documentation ✅
+### 25. Documentation ✅
 - Updated docs/project-status.md
-- Updated docs/architecture.md where necessary
+- Updated docs/architecture.md
+- Updated README.md where necessary
 
 ## Commands Executed
 ```bash
 # Phase 1 setup
 npx expo install expo-router react-native-safe-area-context react-native-screens expo-linking expo-constants expo-sqlite
 
+# Phase 6: Analytics & AI Removal
+npx expo install react-native-svg@15.8.0 react-native-gifted-charts@1.4.28
+npx expo install @expo/config-plugins@9.0.0 (dev dependency for notification plugin)
+
 # Validation
 npx tsc --noEmit  # PASSED
-npx expo-doctor    # PASSED (18/18)
+npx expo-doctor    # 16/18 passed (2 non-blocking transitive dep warnings)
 
 # Native project generation
 npx expo prebuild --clean  # PASSED
-
-# Android build attempted (environment issues)
-cd android && ./gradlew assembleDebug  # Gradle config issues
 ```
 
 ## Validation Results
 - ✅ TypeScript: 0 errors
-- ✅ expo-doctor: 18/18 checks passed
+- ✅ expo-doctor: 16/18 checks passed (2 transitive dep warnings)
 - ✅ Database initialization: Works
 - ✅ Category seeding: Works
 - ✅ Member seeding: Works
-- ✅ Transaction insertion: Works
-- ✅ Transaction retrieval: Works
-- ✅ Amount formatting: Works
+- ✅ Transaction CRUD operations work
+- ✅ Amount formatting works
 - ✅ Home screen rendering: Works
 - ✅ Transactions screen rendering: Works
+- ✅ Analytics screen rendering: Works
 - ✅ Settings screen rendering: Works
 - ⚠️ Android build: Gradle configuration issues (local environment)
 
 ## Files Created/Modified
 **New Files:**
-- app/_layout.tsx
-- app/(tabs)/_layout.tsx
-- app/(tabs)/index.tsx
-- app/(tabs)/transactions.tsx
-- app/(tabs)/settings.tsx
-- src/design/tokens.ts
-- src/design/primitives.tsx
-- src/database/db.ts
-- src/database/schema.ts
-- src/database/repositories/transactionRepository.ts
-- src/database/repositories/categoryRepository.ts
-- src/database/repositories/memberRepository.ts
-- src/database/repositories/index.ts
-- src/domain/transaction.ts
-- src/services/index.ts
-- src/services/seedData.ts
-- android/local.properties
+- app/(tabs)/analytics.tsx
+- docs/project-status.md (updated)
+- docs/architecture.md (updated)
+- README.md (updated)
 
 **Modified Files:**
-- package.json (added expo-router, expo-sqlite, etc.)
-- tsconfig.json (added path aliases)
-- docs/project-status.md
-- README.md (updated for Phase 1)
+- app/(tabs)/_layout.tsx (added Analytics tab with icon)
+- src/services/index.ts (removed AI init, export analytics/budget services)
+- src/services/classification.ts (removed AI fallback, kept merchant memory)
+- src/database/schema.ts (removed AI_SUGGESTED from TS types, kept DB CHECK constraint)
+- src/database/repositories/merchantMemoryRepository.ts (removed aiSuggested from stats)
+- app.json (removed local-ai plugin)
+- package.json (added react-native-svg, react-native-gifted-charts, removed local-ai refs)
+
+**Deleted Files:**
+- modules/local-ai/ (entire directory)
+- src/services/localAIProvider.ts
+- src/services/mockAIProvider.ts
+- src/services/aiValidation.ts
+- src/services/aiClassificationProvider.ts
+- app/ai-dev-test.tsx
+- app/(tabs)/ai-assessment.tsx (if existed)
 
 ## Current State
 **What Works:**
-- Complete app shell with navigation
+- Complete app shell with 4-tab navigation (Home, Transactions, Analytics, Settings)
 - Apple-inspired design system
-- All three screens functional
-- SQLite database with full schema
+- All four screens functional
+- SQLite database with full schema (v5)
 - Repository layer with CRUD operations
 - Service layer with business logic
 - Seed data for development
 - TypeScript strict mode clean
 - Expo SDK 52 compliance
+- Comprehensive Analytics with 6 chart types
+- Deterministic merchant memory for Quick Capture suggestions
+- Budget tracking with progress bars
 
 **Known Issues:**
-- Android gradle build has configuration issues (ANDROID_HOME path, expo-modules-core plugin)
-- These are environment-specific, not code issues
-- No physical device/emulator available for runtime testing
+- Expo Doctor shows 2 non-blocking warnings about `@expo/config-plugins@10.1.2`, a nested transitive dependency of `expo-module-scripts` (a devDependency of the local notification-detection module, used only for that module's own lint/test scripts; it is not part of the Android app build). The top-level `@expo/config-plugins@9.0.0` matches SDK 52.
+- 119 pre-existing ESLint warnings remain (unused imports, `Array<T>` style) — none affect behavior.
+- `app.json` has no `scheme`; Expo Linking logs a development-mode warning and deep links (e.g. opening Quick Capture with a pending event id from a notification) require one. Recommended for the release phase.
+- The 16 KB page-size compatibility notice on new emulators is expected for RN 0.76 native libraries; the OS runs the app in compatible mode.
+
+## Validation & Lint Cleanup (October 2026)
+
+**Lint cleanup — all 13 ESLint errors resolved (`npx expo lint`: 0 errors):**
+- `react-hooks/immutability` (5 errors in `analytics.tsx`, `quick-capture.tsx`, `transaction/[id].tsx`): loaders were called from effects before being declared (TDZ). Loaders are now declared before the effects that call them, wrapped in `useCallback` with correct dependency arrays.
+- `react-hooks/set-state-in-effect` (8 errors across `(tabs)/analytics.tsx`, `(tabs)/index.tsx`, `(tabs)/settings.tsx`, `(tabs)/transactions.tsx`, `transactions/new.tsx`, `transactions/edit/[id].tsx`): every `setState` reachable from an effect now happens inside promise callbacks (`.then`/`.catch`/`.finally`), never in a synchronous body. Loading/refreshing state starts are owned by event handlers or derived during render (edit screen loading is derived from `loadedTransactionId`).
+- All async loads are guarded against unmount (mounted refs / `active` flags) and stale responses (request-id guards), so an older response can never overwrite a newer one.
+- Fixed repeated-database-request bugs found during the cleanup: `transactions/new.tsx` refetched reference data on every category/member selection (defaults now applied with functional state updates); `(tabs)/transactions.tsx` fired the initial query twice per mount (filter effect now skips its first run).
+
+**Fixes required to make the existing implementations actually run (all verified on emulator):**
+- `modules/notification-detection` was never autolinked into any build: it lacked `expo-module.config.json` (required by SDK 52 autolinking), its `android/build.gradle` used a non-existent plugin id (`expo.modules.gradle`; converted to the SDK 52 `ExpoModulesCorePlugin.gradle` convention), and its Kotlin sources had genuine compile errors (Scala-style lambdas in the bridge — rewritten with the `expo.modules.kotlin` DSL; `when` used as an identifier; missing `kotlin.math.min` imports; hidden `Settings.Secure.ENABLED_NOTIFICATION_LISTENERS` constant replaced with its literal; a private-constructor call; an interface property initializer). The Kotlin module now compiles, registers, and works — Settings can open the system notification-access screen.
+- `src/services/notificationDetection.ts` accessed the module via React Native's `NativeModules`, which does not expose Expo modules in SDK 52; switched to `requireOptionalNativeModule` from `expo-modules-core` (graceful null fallback preserved).
+- `react-native-gifted-charts` 1.4.28 declared `gifted-charts-core: ^0.1.29`, which resolved to 0.1.83 — an incompatible pair (the wrapper's 1-arg `getX` vs the core's 2-arg `getX` produced `cx: NaN` and crashed the native SVG bridge). Updated `react-native-gifted-charts` to 1.4.81, which pins `gifted-charts-core@0.1.83` exactly; removed the explicit `x` values from the trend chart data (index-based spacing is equivalent and NaN-safe).
+- Replaced the non-existent `react-native-linear-gradient@14.0.0` (declared but never installed) with `expo-linear-gradient@14.0.2` (the SDK 52 version) — `react-native-gifted-charts` requires a gradient package at runtime; its absence made the entire Analytics tab fail to register.
+- `src/services/analytics.ts` produced duplicate React keys in Top Merchants when several merchants had no entity (all got `merchantId: 'unknown'`); the fallback is now unique per row.
+
+**Validation results (Pixel_10 emulator, fresh debug build):**
+- `npx tsc --noEmit`: passes
+- `npx expo lint`: 0 errors (119 pre-existing warnings)
+- `npx expo-doctor`: 16/18 checks pass (2 documented non-blocking warnings above)
+- `npx expo run:android`: BUILD SUCCESSFUL, installs and launches
+- Runtime: Home, Transactions (list, create, detail, edit — persisted to SQLite), Analytics (all chart types render database-backed data), Settings, and Quick Capture all verified with zero errors in freshly generated Metro logs; no React Hooks violations; no missing-route warnings; native notification module functional.
 
 ## Next Milestone
-**PHASE 2 — TRANSACTION DOMAIN**
-- Transaction detail/edit screen
-- Category management UI
-- Member management UI
-- Advanced filtering (by category, member, date range)
-- Transaction CRUD from UI
-- Form validation
-- Better empty states
-
-**PHASE 3 — NATIVE NOTIFICATION SYSTEM**
-- Kotlin native module
-- NotificationListenerService
-- Notification access state
-- Event bridge to React Native
-- Parser framework
+**PHASE 7 — POLISH & RELEASE PREPARATION**
+- Export/Import data (CSV/JSON)
+- Transaction attachment support (receipts)
+- Recurring transaction detection UI
+- Advanced category management (custom icons, reordering)
+- Backup/restore to local file
+- Performance optimization for large datasets
+- Accessibility audit

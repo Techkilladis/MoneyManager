@@ -1,5 +1,5 @@
 // Home Screen - Premium Dashboard
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { ScrollView, RefreshControl, View, Platform } from 'react-native';
 import { 
   Screen, 
@@ -46,29 +46,60 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const loadData = async () => {
+  // Track mount state and the latest in-flight request so stale responses
+  // never overwrite newer results and results are ignored after unmount.
+  const mountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Loads home data from the database, retrying once if the tables are still
+  // being created. Pure data loading — no state updates.
+  const fetchHomeData = useCallback(async (): Promise<HomeData> => {
     try {
-      setError(null);
-      const data = await transactionService.getHomeData();
-      setHomeData(data);
+      return await transactionService.getHomeData();
     } catch (err) {
-      console.error('[HomeScreen] Error loading data:', err);
       if (err instanceof Error && err.message.includes('no such table')) {
+        // Database may still be initializing — wait briefly and retry once
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
-          const data = await transactionService.getHomeData();
-          setHomeData(data);
-          return;
+          return await transactionService.getHomeData();
         } catch (retryErr) {
           console.error('[HomeScreen] Retry failed:', retryErr);
         }
       }
-      setError('Failed to load data');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      throw err;
     }
-  };
+  }, []);
+
+  // Fetches home data and applies it to state. All setState calls happen in
+  // promise callbacks (never in the synchronous body), so this is safe to
+  // call from effects as well as event handlers.
+  const loadData = useCallback((): void => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => mountedRef.current && requestId === requestIdRef.current;
+
+    fetchHomeData()
+      .then((data) => {
+        if (!isCurrent()) return;
+        setHomeData(data);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!isCurrent()) return;
+        console.error('[HomeScreen] Error loading data:', err);
+        setError('Failed to load data');
+      })
+      .finally(() => {
+        if (!isCurrent()) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
+  }, [fetchHomeData]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -77,7 +108,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   // Spending insights - always called to maintain hook order
   const spendingInsights = useMemo(() => {
@@ -214,7 +245,7 @@ export default function HomeScreen() {
       <EmptyState
         title="Unable to load"
         subtitle={error ?? undefined}
-        action={{ label: 'Retry', onPress: loadData, variant: 'primary' }}
+        action={{ label: 'Retry', onPress: () => { setError(null); loadData(); }, variant: 'primary' }}
       />
     </Screen>
   );

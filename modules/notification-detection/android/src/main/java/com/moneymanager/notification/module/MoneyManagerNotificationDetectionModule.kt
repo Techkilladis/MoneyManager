@@ -1,231 +1,173 @@
 package com.moneymanager.notification.module
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
-import android.util.Log
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleObserver
-import androidx.lifecycle.OnLifecycleEvent
 import com.moneymanager.notification.access.NotificationAccessManager
 import com.moneymanager.notification.normalizer.NormalizedNotification
 import com.moneymanager.notification.parsers.ParsedUpiTransaction
 import com.moneymanager.notification.parsers.ParserRegistry
 import com.moneymanager.notification.store.PendingEventStore
 import com.moneymanager.notification.store.PendingUpiEvent
-import expo.modules.core.arguments.Arguments
-import expo.modules.core.arguments.ArgumentsContainer
-import expo.modules.core.arguments.ReadableArray
-import expo.modules.core.arguments.ReadableMap
-import expo.modules.core.modules.Module
-import expo.modules.core.modules.ModuleDefinition
-import expo.modules.core.modules.ModuleRegistry
-import expo.modules.core.promises.Promise
-import expo.modules.core.ModuleClass
-import expo.modules.core.ModuleLifecycleDelegate
-import expo.modules.core.ModuleRegistryConsumer
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import java.util.UUID
 
 /**
  * Expo Module for Money Manager Notification Detection.
  * Bridges the native notification listener to React Native.
  */
-@ModuleClass
-class MoneyManagerNotificationDetectionModule : Module(), ModuleRegistryConsumer {
+class MoneyManagerNotificationDetectionModule : Module() {
 
-    private var moduleRegistry: ModuleRegistry? = null
-    private var context: Context? = null
+    private val context: Context?
+        get() = appContext.reactContext
 
     override fun definition() = ModuleDefinition {
-        name("MoneyManagerNotificationDetection")
+        Name("MoneyManagerNotificationDetection")
 
         // Initialize with context
-        asyncFunction("initialize") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("initialize") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 // Initialize native components
-                _ = NotificationAccessManager.getInstance(ctx)
-                _ = PendingEventStore.getInstance(ctx)
-                _ = ParserRegistry.getInstance(ctx)
-                promise.resolve(true)
+                NotificationAccessManager.getInstance(ctx)
+                PendingEventStore.getInstance(ctx)
+                ParserRegistry.getInstance(ctx)
+                promise.resolve(mapOf("success" to true))
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
         // Notification Access
-        asyncFunction("isNotificationAccessEnabled") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("isNotificationAccessEnabled") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 val enabled = NotificationAccessManager.isNotificationAccessEnabled(ctx)
-                promise.resolve(Arguments.of("enabled", enabled))
+                promise.resolve(mapOf("enabled" to enabled))
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        asyncFunction("openNotificationAccessSettings") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("openNotificationAccessSettings") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 NotificationAccessManager.openNotificationAccessSettings(ctx)
-                promise.resolve(true)
+                promise.resolve(null)
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
         // Pending Events
-        asyncFunction("getPendingUpiEvents") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("getPendingUpiEvents") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 val store = PendingEventStore.getInstance(ctx)
                 val events = store.getPendingEvents("PENDING")
-                val array = Arguments.createArray()
-                for (event in events) {
-                    array.pushMap(eventToMap(event))
-                }
-                promise.resolve(Arguments.of("events", array))
+                promise.resolve(mapOf("events" to events.map { eventToMap(it) }))
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        asyncFunction("getAllPendingUpiEvents") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("getAllPendingUpiEvents") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 val store = PendingEventStore.getInstance(ctx)
                 val events = store.getPendingEvents()
-                val array = Arguments.createArray()
-                for (event in events) {
-                    array.pushMap(eventToMap(event))
-                }
-                promise.resolve(Arguments.of("events", array))
+                promise.resolve(mapOf("events" to events.map { eventToMap(it) }))
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        asyncFunction("consumePendingUpiEvent") { (id: String, promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("consumePendingUpiEvent") { id: String, promise: Promise ->
+            val ctx = context
             if (ctx != null) {
-                val store = PendingEventStore.getInstance(ctx)
-                store.consumeEvent(id)
-                promise.resolve(true)
+                PendingEventStore.getInstance(ctx).consumeEvent(id)
+                promise.resolve(null)
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        asyncFunction("dismissPendingUpiEvent") { (id: String, promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("dismissPendingUpiEvent") { id: String, promise: Promise ->
+            val ctx = context
             if (ctx != null) {
-                val store = PendingEventStore.getInstance(ctx)
-                store.dismissEvent(id)
-                promise.resolve(true)
+                PendingEventStore.getInstance(ctx).dismissEvent(id)
+                promise.resolve(null)
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
         // Developer/Diagnostic
-        asyncFunction("getParsingStats") { (promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("getParsingStats") { promise: Promise ->
+            val ctx = context
             if (ctx != null) {
-                val store = PendingEventStore.getInstance(ctx)
-                val stats = store.getStats()
-                val map = Arguments.createMap()
-                map.putInt("total", stats["total"] as? Long ?: 0L)
-                
-                val bySource = Arguments.createMap()
-                (stats["bySource"] as? Map<String, Long>)?.forEach { (k, v) ->
-                    bySource.putInt(k, v)
-                }
-                map.putMap("bySource", bySource)
-                
-                val byParser = Arguments.createMap()
-                (stats["byParser"] as? Map<String, Long>)?.forEach { (k, v) ->
-                    byParser.putInt(k, v)
-                }
-                map.putMap("byParser", byParser)
-                
-                val byStatus = Arguments.createMap()
-                (stats["byStatus"] as? Map<String, Long>)?.forEach { (k, v) ->
-                    byStatus.putInt(k, v)
-                }
-                map.putMap("byStatus", byStatus)
-                
-                promise.resolve(map)
+                promise.resolve(PendingEventStore.getInstance(ctx).getStats())
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
         // Development only - simulate notification for testing
-        asyncFunction("simulateUpiNotification") { (notificationMap: ReadableMap, promise: Promise) =>
-            val ctx = moduleRegistry?.context ?: context
+        AsyncFunction("simulateUpiNotification") { notificationMap: Map<String, Any?>, promise: Promise ->
+            val ctx = context
             if (ctx != null) {
                 val normalized = mapToNormalizedNotification(notificationMap)
                 val registry = ParserRegistry.getInstance(ctx)
                 val parsed = registry.tryParse(normalized)
-                if (parsed != null) {
-                    promise.resolve(parsedTransactionToMap(parsed))
-                } else {
-                    promise.resolve(null)
-                }
+                promise.resolve(parsed?.let { parsedTransactionToMap(it) })
             } else {
-                promise.reject("ERR_CONTEXT", "Context not available")
+                promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
     }
 
-    override fun setModuleRegistry(moduleRegistry: ModuleRegistry?) {
-        this.moduleRegistry = moduleRegistry
-        if (moduleRegistry != null) {
-            this.context = moduleRegistry.context
-        }
+    private fun eventToMap(event: PendingUpiEvent): Map<String, Any?> {
+        return mapOf(
+            "id" to event.id,
+            "amountPaise" to event.amountPaise,
+            "merchant" to event.merchant,
+            "sourceApp" to event.sourceApp,
+            "transactionTimestamp" to event.transactionTimestamp,
+            "transactionReference" to event.transactionReference,
+            "parserName" to event.parserName,
+            "parserVersion" to event.parserVersion,
+            "confidence" to event.confidence,
+            "notificationId" to event.notificationId,
+            "status" to event.status.name,
+            "createdAt" to event.createdAt,
+            "dedupeKey" to event.dedupeKey
+        )
     }
 
-    private fun eventToMap(event: PendingUpiEvent): ArgumentsContainer {
-        val map = Arguments.createMap()
-        map.putString("id", event.id)
-        map.putInt("amountPaise", event.amountPaise)
-        map.putString("merchant", event.merchant)
-        map.putString("sourceApp", event.sourceApp)
-        map.putInt("transactionTimestamp", event.transactionTimestamp)
-        map.putString("transactionReference", event.transactionReference ?: "")
-        map.putString("parserName", event.parserName)
-        map.putString("parserVersion", event.parserVersion)
-        map.putDouble("confidence", event.confidence)
-        map.putString("notificationId", event.notificationId)
-        map.putString("status", event.status.name)
-        map.putInt("createdAt", event.createdAt)
-        map.putString("dedupeKey", event.dedupeKey)
-        return map
+    private fun parsedTransactionToMap(parsed: ParsedUpiTransaction): Map<String, Any?> {
+        return mapOf(
+            "amountPaise" to parsed.amountPaise,
+            "merchant" to parsed.merchant,
+            "sourceApp" to parsed.sourceApp,
+            "transactionTimestamp" to parsed.transactionTimestamp,
+            "transactionReference" to parsed.transactionReference,
+            "parserName" to parsed.parserName,
+            "parserVersion" to parsed.parserVersion,
+            "confidence" to parsed.confidence
+        )
     }
 
-    private fun parsedTransactionToMap(parsed: ParsedUpiTransaction): ArgumentsContainer {
-        val map = Arguments.createMap()
-        map.putInt("amountPaise", parsed.amountPaise)
-        map.putString("merchant", parsed.merchant ?: "")
-        map.putString("sourceApp", parsed.sourceApp)
-        map.putInt("transactionTimestamp", parsed.transactionTimestamp)
-        map.putString("transactionReference", parsed.transactionReference ?: "")
-        map.putString("parserName", parsed.parserName)
-        map.putString("parserVersion", parsed.parserVersion)
-        map.putDouble("confidence", parsed.confidence)
-        return map
-    }
-
-    private fun mapToNormalizedNotification(map: ReadableMap): NormalizedNotification {
+    private fun mapToNormalizedNotification(map: Map<String, Any?>): NormalizedNotification {
         return NormalizedNotification(
-            notificationId = map.getString("notificationId") ?: UUID.randomUUID().toString(),
-            packageName = map.getString("packageName") ?: "",
-            title = map.getString("title"),
-            text = map.getString("text"),
-            bigText = map.getString("bigText"),
-            subText = map.getString("subText"),
-            postTime = map.getLong("postTime") ?: System.currentTimeMillis(),
-            when = map.getLong("when"),
-            extras = Bundle()
+            notificationId = map["notificationId"] as? String ?: UUID.randomUUID().toString(),
+            packageName = map["packageName"] as? String ?: "",
+            title = map["title"] as? String,
+            text = map["text"] as? String,
+            bigText = map["bigText"] as? String,
+            subText = map["subText"] as? String,
+            postTime = (map["postTime"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+            whenTime = (map["when"] as? Number)?.toLong(),
+            extras = null
         )
     }
 }

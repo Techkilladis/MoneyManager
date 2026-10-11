@@ -45,3 +45,7 @@ models/
 # generated native folders
 /ios
 /android
+
+# local module gradle build output
+modules/*/android/build/
+modules/*/android/.cxx/

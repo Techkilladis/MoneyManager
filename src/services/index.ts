@@ -14,51 +14,13 @@ import { getClassificationSuggestion, recordClassification, recordCorrection, Cl
 import { normalizeMerchantFull } from './merchantNormalization';
 import * as budgetService from './budget';
 import * as analyticsService from './analytics';
-import { localAIProvider } from './localAIProvider';
-import { providerRegistry } from './aiClassificationProvider';
-import { mockLocalAIProvider } from './mockAIProvider';
 
 export const transactionService = {
   // Initialize database
   async initialize(): Promise<void> {
     await initializeDatabase();
     await seedDevelopmentData();
-    // Register AI providers: real llama.cpp provider first (preferred), mock as fallback
-    setTimeout(async () => {
-      try {
-        const { providerRegistry } = require('./aiClassificationProvider');
-        const { localAIProvider } = require('./localAIProvider');
-        const { mockLocalAIProvider } = require('./mockAIProvider');
-        
-        // Register real provider first (preferred)
-        providerRegistry.register(localAIProvider);
-        
-        // Register mock as fallback
-        providerRegistry.register(mockLocalAIProvider);
-        
-        // Set active provider to real one, initialize it
-        providerRegistry.setActive(localAIProvider.providerId);
-        const initResult = await localAIProvider.initialize();
-        if (!initResult.success) {
-          console.warn('[transactionService] Real AI provider failed to initialize, falling back to mock:', initResult.error);
-          providerRegistry.setActive(mockLocalAIProvider.providerId);
-          await providerRegistry.initializeAll();
-        } else {
-          await providerRegistry.initializeAll();
-        }
-      } catch (error) {
-        console.warn('[transactionService] AI provider registration failed, using mock:', error);
-        try {
-          const { providerRegistry } = require('./aiClassificationProvider');
-          const { mockLocalAIProvider } = require('./mockAIProvider');
-          providerRegistry.register(mockLocalAIProvider);
-          providerRegistry.setActive(mockLocalAIProvider.providerId);
-          await providerRegistry.initializeAll();
-        } catch (fallbackError) {
-          console.error('[transactionService] Even mock provider failed:', fallbackError);
-        }
-      }
-    }, 0);
+    
     // Recovery: Handle CONFIRMED transactions that weren't consumed from native
     await this.recoverUnconsumedEvents();
   },
@@ -452,7 +414,7 @@ export const classificationService = {
     return getClassificationSuggestion(input);
   },
 
-  async recordClassification(merchantId: string, categoryId: string | null, memberId: string | null, source?: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED') {
+  async recordClassification(merchantId: string, categoryId: string | null, memberId: string | null, source?: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT') {
     return recordClassification(merchantId, categoryId, memberId, source);
   },
 
@@ -479,3 +441,7 @@ export const services = {
   budget: budgetService,
   analytics: analyticsService,
 };
+
+// Export individual services for direct imports
+export { budgetService };
+export { analyticsService };

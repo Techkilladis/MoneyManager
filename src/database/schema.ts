@@ -62,7 +62,7 @@ export interface MerchantMemory {
   merchantId: string;
   categoryId: string | null;
   memberId: string | null;
-  source: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED';
+  source: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT';
   confidence: 'LOW' | 'MEDIUM' | 'HIGH';
   usageCount: number;
   lastUsedAt: number;
@@ -70,7 +70,7 @@ export interface MerchantMemory {
   updatedAt: number;
 }
 
-export type MerchantMemorySource = 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED';
+export type MerchantMemorySource = 'USER_CONFIRMED' | 'SYSTEM_DEFAULT';
 export type MerchantMemoryConfidence = 'LOW' | 'MEDIUM' | 'HIGH';
 
 // Phase 7: Budget

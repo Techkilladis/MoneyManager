@@ -1,7 +1,11 @@
-import { Platform, NativeModules } from 'react-native';
+import { Platform } from 'react-native';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
-// Import the native module
-const { MoneyManagerNotificationDetection } = NativeModules;
+// Import the native module. Expo modules (expo.modules.kotlin) are exposed
+// through expo-modules-core, not through React Native's `NativeModules` object.
+// `requireOptionalNativeModule` returns null when the module isn't available
+// (e.g. on non-Android platforms), which this service handles gracefully.
+const MoneyManagerNotificationDetection = requireOptionalNativeModule<NativeModuleInterface>('MoneyManagerNotificationDetection');
 
 // Check if module is available
 const isModuleAvailable = !!MoneyManagerNotificationDetection;

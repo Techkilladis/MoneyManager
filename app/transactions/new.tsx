@@ -1,5 +1,5 @@
 // Transaction Create Screen
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Alert, Keyboard, ScrollView } from 'react-native';
 import { 
   Screen, 
@@ -48,32 +48,40 @@ export default function TransactionCreateScreen() {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
 
-  // Load reference data
-  const loadReferenceData = useCallback(async () => {
-    try {
-      const [cats, mems] = await Promise.all([
-        categoryService.getAll(),
-        memberService.getAll(),
-      ]);
-      setCategories(cats);
-      setMembers(mems);
-      
-      // Set default category (first one) and member (Self)
-      if (cats.length > 0 && !categoryId) {
-        setCategoryId(cats[0].id);
-      }
-      const selfMember = mems.find(m => m.name === 'Self');
-      if (selfMember && !memberId) {
-        setMemberId(selfMember.id);
-      }
-    } catch (err) {
-      console.error('[TransactionCreate] Load reference data error:', err);
-    }
-  }, [categoryId, memberId]);
-
+  // Load reference data (categories/members) once on mount.
+  // setState happens only inside promise callbacks, so the effect body never
+  // calls setState synchronously. Defaults are applied with functional updates
+  // so they read the latest state and never overwrite an explicit user choice.
   useEffect(() => {
-    loadReferenceData();
-  }, [loadReferenceData]);
+    let active = true;
+
+    Promise.all([
+      categoryService.getAll(),
+      memberService.getAll(),
+    ])
+      .then(([cats, mems]) => {
+        if (!active) return;
+        setCategories(cats);
+        setMembers(mems);
+
+        // Set default category (first one) and member (Self) — only if the
+        // user hasn't already picked one.
+        if (cats.length > 0) {
+          setCategoryId(prev => prev ?? cats[0].id);
+        }
+        const selfMember = mems.find(m => m.name === 'Self');
+        if (selfMember) {
+          setMemberId(prev => prev ?? selfMember.id);
+        }
+      })
+      .catch((err) => {
+        console.error('[TransactionCreate] Load reference data error:', err);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Validation
   const validateField = (name: string, value: any): string | null => {

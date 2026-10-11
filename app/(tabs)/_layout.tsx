@@ -64,6 +64,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="analytics"
+        options={{
+          title: 'Analytics',
+          tabBarIcon: ({ focused, color, size }) => (
+            <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+              <AnalyticsIcon focused={focused} color={focused ? colors.accent : colors.textTertiary} size={size * 0.55} />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
@@ -241,6 +252,85 @@ function SettingsIcon({ focused, color, size }: { focused: boolean; color: strin
           />
         )}
       </View>
+    </View>
+  );
+}
+
+function AnalyticsIcon({ focused, color, size }: { focused: boolean; color: string; size: number }) {
+  const iconSize = size * 0.7;
+  const strokeWidth = focused ? 2.5 : 1.5;
+  
+  return (
+    <View
+      style={{
+        width: iconSize,
+        height: iconSize,
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
+    >
+      {/* Bar chart icon */}
+      <View
+        style={{
+          width: iconSize * 0.8,
+          height: iconSize * 0.65,
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          paddingHorizontal: iconSize * 0.05,
+        }}
+      >
+        <View
+          style={{
+            width: iconSize * 0.18,
+            height: iconSize * 0.25,
+            borderRadius: radius.micro,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.7,
+          }}
+        />
+        <View
+          style={{
+            width: iconSize * 0.18,
+            height: iconSize * 0.45,
+            borderRadius: radius.micro,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.7,
+          }}
+        />
+        <View
+          style={{
+            width: iconSize * 0.18,
+            height: iconSize * 0.35,
+            borderRadius: radius.micro,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.7,
+          }}
+        />
+        <View
+          style={{
+            width: iconSize * 0.18,
+            height: iconSize * 0.55,
+            borderRadius: radius.micro,
+            backgroundColor: color,
+            opacity: focused ? 1 : 0.5,
+          }}
+        />
+      </View>
+      {focused && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: iconSize * 0.05,
+            left: '50%',
+            marginLeft: -2,
+            width: 4,
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: color,
+          }}
+        />
+      )}
     </View>
   );
 }

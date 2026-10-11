@@ -42,7 +42,7 @@ data class ParsedUpiTransaction(
     override fun describeContents(): Int = 0
 
     companion object {
-        @android.os.Parcelable.Creator
+        @JvmField
         val CREATOR: android.os.Parcelable.Creator<ParsedUpiTransaction> = object : android.os.Parcelable.Creator<ParsedUpiTransaction> {
             override fun createFromParcel(parcel: android.os.Parcel): ParsedUpiTransaction {
                 return ParsedUpiTransaction(parcel)
@@ -87,5 +87,5 @@ interface UpiNotificationParser {
     /**
      * Version of this parser.
      */
-    val version: String = "1.0"
+    val version: String get() = "1.0"
 }

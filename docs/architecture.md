@@ -15,6 +15,7 @@ Expo React Native Application
 │   ├── Member System
 │   ├── Merchant Memory
 │   ├── Budget Logic
+│   ├── Analytics Engine
 │   └── Deduplication Engine
 ├── Data Layer (Local-First)
 │   ├── Expo SQLite Database
@@ -61,6 +62,13 @@ Expo React Native Application
 - Notification access explained & user-controlled
 - Debug logging avoids sensitive data
 
+### 6. Analytics-First Design (No AI)
+- All analytics computed via SQL aggregation in SQLite
+- No on-device ML inference; deterministic merchant memory only
+- Charts rendered via react-native-gifted-charts (SVG-based)
+- Period comparisons calculated server-side (in SQLite)
+- Integer paise preserved throughout computation pipeline
+
 ## Data Flow
 
 ```
@@ -77,4 +85,22 @@ React Native UI (Quick Capture notification)
 User Classification → CONFIRMED transaction
     ↓
 Home / Transactions / Analytics screens
+```
+
+## Analytics Data Pipeline
+
+```
+Analytics Screen
+    ↓
+analyticsService.getAnalytics(periodRange)
+    ↓
+SQL Aggregations (getTotalSpending, getCategorySpending, getMerchantSpending, 
+                  getMemberSpending, getDailySpendingTrend, getUncategorizedSpending,
+                  getMonthlyComparison, generateInsights)
+    ↓
+Expo SQLite (confirmed transactions only)
+    ↓
+Chart Data Transformations
+    ↓
+react-native-gifted-charts (PieChart, LineChart, BarChart)
 ```

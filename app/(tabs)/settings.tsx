@@ -36,17 +36,31 @@ export default function SettingsScreen() {
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const checkNotificationAccess = async () => {
-    try {
-      const enabled = await services.notification.isNotificationAccessEnabled();
-      setNotificationAccessEnabled(enabled);
-    } catch (error) {
-      console.error('Failed to check notification access:', error);
-      setNotificationAccessEnabled(false);
-    } finally {
-      setCheckingAccess(false);
-    }
-  };
+  // Check notification access status on mount. setState happens only inside
+  // promise callbacks (never synchronously in the effect body), and results
+  // are ignored after unmount.
+  useEffect(() => {
+    let active = true;
+
+    services.notification.isNotificationAccessEnabled()
+      .then((enabled) => {
+        if (!active) return;
+        setNotificationAccessEnabled(enabled);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('Failed to check notification access:', error);
+        setNotificationAccessEnabled(false);
+      })
+      .finally(() => {
+        if (!active) return;
+        setCheckingAccess(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const openNotificationAccessSettings = async () => {
     try {
@@ -66,10 +80,6 @@ export default function SettingsScreen() {
       console.error('Failed to open app settings:', e);
     }
   };
-
-  useEffect(() => {
-    checkNotificationAccess();
-  }, []);
 
   const version = Constants.expoConfig?.version || '1.0.0';
   const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';

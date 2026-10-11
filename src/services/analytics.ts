@@ -221,7 +221,10 @@ export async function getMerchantSpending(period: PeriodRange, limit: number = 1
   return rows.map(r => {
     const merchant = merchantMap.get(r.merchant);
     return {
-      merchantId: merchant?.id || 'unknown',
+      // Fall back to a per-row value derived from the (unique) raw merchant
+      // name: a shared 'unknown' literal produced duplicate React keys in the
+      // Top Merchants list whenever more than one merchant had no entity.
+      merchantId: merchant?.id || `unknown:${r.merchant}`,
       merchantName: r.merchant,
       canonicalName: merchant?.canonicalName || r.merchant,
       totalPaise: r.total,

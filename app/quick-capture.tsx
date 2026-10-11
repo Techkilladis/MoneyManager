@@ -1,6 +1,6 @@
 // Quick Capture Screen - Polished capture workflow for pending UPI events
 // Phase 5: Added merchant memory suggestions with confidence indicators
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, ScrollView, Platform, StyleSheet, Keyboard, Animated, TouchableOpacity } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { 
@@ -66,93 +66,122 @@ export default function QuickCaptureScreen() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showMemberPicker, setShowMemberPicker] = useState(false);
 
+  // Track mount state so late-arriving async results are ignored after unmount
+  const mountedRef = useRef(true);
   useEffect(() => {
-    loadData();
-    loadFilterData();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  const loadData = async () => {
+  // Loads the pending transaction and its classification suggestion.
+  // Pure data loading with no state updates, so it is safe to call from effects.
+  const fetchTransactionData = useCallback(async (): Promise<{
+    data: FormattedTransaction | null;
+    classification: Awaited<ReturnType<typeof classificationService.getSuggestion>> | null;
+  }> => {
+    let data: FormattedTransaction | null = null;
+
+    if (id) {
+      data = await transactionService.getFormattedTransaction(id);
+    } else if (sourceEventId) {
+      // Pending-capture events without a transaction id have nothing to load yet.
+      data = null;
+    }
+
+    if (!data) {
+      return { data: null, classification: null };
+    }
+
+    // Get classification suggestion from merchant memory (Phase 5)
     try {
-      setError(null);
-      let data: FormattedTransaction | null = null;
-      
-      if (id) {
-        data = await transactionService.getFormattedTransaction(id);
-      } else if (sourceEventId) {
-        data = null;
-      }
-      
-      if (!data) {
-        setError('Payment not found');
-        setLoading(false);
-        return;
-      }
-      
-      setTx(data);
-      
-      setAmount(formatPaiseForInput(data.amountPaise));
-      setMerchant(data.merchant);
-      setNote(data.note || '');
-      setCategoryId(data.category?.id || null);
-      setMemberId(data.member?.id || null);
-      
-      // Get classification suggestion from merchant memory (Phase 5)
-      try {
-        const classification = await classificationService.getSuggestion({
-          merchant: data.merchant,
-          amountPaise: data.amountPaise,
-          categoryId: data.category?.id || null,
-          memberId: data.member?.id || null,
-          sourceEventId: data.sourceEventId || undefined,
-        });
-        
-        if (classification.suggestion) {
-          setSuggestion(classification.suggestion);
-          
-          // Pre-fill if confidence is sufficient and user hasn't explicitly chosen
-          if (!data.category?.id && classification.suggestion.categoryId && 
-              classificationService.shouldPrefill(classification.suggestion.confidence)) {
-            setCategoryId(classification.suggestion.categoryId);
-          }
-          if (!data.member?.id && classification.suggestion.memberId && 
-              classificationService.shouldPrefill(classification.suggestion.confidence)) {
-            setMemberId(classification.suggestion.memberId);
-          }
+      const classification = await classificationService.getSuggestion({
+        merchant: data.merchant,
+        amountPaise: data.amountPaise,
+        categoryId: data.category?.id || null,
+        memberId: data.member?.id || null,
+        sourceEventId: data.sourceEventId || undefined,
+      });
+      return { data, classification };
+    } catch (classificationError) {
+      // Classification is an enhancement, not critical — warn and continue
+      console.warn('[QuickCapture] Classification failed:', classificationError);
+      return { data, classification: null };
+    }
+  }, [id, sourceEventId]);
+
+  // Applies the fetched transaction (and suggestion) to the form state.
+  // All setState calls live inside promise callbacks, never in the
+  // synchronous body, so this can be called from effects without
+  // triggering cascading renders.
+  const loadTransaction = useCallback((): void => {
+    fetchTransactionData()
+      .then(({ data, classification }) => {
+        if (!mountedRef.current) return;
+
+        if (!data) {
+          setError('Payment not found');
+          return;
         }
-        setMerchantEntity(classification.merchant);
-      } catch (classificationError) {
-        console.warn('[QuickCapture] Classification failed:', classificationError);
-      }
-      
-    } catch (err) {
-      console.error('[QuickCapture] Load error:', err);
-      setError('Failed to load payment');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const loadFilterData = async () => {
-    try {
-      const [cats, mems] = await Promise.all([
-        categoryService.getAll(),
-        memberService.getAll(),
-      ]);
-      setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
-      setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
-    } catch (err) {
-      console.error('[QuickCapture] Filter data load error:', err);
-    }
-  };
+        setTx(data);
 
-  const formatPaiseForInput = (paise: number) => {
-    return (paise / 100).toFixed(2);
-  };
+        setAmount(formatPaiseForInput(data.amountPaise));
+        setMerchant(data.merchant);
+        setNote(data.note || '');
+        setCategoryId(data.category?.id || null);
+        setMemberId(data.member?.id || null);
 
-  const parseAmountInput = (value: string) => {
-    const rupees = parseFloat(value.replace(/[₹,\s]/g, ''));
-    return isNaN(rupees) ? 0 : Math.round(rupees * 100);
-  };
+        if (classification) {
+          if (classification.suggestion) {
+            setSuggestion(classification.suggestion);
+
+            // Pre-fill if confidence is sufficient and user hasn't explicitly chosen
+            if (!data.category?.id && classification.suggestion.categoryId &&
+                classificationService.shouldPrefill(classification.suggestion.confidence)) {
+              setCategoryId(classification.suggestion.categoryId);
+            }
+            if (!data.member?.id && classification.suggestion.memberId &&
+                classificationService.shouldPrefill(classification.suggestion.confidence)) {
+              setMemberId(classification.suggestion.memberId);
+            }
+          }
+          setMerchantEntity(classification.merchant);
+        }
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        console.error('[QuickCapture] Load error:', err);
+        setError('Failed to load payment');
+      })
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setLoading(false);
+      });
+  }, [fetchTransactionData]);
+
+  // Loads category/member options for the pickers.
+  // setState only happens in promise callbacks.
+  const loadFilterData = useCallback((): void => {
+    Promise.all([
+      categoryService.getAll(),
+      memberService.getAll(),
+    ])
+      .then(([cats, mems]) => {
+        if (!mountedRef.current) return;
+        setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
+        setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
+      })
+      .catch((err) => {
+        console.error('[QuickCapture] Filter data load error:', err);
+      });
+  }, []);
+
+  useEffect(() => {
+    loadTransaction();
+    loadFilterData();
+  }, [loadTransaction, loadFilterData]);
 
   const handleCategorySelect = useCallback((newCategoryId: string | null) => {
     const oldCategoryId = categoryId;

@@ -30,9 +30,11 @@ class NotificationAccessManager private constructor(context: Context) {
          * Checks if notification access is enabled for this app.
          */
         fun isNotificationAccessEnabled(context: Context): Boolean {
+            // "enabled_notification_listeners" is Settings.Secure.ENABLED_NOTIFICATION_LISTENERS,
+            // which is not part of the public Android SDK, so the raw value is used here.
             val enabledListeners = Settings.Secure.getString(
                 context.contentResolver,
-                Settings.Secure.ENABLED_NOTIFICATION_LISTENERS
+                "enabled_notification_listeners"
             )
             return enabledListeners?.contains(context.packageName) == true
         }

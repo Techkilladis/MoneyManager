@@ -77,7 +77,7 @@ class UpiAppRegistry private constructor(context: Context) {
      */
     fun getAppLabel(packageName: String): String? {
         return try {
-            packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0))
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0))?.toString()
         } catch (e: Exception) {
             null
         }

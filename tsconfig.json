@@ -13,5 +13,9 @@
       "@utils/*": ["src/utils/*"],
       "@types/*": ["src/types/*"]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "modules/local-ai/android/src/main/cpp/llama.cpp/examples"
+  ]
 }

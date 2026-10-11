@@ -3,6 +3,7 @@ package com.moneymanager.notification.parsers
 import com.moneymanager.notification.normalizer.NormalizedNotification
 import android.os.Bundle
 import java.util.regex.Pattern
+import kotlin.math.min
 
 /**
  * Parser for Google Pay (GPay) UPI notifications.

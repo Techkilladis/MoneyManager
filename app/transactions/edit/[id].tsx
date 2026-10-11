@@ -1,5 +1,5 @@
 // Transaction Edit/Create Screen
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Alert, Keyboard, ScrollView } from 'react-native';
 import { 
   Screen, 
@@ -51,51 +51,73 @@ export default function TransactionEditScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   
   // UI state
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
 
-  // Load reference data
-  const loadReferenceData = useCallback(async () => {
-    try {
-      const [cats, mems] = await Promise.all([
-        categoryService.getAll(),
-        memberService.getAll(),
-      ]);
-      setCategories(cats);
-      setMembers(mems);
-    } catch (err) {
-      console.error('[TransactionEdit] Load reference data error:', err);
-    }
+  // Tracks which transaction id has finished loading (successfully or not) so
+  // the loading state can be derived during render instead of being set
+  // synchronously inside an effect.
+  const [loadedTransactionId, setLoadedTransactionId] = useState<string | null>(null);
+  const loading = mode === 'edit' && loadedTransactionId !== transactionId;
+
+  // Track mount state so late-arriving async results are ignored after unmount
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  // Load existing transaction for edit mode
-  const loadTransaction = useCallback(async () => {
+  // Load reference data (categories/members). All setState calls happen in
+  // promise callbacks, so this is safe to call from an effect.
+  const loadReferenceData = useCallback((): void => {
+    Promise.all([
+      categoryService.getAll(),
+      memberService.getAll(),
+    ])
+      .then(([cats, mems]) => {
+        if (!mountedRef.current) return;
+        setCategories(cats);
+        setMembers(mems);
+      })
+      .catch((err) => {
+        console.error('[TransactionEdit] Load reference data error:', err);
+      });
+  }, []);
+
+  // Load existing transaction for edit mode. Applies the fetched values to the
+  // form; setState only happens in promise callbacks.
+  const loadTransaction = useCallback((): void => {
     if (!transactionId) return;
-    
-    try {
-      setLoading(true);
-      const tx = await transactionService.getFormattedTransaction(transactionId);
-      if (tx) {
-        setAmount(formatPaiseForInput(tx.amountPaise));
-        setMerchant(tx.merchant);
-        setCategoryId(tx.category?.id || null);
-        setMemberId(tx.member?.id || null);
-        setNote(tx.note || '');
-        setDate(new Date(tx.timestamp));
-        setStatus(tx.status as TransactionStatus);
-      } else {
-        setError('Transaction not found');
-      }
-    } catch (err) {
-      console.error('[TransactionEdit] Load error:', err);
-      setError('Failed to load transaction');
-    } finally {
-      setLoading(false);
-    }
+
+    transactionService.getFormattedTransaction(transactionId)
+      .then((tx) => {
+        if (!mountedRef.current) return;
+        if (tx) {
+          setAmount(formatPaiseForInput(tx.amountPaise));
+          setMerchant(tx.merchant);
+          setCategoryId(tx.category?.id || null);
+          setMemberId(tx.member?.id || null);
+          setNote(tx.note || '');
+          setDate(new Date(tx.timestamp));
+          setStatus(tx.status as TransactionStatus);
+        } else {
+          setError('Transaction not found');
+        }
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        console.error('[TransactionEdit] Load error:', err);
+        setError('Failed to load transaction');
+      })
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setLoadedTransactionId(transactionId);
+      });
   }, [transactionId]);
 
   useEffect(() => {

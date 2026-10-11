@@ -1,5 +1,5 @@
 // Transaction Detail Screen
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Linking, Platform, Alert, ScrollView } from 'react-native';
 import { 
   Screen, 
@@ -30,31 +30,44 @@ export default function TransactionDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Track mount state so late-arriving async results are ignored after unmount
+  const mountedRef = useRef(true);
   useEffect(() => {
-    if (transactionId) {
-      loadTransaction();
-    }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Loads the transaction from the database. All setState calls live inside
+  // promise callbacks (never in the synchronous body), so this is safe to
+  // call from an effect.
+  const loadTransaction = useCallback((): void => {
+    if (!transactionId) return;
+
+    transactionService.getFormattedTransaction(transactionId)
+      .then((tx) => {
+        if (!mountedRef.current) return;
+        if (tx) {
+          setTransaction(tx);
+        } else {
+          setError('Transaction not found');
+        }
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        console.error('[TransactionDetail] Error:', err);
+        setError('Failed to load transaction');
+      })
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setLoading(false);
+      });
   }, [transactionId]);
 
-  const loadTransaction = async () => {
-    if (!transactionId) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      const tx = await transactionService.getFormattedTransaction(transactionId);
-      if (tx) {
-        setTransaction(tx);
-      } else {
-        setError('Transaction not found');
-      }
-    } catch (err) {
-      console.error('[TransactionDetail] Error:', err);
-      setError('Failed to load transaction');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    loadTransaction();
+  }, [loadTransaction]);
 
   const handleEdit = () => {
     if (transactionId) {

@@ -1,51 +1,24 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.3.0")
-    }
-}
-
 apply plugin: 'com.android.library'
-apply plugin: 'org.jetbrains.kotlin.android'
-apply plugin: 'expo.modules.gradle'
+
+group = 'com.moneymanager'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
 
 android {
-    namespace 'com.moneymanager.notification'
-    compileSdk 34
+    namespace "com.moneymanager.notification"
 
     defaultConfig {
-        minSdk 24
-        targetSdk 34
         versionCode 1
         versionName "1.0"
     }
-
-    buildFeatures {
-        viewBinding false
-    }
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
-}
-
-repositories {
-    google()
-    mavenCentral()
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
     implementation "androidx.core:core-ktx:1.12.0"
     implementation "androidx.lifecycle:lifecycle-runtime:2.7.0"
-    implementation "com.facebook.react:react-native:+"
-    implementation "expo.modules:expo-modules-core:+"
 }

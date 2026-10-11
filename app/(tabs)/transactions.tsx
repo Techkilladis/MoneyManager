@@ -1,5 +1,5 @@
 // Transactions Screen - Premium Transaction List
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ScrollView, RefreshControl, View, TextInput, Keyboard, FlatList, TouchableOpacity, Alert, StyleSheet, Platform } from 'react-native';
 import { 
   Screen, 
@@ -54,115 +54,184 @@ export default function TransactionsScreen() {
   const [categories, setCategories] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
   const [members, setMembers] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
 
-  const loadFilterData = useCallback(async () => {
-    try {
-      const [cats, mems] = await Promise.all([
-        categoryService.getAll(),
-        memberService.getAll(),
-      ]);
-      setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
-      setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
-    } catch (err) {
-      console.error('[TransactionsScreen] Load filter data error:', err);
-    }
+  // Track mount state and the latest in-flight request so stale responses
+  // never overwrite newer results and results are ignored after unmount.
+  const mountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Loads category/member options for the filter bar. All setState calls
+  // happen in promise callbacks (never in the synchronous body), so this is
+  // safe to call from an effect.
+  const loadFilterData = useCallback((): void => {
+    Promise.all([
+      categoryService.getAll(),
+      memberService.getAll(),
+    ])
+      .then(([cats, mems]) => {
+        if (!mountedRef.current) return;
+        setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
+        setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
+      })
+      .catch((err) => {
+        console.error('[TransactionsScreen] Load filter data error:', err);
+      });
   }, []);
 
   useEffect(() => {
     loadFilterData();
   }, [loadFilterData]);
 
-  const loadTransactions = useCallback(async (isRefresh = false, isLoadMore = false) => {
-    try {
-      if (isRefresh) setRefreshing(true);
-      if (isLoadMore) setLoading(true);
-      if (!isLoadMore && !isRefresh) setLoading(true);
-      
-      setError(null);
-      
-      // Build date range from preset
-      let startDate: number | undefined;
-      let endDate: number | undefined;
-      
-      if (dateFilterPreset !== 'custom') {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        let start: Date;
-        
-        switch (dateFilterPreset) {
-          case 'today':
-            start = today;
-            break;
-          case 'this_week':
-            start = new Date(today);
-            start.setDate(today.getDate() - today.getDay());
-            break;
-          case 'this_month':
-            start = new Date(today.getFullYear(), today.getMonth(), 1);
-            break;
-        }
-        startDate = start.getTime();
-        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-      } else if (customDateRange) {
-        startDate = new Date(customDateRange.start).setHours(0, 0, 0, 0);
-        endDate = new Date(customDateRange.end).setHours(23, 59, 59, 999);
+  // Loads a page of transactions. `isRefresh` replaces the list, `isLoadMore`
+  // appends the next page. Callers own the synchronous loading/refreshing
+  // state (event handlers may set it directly; effects rely on the initial
+  // state), which keeps every setState call in this function inside promise
+  // callbacks — safe to call from effects and event handlers alike.
+  const loadTransactions = useCallback((isRefresh = false, isLoadMore = false): void => {
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => mountedRef.current && requestId === requestIdRef.current;
+
+    // Build date range from preset
+    let startDate: number | undefined;
+    let endDate: number | undefined;
+
+    if (dateFilterPreset !== 'custom') {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let start: Date;
+
+      switch (dateFilterPreset) {
+        case 'today':
+          start = today;
+          break;
+        case 'this_week':
+          start = new Date(today);
+          start.setDate(today.getDate() - today.getDay());
+          break;
+        case 'this_month':
+          start = new Date(today.getFullYear(), today.getMonth(), 1);
+          break;
       }
-      
-      const newOffset = isRefresh || !isLoadMore ? 0 : offset;
-      const data = await transactionService.getFormattedTransactions({
-        search: searchQuery || undefined,
-        categoryId: categoryFilter || undefined,
-        memberId: memberFilter || undefined,
-        startDate,
-        endDate,
-        limit: LIMIT,
-        offset: newOffset,
-        is_pending_capture: 0, // Exclude pending captures from normal transaction list
-      });
-      
-      if (isRefresh || !isLoadMore) {
-        setTransactions(data);
-        setOffset(LIMIT);
-      } else {
-        setTransactions(prev => [...prev, ...data]);
-        setOffset(prev => prev + LIMIT);
-      }
-      
-      setHasMore(data.length === LIMIT);
-    } catch (err) {
-      console.error('[TransactionsScreen] Error loading transactions:', err);
-      setError('Failed to load transactions');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+
+      startDate = start.getTime();
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+    } else if (customDateRange) {
+      startDate = new Date(customDateRange.start).setHours(0, 0, 0, 0);
+      endDate = new Date(customDateRange.end).setHours(23, 59, 59, 999);
     }
+
+    const newOffset = isRefresh || !isLoadMore ? 0 : offset;
+
+    transactionService.getFormattedTransactions({
+      search: searchQuery || undefined,
+      categoryId: categoryFilter || undefined,
+      memberId: memberFilter || undefined,
+      startDate,
+      endDate,
+      limit: LIMIT,
+      offset: newOffset,
+      is_pending_capture: 0, // Exclude pending captures from normal transaction list
+    })
+      .then((data) => {
+        if (!isCurrent()) return;
+
+        if (isRefresh || !isLoadMore) {
+          setTransactions(data);
+          setOffset(LIMIT);
+        } else {
+          setTransactions(prev => [...prev, ...data]);
+          setOffset(prev => prev + LIMIT);
+        }
+
+        setHasMore(data.length === LIMIT);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!isCurrent()) return;
+        console.error('[TransactionsScreen] Error loading transactions:', err);
+        setError('Failed to load transactions');
+      })
+      .finally(() => {
+        if (!isCurrent()) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [searchQuery, offset, categoryFilter, memberFilter, dateFilterPreset, customDateRange]);
 
+  // Keep a ref to the latest loader so the effects below always call the
+  // up-to-date version without re-running whenever its identity changes.
+  const loadTransactionsRef = useRef(loadTransactions);
+  useEffect(() => {
+    loadTransactionsRef.current = loadTransactions;
+  });
+
+  // Initial load (mount only)
+  useEffect(() => {
+    loadTransactionsRef.current();
+  }, []);
+
+  // Reload when filters change. The first run (mount) is skipped — the
+  // initial-load effect above already covers it, and skipping avoids firing
+  // the same query twice per mount.
+  const didInitialFilterRunRef = useRef(false);
+  useEffect(() => {
+    if (!didInitialFilterRunRef.current) {
+      didInitialFilterRunRef.current = true;
+      return;
+    }
+    loadTransactionsRef.current(true);
+  }, [categoryFilter, memberFilter, dateFilterPreset]);
+
+  // Filter selection helpers. They enter the refreshing state only when the
+  // selection actually changes — a no-op tap triggers no reload (matching the
+  // previous behaviour), so a spinner set for it would never clear.
+  const changeCategoryFilter = (id: string | null) => {
+    if (categoryFilter === id) return;
+    setCategoryFilter(id);
+    setRefreshing(true);
+  };
+
+  const changeMemberFilter = (id: string | null) => {
+    if (memberFilter === id) return;
+    setMemberFilter(id);
+    setRefreshing(true);
+  };
+
+  const changeDateFilterPreset = (preset: 'today' | 'this_week' | 'this_month' | 'custom') => {
+    if (dateFilterPreset === preset) return;
+    setDateFilterPreset(preset);
+    if (preset !== 'custom') {
+      setCustomDateRange(null);
+    }
+    setRefreshing(true);
+  };
+
   const onRefresh = () => {
+    setRefreshing(true);
     loadTransactions(true);
   };
 
   const onSearchChange = (text: string) => {
     setSearchQuery(text);
-    // Debounce search
+    // Debounce search; use the ref so the fired request always uses the
+    // latest search query rather than the closure captured at schedule time.
     setTimeout(() => {
-      loadTransactions(true);
+      setRefreshing(true);
+      loadTransactionsRef.current(true);
     }, 300);
   };
 
   const onEndReached = () => {
     if (hasMore && !loading && !refreshing) {
+      setLoading(true);
       loadTransactions(false, true);
     }
   };
-
-  useEffect(() => {
-    loadTransactions();
-  }, []);
-
-  // Reset when search/filter changes
-  useEffect(() => {
-    loadTransactions(true);
-  }, [categoryFilter, memberFilter, dateFilterPreset]);
 
   if (loading && transactions.length === 0) {
     return (
@@ -178,7 +247,7 @@ export default function TransactionsScreen() {
         <EmptyState
           title="Unable to load"
           subtitle={error}
-          action={{ label: 'Retry', onPress: () => loadTransactions(true) }}
+          action={{ label: 'Retry', onPress: () => { setRefreshing(true); loadTransactions(true); } }}
         />
       </Screen>
     );
@@ -294,10 +363,10 @@ export default function TransactionsScreen() {
                       size="small"
                       fullWidth
                       onPress={() => Alert.alert('Category', 'Select category', [
-                        { text: 'All', onPress: () => setCategoryFilter(null) },
+                        { text: 'All', onPress: () => changeCategoryFilter(null) },
                         ...categories.map(c => ({
                           text: c.label,
-                          onPress: () => setCategoryFilter(c.id),
+                          onPress: () => changeCategoryFilter(c.id),
                         })),
                       ])}
                     >
@@ -317,10 +386,10 @@ export default function TransactionsScreen() {
                       size="small"
                       fullWidth
                       onPress={() => Alert.alert('Member', 'Select member', [
-                        { text: 'All', onPress: () => setMemberFilter(null) },
+                        { text: 'All', onPress: () => changeMemberFilter(null) },
                         ...members.map(m => ({
                           text: m.label,
-                          onPress: () => setMemberFilter(m.id),
+                          onPress: () => changeMemberFilter(m.id),
                         })),
                       ])}
                     >
@@ -339,10 +408,10 @@ export default function TransactionsScreen() {
                     size="small"
                     fullWidth
                     onPress={() => Alert.alert('Date Range', 'Select date range', [
-                      { text: 'Today', onPress: () => { setDateFilterPreset('today'); setCustomDateRange(null); } },
-                      { text: 'This Week', onPress: () => { setDateFilterPreset('this_week'); setCustomDateRange(null); } },
-                      { text: 'This Month', onPress: () => { setDateFilterPreset('this_month'); setCustomDateRange(null); } },
-                      { text: 'Custom', onPress: () => { setDateFilterPreset('custom'); } },
+                      { text: 'Today', onPress: () => changeDateFilterPreset('today') },
+                      { text: 'This Week', onPress: () => changeDateFilterPreset('this_week') },
+                      { text: 'This Month', onPress: () => changeDateFilterPreset('this_month') },
+                      { text: 'Custom', onPress: () => changeDateFilterPreset('custom') },
                     ])}
                   >
                     <TextPrimitive variant="buttonSmall">

@@ -313,7 +313,6 @@ export const merchantMemoryRepository = {
     totalEntries: number;
     userConfirmed: number;
     systemDefault: number;
-    aiSuggested: number;
     highConfidence: number;
     mediumConfidence: number;
     lowConfidence: number;
@@ -324,7 +323,6 @@ export const merchantMemoryRepository = {
       total: number;
       userConfirmed: number;
       systemDefault: number;
-      aiSuggested: number;
       high: number;
       medium: number;
       low: number;
@@ -333,7 +331,6 @@ export const merchantMemoryRepository = {
         COUNT(*) as total,
         SUM(CASE WHEN source = 'USER_CONFIRMED' THEN 1 ELSE 0 END) as userConfirmed,
         SUM(CASE WHEN source = 'SYSTEM_DEFAULT' THEN 1 ELSE 0 END) as systemDefault,
-        SUM(CASE WHEN source = 'AI_SUGGESTED' THEN 1 ELSE 0 END) as aiSuggested,
         SUM(CASE WHEN confidence = 'HIGH' THEN 1 ELSE 0 END) as high,
         SUM(CASE WHEN confidence = 'MEDIUM' THEN 1 ELSE 0 END) as medium,
         SUM(CASE WHEN confidence = 'LOW' THEN 1 ELSE 0 END) as low
@@ -346,7 +343,6 @@ export const merchantMemoryRepository = {
       totalEntries: row?.total || 0,
       userConfirmed: row?.userConfirmed || 0,
       systemDefault: row?.systemDefault || 0,
-      aiSuggested: row?.aiSuggested || 0,
       highConfidence: row?.high || 0,
       mediumConfidence: row?.medium || 0,
       lowConfidence: row?.low || 0,

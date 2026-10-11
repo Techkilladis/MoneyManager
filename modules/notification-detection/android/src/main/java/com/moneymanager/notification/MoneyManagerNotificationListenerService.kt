@@ -7,9 +7,10 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.annotation.RequiresApi
-import com.moneymanager.notification.normalizer.NotificationNormalizer
+import com.moneymanager.notification.normalizer.NormalizedNotification
 import com.moneymanager.notification.parsers.ParserRegistry
 import com.moneymanager.notification.store.PendingEventStore
+import com.moneymanager.notification.store.PendingUpiEvent
 import com.moneymanager.notification.dedupe.DedupeEngine
 import com.moneymanager.notification.registry.UpiAppRegistry
 import com.moneymanager.notification.access.NotificationAccessManager
@@ -23,7 +24,6 @@ import com.moneymanager.notification.access.NotificationAccessManager
 @RequiresApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
 class MoneyManagerNotificationListenerService : NotificationListenerService() {
 
-    private lateinit var normalizer: NotificationNormalizer
     private lateinit var parserRegistry: ParserRegistry
     private lateinit var pendingEventStore: PendingEventStore
     private lateinit var dedupeEngine: DedupeEngine
@@ -36,8 +36,7 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
     }
 
     private fun initializeComponents() {
-        normalizer = NotificationNormalizer(this)
-        parserRegistry = ParserRegistry(this)
+        parserRegistry = ParserRegistry.getInstance(this)
         pendingEventStore = PendingEventStore.getInstance(this)
         dedupeEngine = DedupeEngine.getInstance(this)
         upiAppRegistry = UpiAppRegistry.getInstance(this)
@@ -67,7 +66,7 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
             }
 
             // Normalize the notification
-            val normalized = normalizer.normalize(sbn)
+            val normalized = NormalizedNotification.fromStatusBarNotification(sbn)
             
             // Try to parse with registered parsers
             val parsed = parserRegistry.tryParse(normalized)
