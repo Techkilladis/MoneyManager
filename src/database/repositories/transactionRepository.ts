@@ -29,6 +29,7 @@ export interface UpdateTransactionInput {
   memberId?: string | null;
   note?: string | null;
   status?: TransactionStatus;
+  is_pending_capture?: number;      // NEW: cleared on confirmation
   is_dismissed?: number;           // NEW
   dismissed_at?: number | null;    // NEW
 }
@@ -156,6 +157,10 @@ export const transactionRepository = {
     if (input.status !== undefined) {
       updates.push('status = ?');
       values.push(input.status);
+    }
+    if (input.is_pending_capture !== undefined) {
+      updates.push('is_pending_capture = ?');
+      values.push(input.is_pending_capture);
     }
     if (input.is_dismissed !== undefined) {
       updates.push('is_dismissed = ?');

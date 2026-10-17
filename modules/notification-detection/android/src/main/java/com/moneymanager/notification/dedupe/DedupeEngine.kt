@@ -35,23 +35,36 @@ class DedupeEngine private constructor(context: Context) {
     /**
      * Generates a deterministic deduplication key from a parsed transaction.
      * Uses multiple signals in order of reliability.
+     *
+     * A UPI transaction reference is unique per payment. When one is present
+     * it is the primary identity signal and the time window must NOT
+     * participate: the same payment re-notified minutes or hours later is
+     * still the same payment and must not create a second event.
+     *
+     * Without a reference the key falls back to a composite of source app,
+     * amount, merchant and a one-minute time window.
      */
     fun generateKey(parsed: ParsedUpiTransaction): String {
+        parsed.transactionReference?.let { ref ->
+            return listOf(
+                "ref:$ref",
+                "app:${parsed.sourceApp}",
+                "amt:${parsed.amountPaise}"
+            ).joinToString("|")
+        }
+
         val parts = mutableListOf<String>()
 
-        // 1. Transaction reference (most reliable)
-        parsed.transactionReference?.let { parts.add("ref:$it") }
-
-        // 2. Source app
+        // 1. Source app
         parts.add("app:${parsed.sourceApp}")
 
-        // 3. Amount in paise
+        // 2. Amount in paise
         parts.add("amt:${parsed.amountPaise}")
 
-        // 4. Merchant (normalized)
+        // 3. Merchant (normalized)
         parsed.merchant?.let { parts.add("merch:${normalizeMerchant(it)}") }
 
-        // 5. Timestamp window (rounded to nearest minute)
+        // 4. Timestamp window (rounded to nearest minute)
         val timeWindow = parsed.transactionTimestamp / (60 * 1000)
         parts.add("time:$timeWindow")
 

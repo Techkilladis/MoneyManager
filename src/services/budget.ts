@@ -6,10 +6,9 @@
  */
 
 import { budgetRepository } from '../database/repositories/budgetRepository';
-import { transactionRepository } from '../database/repositories/transactionRepository';
 import { categoryRepository } from '../database/repositories/categoryRepository';
-import { Budget, BudgetPeriodType, BudgetWithSpending, BudgetStatus } from '../database/schema';
-import { now } from '../database/db';
+import { Budget, BudgetPeriodType, BudgetWithSpending, BudgetStatus, Category } from '../database/schema';
+import { openDatabase } from '../database/db';
 
 // Budget status thresholds (centralized, not magic numbers)
 const BUDGET_THRESHOLDS = {
@@ -40,14 +39,82 @@ async function getCategorySpendingInPeriod(
   periodStart: number,
   periodEnd: number
 ): Promise<number> {
-  const transactions = await transactionRepository.list({
+  // Aggregate in SQL: listing rows would be capped by the repository's
+  // default page size and under-count busy categories.
+  const database = await openDatabase();
+  const row = await database.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(amountPaise), 0) AS total FROM transactions
+     WHERE status = 'CONFIRMED' AND is_pending_capture = 0 AND is_dismissed = 0
+     AND categoryId = ? AND transactionTimestamp >= ? AND transactionTimestamp < ?`,
+    [categoryId, periodStart, periodEnd]
+  );
+  return row?.total ?? 0;
+}
+
+export interface MonthlyBudgetView extends BudgetWithSpending {
+  category: Category | null;
+}
+
+/**
+ * Monthly budgets are recurring: an active MONTHLY budget applies to every
+ * month, so spending is measured against the month containing `date`
+ * rather than the period the budget was created in.
+ */
+export async function getMonthlyBudgets(date = new Date()): Promise<MonthlyBudgetView[]> {
+  const { start, end } = getMonthlyPeriodBounds(date.getFullYear(), date.getMonth());
+  const [budgets, categories] = await Promise.all([budgetRepository.getActive(), categoryRepository.getAll()]);
+  const categoryMap = new Map(categories.map((c) => [c.id, c]));
+
+  const views = await Promise.all(
+    budgets
+      .filter((b) => b.periodType === 'MONTHLY')
+      .map(async (budget) => {
+        const spentPaise = await getCategorySpendingInPeriod(budget.categoryId, start, end);
+        const raw = budget.amountPaise > 0 ? Math.round((spentPaise / budget.amountPaise) * 100) : 0;
+        return {
+          budget,
+          category: categoryMap.get(budget.categoryId) ?? null,
+          spentPaise,
+          remainingPaise: budget.amountPaise - spentPaise,
+          percentageUsed: raw,
+          status: calculateBudgetStatus(raw),
+        };
+      })
+  );
+
+  return views.sort((a, b) => b.percentageUsed - a.percentageUsed);
+}
+
+/** Creates or updates the recurring monthly budget for a category. */
+export async function upsertMonthlyBudget(
+  categoryId: string,
+  amountPaise: number
+): Promise<{ success: boolean; error?: string }> {
+  if (!Number.isInteger(amountPaise) || amountPaise <= 0) {
+    return { success: false, error: 'Enter a budget amount greater than zero' };
+  }
+  const category = await categoryRepository.getById(categoryId);
+  if (!category) return { success: false, error: 'Selected category does not exist' };
+
+  const active = await budgetRepository.list({ categoryId, isActive: true });
+  const existing = active.find((b) => b.periodType === 'MONTHLY');
+  if (existing) {
+    await budgetRepository.update(existing.id, { amountPaise, name: category.name });
+    return { success: true };
+  }
+
+  const nowDate = new Date();
+  const { start, end } = getMonthlyPeriodBounds(nowDate.getFullYear(), nowDate.getMonth());
+  await budgetRepository.create({
+    name: category.name,
     categoryId,
-    status: 'CONFIRMED',
-    startDate: periodStart,
-    endDate: periodEnd - 1, // periodEnd is exclusive
+    amountPaise,
+    periodType: 'MONTHLY',
+    periodStart: start,
+    periodEnd: end,
+    isActive: true,
   });
-  
-  return transactions.reduce((sum, t) => sum + t.amountPaise, 0);
+  return { success: true };
 }
 
 /**

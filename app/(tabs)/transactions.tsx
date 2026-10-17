@@ -1,501 +1,418 @@
-// Transactions Screen - Premium Transaction List
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { ScrollView, RefreshControl, View, TextInput, Keyboard, FlatList, TouchableOpacity, Alert, StyleSheet, Platform } from 'react-native';
-import { 
-  Screen, 
-  Section, 
-  Card, 
-  Row, 
-  Column,
-  BodyEmphasis, 
-  Body, 
-  Footnote, 
-  Badge,
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { colors, radius, space } from '@/design/tokens';
+import { categoryService, ledgerService, memberService } from '@/services';
+import { transactionRepository } from '@/database/repositories/transactionRepository';
+import { useScreenData } from '@/hooks/useScreenData';
+import { FormattedTransaction } from '@/domain/transaction';
+import { categoryGlyph } from '@/domain/glyphs';
+import { formatDayLabel, formatINR, pluralize, startOfDay } from '@/utils/format';
+import { TransactionRow } from '@/components/TransactionRow';
+import {
+  Button,
+  Chip,
   Divider,
   EmptyState,
-  Input,
-  DisplayLarge,
-  Button,
-  Title2,
-  Caption1,
-  Caption2,
-  Micro,
-  Title1,
-  SectionHeader,
-  ListItem,
-  TextPrimitive,
-} from '@/design/primitives';
-import { transactionService, categoryService, memberService } from '@/services';
-import { FormattedTransaction } from '@/domain/transaction';
-import { useRouter } from 'expo-router';
-import { formatDateForInput, formatDate } from '@/utils/date';
-import { colors, spacing, radius, shadows, typography } from '@/design/tokens';
+  ErrorView,
+  Icon,
+  LoadingView,
+  ScreenHeader,
+  Sheet,
+  Text,
+  TextField,
+} from '@/components/ui';
 
-export default function TransactionsScreen() {
-  const router = useRouter();
-  
-  const [transactions, setTransactions] = useState<FormattedTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [offset, setOffset] = useState(0);
-  const LIMIT = 20;
-  
-  // Filters
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [memberFilter, setMemberFilter] = useState<string | null>(null);
-  const [dateFilterPreset, setDateFilterPreset] = useState<'today' | 'this_week' | 'this_month' | 'custom'>('this_month');
-  const [customDateRange, setCustomDateRange] = useState<{ start: Date; end: Date } | null>(null);
+const PAGE = 40;
+
+type Period = 'month' | 'last_month' | 'quarter' | 'year' | 'all';
+
+const PERIODS: { value: Period; label: string }[] = [
+  { value: 'month', label: 'This month' },
+  { value: 'last_month', label: 'Last month' },
+  { value: 'quarter', label: '3 months' },
+  { value: 'year', label: 'This year' },
+  { value: 'all', label: 'All time' },
+];
+
+function periodRange(p: Period): { start?: number; end?: number } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  switch (p) {
+    case 'month':
+      return { start: new Date(y, m, 1).getTime(), end: new Date(y, m + 1, 1).getTime() };
+    case 'last_month':
+      return { start: new Date(y, m - 1, 1).getTime(), end: new Date(y, m, 1).getTime() };
+    case 'quarter':
+      return { start: new Date(y, m - 2, 1).getTime(), end: new Date(y, m + 1, 1).getTime() };
+    case 'year':
+      return { start: new Date(y, 0, 1).getTime(), end: new Date(y + 1, 0, 1).getTime() };
+    default:
+      return {};
+  }
+}
+
+export default function HistoryScreen() {
+  const [period, setPeriod] = useState<Period>('month');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [memberId, setMemberId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  
-  // Filter data
-  const [categories, setCategories] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
-  const [members, setMembers] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Track mount state and the latest in-flight request so stale responses
-  // never overwrite newer results and results are ignored after unmount.
-  const mountedRef = useRef(true);
-  const requestIdRef = useRef(0);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const filters = useMemo(
+    () => ({ ...periodRange(period), search: search || undefined, categoryId, memberId }),
+    [period, search, categoryId, memberId]
+  );
+  const filterKey = JSON.stringify(filters);
 
-  // Loads category/member options for the filter bar. All setState calls
-  // happen in promise callbacks (never in the synchronous body), so this is
-  // safe to call from an effect.
-  const loadFilterData = useCallback((): void => {
-    Promise.all([
+  const fetcher = useCallback(async () => {
+    const [items, totals, daily, pending, categories, members] = await Promise.all([
+      ledgerService.getHistoryPage(filters, PAGE, 0),
+      ledgerService.getHistoryTotals(filters),
+      ledgerService.getDailyTotals(filters),
+      transactionRepository.getPending(),
       categoryService.getAll(),
       memberService.getAll(),
-    ])
-      .then(([cats, mems]) => {
-        if (!mountedRef.current) return;
-        setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
-        setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
+    ]);
+    // A fresh key per load: after edits/deletes, offsets shift, so older
+    // extra pages must not be appended to a newly loaded first page.
+    return { key: `${filterKey}:${Date.now()}`, items, totals, daily, pendingCount: pending.length, categories, members };
+  }, [filters, filterKey]);
+
+  const { data, error, refreshing, refresh, reload } = useScreenData(fetcher);
+
+  // Extra pages are tied to the filter key they were loaded for, so a
+  // filter change implicitly discards them.
+  const [more, setMore] = useState<{ key: string; items: FormattedTransaction[]; done: boolean }>({ key: '', items: [], done: false });
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const items = useMemo(() => {
+    if (!data) return [];
+    return more.key === data.key ? [...data.items, ...more.items] : data.items;
+  }, [data, more]);
+  const done = !data || data.items.length < PAGE || (more.key === data.key && more.done);
+
+  const loadMore = () => {
+    if (!data || done || loadingMore) return;
+    const key = data.key;
+    setLoadingMore(true);
+    ledgerService
+      .getHistoryPage(filters, PAGE, items.length)
+      .then((page) => {
+        setMore((prev) => ({
+          key,
+          items: prev.key === key ? [...prev.items, ...page] : page,
+          done: page.length < PAGE,
+        }));
       })
-      .catch((err) => {
-        console.error('[TransactionsScreen] Load filter data error:', err);
-      });
-  }, []);
+      .catch((err) => console.error('[History] load more failed:', err))
+      .finally(() => setLoadingMore(false));
+  };
 
-  useEffect(() => {
-    loadFilterData();
-  }, [loadFilterData]);
-
-  // Loads a page of transactions. `isRefresh` replaces the list, `isLoadMore`
-  // appends the next page. Callers own the synchronous loading/refreshing
-  // state (event handlers may set it directly; effects rely on the initial
-  // state), which keeps every setState call in this function inside promise
-  // callbacks — safe to call from effects and event handlers alike.
-  const loadTransactions = useCallback((isRefresh = false, isLoadMore = false): void => {
-    const requestId = ++requestIdRef.current;
-    const isCurrent = () => mountedRef.current && requestId === requestIdRef.current;
-
-    // Build date range from preset
-    let startDate: number | undefined;
-    let endDate: number | undefined;
-
-    if (dateFilterPreset !== 'custom') {
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      let start: Date;
-
-      switch (dateFilterPreset) {
-        case 'today':
-          start = today;
-          break;
-        case 'this_week':
-          start = new Date(today);
-          start.setDate(today.getDate() - today.getDay());
-          break;
-        case 'this_month':
-          start = new Date(today.getFullYear(), today.getMonth(), 1);
-          break;
-      }
-
-      startDate = start.getTime();
-      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-    } else if (customDateRange) {
-      startDate = new Date(customDateRange.start).setHours(0, 0, 0, 0);
-      endDate = new Date(customDateRange.end).setHours(23, 59, 59, 999);
+  const sections = useMemo(() => {
+    const groups: { title: string; day: number; data: FormattedTransaction[] }[] = [];
+    for (const tx of items) {
+      const day = startOfDay(tx.timestamp);
+      const last = groups[groups.length - 1];
+      if (last && last.day === day) last.data.push(tx);
+      else groups.push({ title: formatDayLabel(tx.timestamp), day, data: [tx] });
     }
+    return groups;
+  }, [items]);
 
-    const newOffset = isRefresh || !isLoadMore ? 0 : offset;
-
-    transactionService.getFormattedTransactions({
-      search: searchQuery || undefined,
-      categoryId: categoryFilter || undefined,
-      memberId: memberFilter || undefined,
-      startDate,
-      endDate,
-      limit: LIMIT,
-      offset: newOffset,
-      is_pending_capture: 0, // Exclude pending captures from normal transaction list
-    })
-      .then((data) => {
-        if (!isCurrent()) return;
-
-        if (isRefresh || !isLoadMore) {
-          setTransactions(data);
-          setOffset(LIMIT);
-        } else {
-          setTransactions(prev => [...prev, ...data]);
-          setOffset(prev => prev + LIMIT);
-        }
-
-        setHasMore(data.length === LIMIT);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!isCurrent()) return;
-        console.error('[TransactionsScreen] Error loading transactions:', err);
-        setError('Failed to load transactions');
-      })
-      .finally(() => {
-        if (!isCurrent()) return;
-        setLoading(false);
-        setRefreshing(false);
-      });
-  }, [searchQuery, offset, categoryFilter, memberFilter, dateFilterPreset, customDateRange]);
-
-  // Keep a ref to the latest loader so the effects below always call the
-  // up-to-date version without re-running whenever its identity changes.
-  const loadTransactionsRef = useRef(loadTransactions);
-  useEffect(() => {
-    loadTransactionsRef.current = loadTransactions;
-  });
-
-  // Initial load (mount only)
-  useEffect(() => {
-    loadTransactionsRef.current();
-  }, []);
-
-  // Reload when filters change. The first run (mount) is skipped — the
-  // initial-load effect above already covers it, and skipping avoids firing
-  // the same query twice per mount.
-  const didInitialFilterRunRef = useRef(false);
-  useEffect(() => {
-    if (!didInitialFilterRunRef.current) {
-      didInitialFilterRunRef.current = true;
-      return;
-    }
-    loadTransactionsRef.current(true);
-  }, [categoryFilter, memberFilter, dateFilterPreset]);
-
-  // Filter selection helpers. They enter the refreshing state only when the
-  // selection actually changes — a no-op tap triggers no reload (matching the
-  // previous behaviour), so a spinner set for it would never clear.
-  const changeCategoryFilter = (id: string | null) => {
-    if (categoryFilter === id) return;
-    setCategoryFilter(id);
-    setRefreshing(true);
+  const onSearch = (text: string) => {
+    setSearchInput(text);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setSearch(text.trim()), 250);
   };
 
-  const changeMemberFilter = (id: string | null) => {
-    if (memberFilter === id) return;
-    setMemberFilter(id);
-    setRefreshing(true);
-  };
+  const openTx = useCallback((tx: FormattedTransaction) => router.push(`/transaction/${tx.id}`), []);
 
-  const changeDateFilterPreset = (preset: 'today' | 'this_week' | 'this_month' | 'custom') => {
-    if (dateFilterPreset === preset) return;
-    setDateFilterPreset(preset);
-    if (preset !== 'custom') {
-      setCustomDateRange(null);
-    }
-    setRefreshing(true);
-  };
+  if (error && !data) return <ErrorView message={error} onRetry={reload} />;
+  if (!data) return <LoadingView />;
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadTransactions(true);
-  };
+  const activeCategory = data.categories.find((c) => c.id === categoryId);
+  const activeMember = data.members.find((m) => m.id === memberId);
+  const filterCount = (categoryId ? 1 : 0) + (memberId ? 1 : 0);
+  const hasQuery = !!search || filterCount > 0;
 
-  const onSearchChange = (text: string) => {
-    setSearchQuery(text);
-    // Debounce search; use the ref so the fired request always uses the
-    // latest search query rather than the closure captured at schedule time.
-    setTimeout(() => {
-      setRefreshing(true);
-      loadTransactionsRef.current(true);
-    }, 300);
-  };
+  const header = (
+    <View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.periods}>
+        {PERIODS.map((p) => (
+          <Chip key={p.value} label={p.label} selected={period === p.value} onPress={() => setPeriod(p.value)} />
+        ))}
+      </ScrollView>
 
-  const onEndReached = () => {
-    if (hasMore && !loading && !refreshing) {
-      setLoading(true);
-      loadTransactions(false, true);
-    }
-  };
+      {filterCount > 0 ? (
+        <View style={styles.activeFilters}>
+          {categoryId ? (
+            <Chip
+              label={activeCategory?.name ?? 'Uncategorized'}
+              emoji={activeCategory ? categoryGlyph(activeCategory.icon) : undefined}
+              selected
+              color={activeCategory?.color}
+              icon={activeCategory ? undefined : 'x'}
+              onPress={() => setCategoryId(null)}
+            />
+          ) : null}
+          {activeMember ? <Chip label={activeMember.name} selected color={activeMember.color} onPress={() => setMemberId(null)} /> : null}
+          <Pressable onPress={() => { setCategoryId(null); setMemberId(null); }} hitSlop={8}>
+            <Text variant="labelStrong" color={colors.brand}>
+              Clear
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
-  if (loading && transactions.length === 0) {
-    return (
-      <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Body color={colors.textTertiary}>Loading transactions…</Body>
-      </Screen>
-    );
-  }
+      {data.pendingCount > 0 ? (
+        <Pressable
+          onPress={() => router.push('/quick-capture')}
+          style={({ pressed }) => [styles.pending, pressed && { opacity: 0.85 }]}
+          accessibilityRole="button"
+        >
+          <Icon name="zap" size={16} color={colors.brand} />
+          <Text variant="labelStrong" color={colors.brand} style={{ flex: 1 }}>
+            {data.pendingCount === 1 ? '1 UPI payment waiting for review' : `${data.pendingCount} UPI payments waiting for review`}
+          </Text>
+          <Icon name="chevronRight" size={16} color={colors.brand} />
+        </Pressable>
+      ) : null}
 
-  if (error && transactions.length === 0) {
-    return (
-      <Screen>
-        <EmptyState
-          title="Unable to load"
-          subtitle={error}
-          action={{ label: 'Retry', onPress: () => { setRefreshing(true); loadTransactions(true); } }}
-        />
-      </Screen>
-    );
-  }
-
-  const renderTransactionRow = (tx: FormattedTransaction, index: number, isLast: boolean) => {
-    const showDivider = !isLast;
-    const { date, time } = { date: tx.date, time: tx.time };
-    
-    return (
-      <TouchableOpacity
-        key={tx.id}
-        onPress={() => router.push(`/transaction/${tx.id}`)}
-        activeOpacity={0.9}
-        style={{ paddingVertical: spacing[3] }}
-      >
-        <Row justify="space-between" align="center">
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Row gap={spacing[2]} align="center" style={{ marginBottom: spacing[1], flexWrap: 'wrap' }}>
-              <BodyEmphasis numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</BodyEmphasis>
-              {tx.category && (
-                <Badge 
-                  variant={tx.status === 'PENDING' ? 'pending' : tx.status === 'CONFIRMED' ? 'success' : 'neutral'} 
-                  size="small"
-                >
-                  {tx.category.name}
-                </Badge>
-              )}
-              {tx.status === 'PENDING' && !tx.category && (
-                <Badge variant="pending" size="small">Pending</Badge>
-              )}
-            </Row>
-            <Row gap={spacing[2]} align="center">
-              <Caption2 color={colors.textTertiary}>{date}</Caption2>
-              <Caption2 color={colors.textTertiary}>{time}</Caption2>
-              {tx.member && (
-                <>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textQuaternary }} />
-                  <Caption2 color={colors.textTertiary}>{tx.member.name}</Caption2>
-                </>
-              )}
-              {tx.note && (
-                <>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textQuaternary }} />
-                  <Caption2 color={colors.textTertiary} numberOfLines={1} ellipsizeMode="tail">{tx.note}</Caption2>
-                </>
-              )}
-            </Row>
-          </View>
-          <Column align="flex-end" style={{ marginLeft: spacing[4] }}>
-            <BodyEmphasis style={{ textAlign: 'right' }}>{tx.amount}</BodyEmphasis>
-            {tx.status === 'PENDING' && (
-              <Micro color={colors.accent} style={{ textAlign: 'right', marginTop: 1 }}>
-                Pending
-              </Micro>
-            )}
-          </Column>
-        </Row>
-        {showDivider && <Divider inset />}
-      </TouchableOpacity>
-    );
-  };
-
-  const clearFilters = () => {
-    setCategoryFilter(null);
-    setMemberFilter(null);
-    setDateFilterPreset('this_month');
-    setCustomDateRange(null);
-    setShowFilters(false);
-  };
-
-  const hasActiveFilters = categoryFilter || memberFilter || dateFilterPreset !== 'this_month' || customDateRange;
+      <View style={styles.summary}>
+        <Text variant="label">
+          {pluralize(data.totals.count, 'expense')}
+        </Text>
+        <Text variant="bodyStrong" numeric>
+          {formatINR(data.totals.total)}
+        </Text>
+      </View>
+    </View>
+  );
 
   return (
-    <Screen>
-      <Section paddedHorizontal style={{ paddingTop: spacing[2], paddingBottom: spacing[3] }}>
-        <Row justify="space-between" align="center">
-          <Title1>Transactions</Title1>
-          <Button variant="primary" size="small" onPress={() => router.push('/transactions/new')}>
-            <TextPrimitive variant="micro">+</TextPrimitive>
-            <TextPrimitive variant="buttonSmall">New</TextPrimitive>
-          </Button>
-        </Row>
-      </Section>
-
-      {/* Filter Bar */}
-      <Section paddedHorizontal style={{ paddingBottom: spacing[2] }}>
-        <Row gap={spacing[2]} align="center">
-          <Button
-            variant={hasActiveFilters ? 'primary' : 'subtle'}
-            size="small"
-            onPress={() => setShowFilters(!showFilters)}
-            fullWidth={false}
-          >
-            <TextPrimitive variant="micro">🔍</TextPrimitive>
-            <TextPrimitive variant="buttonSmall">Filters</TextPrimitive>
-            {hasActiveFilters && (
-              <Badge variant="indigo" size="small" dot style={{ marginLeft: spacing[1] }}>
-                <Micro>Active</Micro>
-              </Badge>
-            )}
-          </Button>
-          
-          {showFilters && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <Row gap={spacing[2]}>
-                {/* Category Filter */}
-                {categories.length > 0 && (
-                  <View style={{ width: 140 }}>
-                    <BodyEmphasis style={{ marginBottom: spacing[2] }}>Category</BodyEmphasis>
-                    <Button 
-                      variant={categoryFilter ? 'secondary' : 'subtle'} 
-                      size="small"
-                      fullWidth
-                      onPress={() => Alert.alert('Category', 'Select category', [
-                        { text: 'All', onPress: () => changeCategoryFilter(null) },
-                        ...categories.map(c => ({
-                          text: c.label,
-                          onPress: () => changeCategoryFilter(c.id),
-                        })),
-                      ])}
-                    >
-                      <TextPrimitive variant="buttonSmall">
-                        {categoryFilter ? categories.find(c => c.id === categoryFilter)?.label || 'Category' : 'All'}
-                      </TextPrimitive>
-                    </Button>
-                  </View>
-                )}
-                
-                {/* Member Filter */}
-                {members.length > 0 && (
-                  <View style={{ width: 140 }}>
-                    <BodyEmphasis style={{ marginBottom: spacing[2] }}>Member</BodyEmphasis>
-                    <Button 
-                      variant={memberFilter ? 'secondary' : 'subtle'} 
-                      size="small"
-                      fullWidth
-                      onPress={() => Alert.alert('Member', 'Select member', [
-                        { text: 'All', onPress: () => changeMemberFilter(null) },
-                        ...members.map(m => ({
-                          text: m.label,
-                          onPress: () => changeMemberFilter(m.id),
-                        })),
-                      ])}
-                    >
-                      <TextPrimitive variant="buttonSmall">
-                        {memberFilter ? members.find(m => m.id === memberFilter)?.label || 'Member' : 'All'}
-                      </TextPrimitive>
-                    </Button>
-                  </View>
-                )}
-                
-                {/* Date Filter */}
-                <View style={{ width: 130 }}>
-                  <BodyEmphasis style={{ marginBottom: spacing[2] }}>Date</BodyEmphasis>
-                  <Button 
-                    variant="secondary" 
-                    size="small"
-                    fullWidth
-                    onPress={() => Alert.alert('Date Range', 'Select date range', [
-                      { text: 'Today', onPress: () => changeDateFilterPreset('today') },
-                      { text: 'This Week', onPress: () => changeDateFilterPreset('this_week') },
-                      { text: 'This Month', onPress: () => changeDateFilterPreset('this_month') },
-                      { text: 'Custom', onPress: () => changeDateFilterPreset('custom') },
-                    ])}
-                  >
-                    <TextPrimitive variant="buttonSmall">
-                      {dateFilterPreset === 'today' ? 'Today' : dateFilterPreset === 'this_week' ? 'This Week' : dateFilterPreset === 'this_month' ? 'This Month' : 'Custom'}
-                    </TextPrimitive>
-                  </Button>
-                </View>
-              </Row>
-            </ScrollView>
-          )}
-        </Row>
-      </Section>
-
-      {/* Search */}
-      <Section paddedHorizontal style={{ paddingBottom: spacing[3] }}>
-        <Input
-          placeholder="Search transactions…"
-          value={searchQuery}
-          onChangeText={onSearchChange}
-          dark={false}
-          leftIcon={<TextPrimitive variant="micro" color={colors.textTertiary}>🔍</TextPrimitive>}
+    <View style={styles.screen}>
+      <ScreenHeader large title="History" />
+      <View style={styles.searchRow}>
+        <TextField
+          icon="search"
+          value={searchInput}
+          onChangeText={onSearch}
+          placeholder="Search merchant or note"
+          returnKeyType="search"
+          containerStyle={{ flex: 1 }}
+          right={
+            searchInput ? (
+              <Pressable onPress={() => onSearch('')} hitSlop={10} accessibilityLabel="Clear search">
+                <Icon name="x" size={16} color={colors.textTertiary} />
+              </Pressable>
+            ) : null
+          }
         />
-      </Section>
+        <Pressable
+          onPress={() => setShowFilters(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Filters"
+          style={({ pressed }) => [styles.filterBtn, filterCount > 0 && styles.filterBtnActive, pressed && { opacity: 0.8 }]}
+        >
+          <Icon name="tag" size={20} color={filterCount > 0 ? colors.textOnBrand : colors.text} />
+          {filterCount > 0 ? (
+            <View style={styles.filterBadge}>
+              <Text variant="caption" color={colors.brand} style={{ fontWeight: '700', fontSize: 10, lineHeight: 12 }}>
+                {filterCount}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </View>
 
-      <FlatList
-        data={transactions}
-        renderItem={({ item, index }) => renderTransactionRow(item, index, index === transactions.length - 1)}
+      <SectionList
+        sections={sections}
         keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.accent]} />
-        }
-        onEndReached={onEndReached}
-        onEndReachedThreshold={0.1}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: spacing[25] }}
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        ListHeaderComponent={header}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} tintColor={colors.brand} />}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.dayHeader}>
+            <Text variant="labelStrong" color={colors.textSecondary}>
+              {section.title}
+            </Text>
+            <Text variant="label" numeric color={colors.textTertiary}>
+              {formatINR(data.daily.get(section.day) ?? 0)}
+            </Text>
+          </View>
+        )}
+        renderItem={({ item, index, section }) => {
+          const first = index === 0;
+          const last = index === section.data.length - 1;
+          return (
+            <View style={[styles.item, first && styles.itemFirst, last && styles.itemLast]}>
+              {!first ? <Divider inset={72} /> : null}
+              <TransactionRow tx={item} onPress={openTx} />
+            </View>
+          );
+        }}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: space.lg }} /> : null}
         ListEmptyComponent={
-          transactions.length === 0 ? (
-            <Section paddedHorizontal style={{ paddingTop: spacing[16], paddingBottom: spacing[16] }}>
-              <EmptyState
-                title={searchQuery ? 'No matches found' : 'No transactions yet'}
-                subtitle={searchQuery
-                  ? 'Try adjusting your search or filters'
-                  : 'Transactions will appear here once added'}
-                action={{
-                  label: 'Add Transaction',
-                  onPress: () => router.push('/transactions/new')
-                }}
-                style={{ paddingVertical: spacing[12] }}
-              />
-            </Section>
-          ) : null
+          hasQuery ? (
+            <EmptyState icon="search" title="No matches" message="Try a different search, period or filter." />
+          ) : (
+            <EmptyState
+              icon="receipt"
+              title="Nothing here yet"
+              message="Expenses you add or confirm will show up here, grouped by day."
+              actionLabel="Add expense"
+              onAction={() => router.push('/transactions/new')}
+            />
+          )
         }
       />
-      
-      {hasMore && loading && (
-        <Section paddedHorizontal style={{ paddingVertical: spacing[4], alignItems: 'center' }}>
-          <Body color={colors.textTertiary}>Loading more…</Body>
-        </Section>
-      )}
-    </Screen>
+
+      <Sheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filter"
+        footer={<Button title="Show results" size="lg" fullWidth onPress={() => setShowFilters(false)} />}
+      >
+        <Text variant="labelStrong" color={colors.textSecondary} style={styles.sheetLabel}>
+          Category
+        </Text>
+        <View style={styles.wrap}>
+          <Chip label="All" selected={!categoryId} onPress={() => setCategoryId(null)} />
+          {data.categories.map((c) => (
+            <Chip
+              key={c.id}
+              label={c.name}
+              emoji={categoryGlyph(c.icon)}
+              color={c.color}
+              selected={categoryId === c.id}
+              onPress={() => setCategoryId(categoryId === c.id ? null : c.id)}
+            />
+          ))}
+          <Chip label="Uncategorized" icon="tag" selected={categoryId === 'none'} onPress={() => setCategoryId(categoryId === 'none' ? null : 'none')} />
+        </View>
+        <Text variant="labelStrong" color={colors.textSecondary} style={styles.sheetLabel}>
+          Spent on
+        </Text>
+        <View style={styles.wrap}>
+          <Chip label="Everyone" selected={!memberId} onPress={() => setMemberId(null)} />
+          {data.members.map((m) => (
+            <Chip key={m.id} label={m.name} color={m.color} selected={memberId === m.id} onPress={() => setMemberId(memberId === m.id ? null : m.id)} />
+          ))}
+        </View>
+      </Sheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  filterChip: {
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1],
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderDefault,
-    backgroundColor: colors.surfaceElevated,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  filterChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.lg,
   },
-  filterChipText: {
-    fontSize: typography.size.caption1,
-    fontFamily: typography.fontFamily.primary,
-    fontWeight: typography.weight.medium,
-    color: colors.textSecondary,
+  filterBtn: {
+    width: 50,
+    height: 50,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  filterChipTextActive: {
-    color: colors.textOnAccent,
+  filterBtnActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periods: {
+    gap: space.xs,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+  },
+  activeFilters: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+  },
+  pending: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    marginHorizontal: space.lg,
+    marginTop: space.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.brandSoft,
+  },
+  summary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    paddingHorizontal: space.lg,
+    paddingTop: space.lg,
+  },
+  list: {
+    paddingBottom: space.xxxl,
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.lg + space.xxs,
+    paddingTop: space.lg,
+    paddingBottom: space.xs,
+  },
+  item: {
+    marginHorizontal: space.lg,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+  },
+  itemFirst: {
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingTop: space.xxs,
+  },
+  itemLast: {
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    paddingBottom: space.xxs,
+  },
+  sheetLabel: {
+    marginTop: space.sm,
+    marginBottom: space.xs,
+  },
+  wrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.xs,
+    marginBottom: space.md,
   },
 });

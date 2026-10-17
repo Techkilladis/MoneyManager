@@ -30,43 +30,40 @@ npx expo run:android
 ## Project Structure
 ```
 MoneyManagerExpo52/
-├── app/                    # Expo Router screens
+├── app/                        # Expo Router screens (every file is a route)
+│   ├── (tabs)/                 # Home, History, Insights, Settings + custom tab bar
+│   ├── transaction/[id].tsx    # Expense detail
+│   ├── transactions/           # Add / edit expense
+│   ├── quick-capture.tsx       # Review queue for auto-captured UPI payments
+│   ├── budgets.tsx, categories.tsx, members.tsx
+│   └── _layout.tsx             # DB init, foreground UPI sync, toasts
 ├── src/
-│   ├── components/         # Reusable UI components
-│   ├── design/             # Design system (tokens, primitives)
-│   ├── database/           # SQLite schema & repositories
-│   ├── domain/             # Business logic & models
-│   ├── services/           # App services
-│   └── utils/              # Utilities
-├── assets/                 # Images, fonts
-├── docs/                   # Documentation
-│   ├── product-spec.md
-│   ├── architecture.md
-│   ├── project-status.md
-│   └── decisions/
-├── modules/
-│   └── notification-detection/  # Native Kotlin module
-├── android/                # GENERATED - do not edit manually
-├── app.json                # Expo config
-├── package.json
-├── tsconfig.json
-├── AGENTS.md
-└── README.md
+│   ├── components/
+│   │   ├── ui/                 # Design-system kit (Text, Button, Card, Sheet, Toast, Icon…)
+│   │   ├── TransactionForm.tsx, TransactionRow.tsx, Pickers.tsx
+│   │   ├── DateTimeSheet.tsx   # Pure-JS calendar + time picker
+│   │   └── Charts.tsx          # Bar, donut and stacked-bar charts (react-native-svg)
+│   ├── design/tokens.ts        # Colours, type scale, spacing, radii, shadows
+│   ├── hooks/useScreenData.ts  # Focus-aware loader that refreshes on data changes
+│   ├── database/               # SQLite schema & repositories
+│   ├── domain/                 # Models, category glyphs
+│   ├── services/               # Ledger queries, budgets, analytics, classification, native bridge
+│   └── utils/format.ts         # INR / date formatting
+├── modules/notification-detection/  # Native Kotlin NotificationListenerService
+├── android/                    # GENERATED - do not edit manually
+└── docs/
 ```
 
 ## Features
-- **Automatic UPI Detection**: Native Android NotificationListenerService captures payments from Google Pay, PhonePe, Paytm, BHIM, and other UPI apps
-- **Quick Capture**: Review and categorize pending transactions with merchant memory suggestions
-- **Local Analytics**: Comprehensive spending analytics with 6 interactive chart types (donut, line, horizontal bar, vertical bar)
-- **Merchant Memory**: Deterministic learning from user confirmations (no AI/ML)
-- **Budget Tracking**: Category budgets with progress bars and status indicators
-- **Local-First**: All data stored in SQLite on device, no cloud backend
-
-## Screens
-- **Home**: Total spending, pending transactions, recent activity
-- **Transactions**: Searchable, filterable list with infinite scroll
-- **Analytics**: Period selector, spending summary, category distribution, trends, merchant rankings, member breakdown, budget progress
-- **Settings**: Data management, permissions, app info, privacy
+- **Automatic UPI capture**: a native NotificationListenerService detects payments from Google Pay, PhonePe, Paytm, BHIM and more; they wait in a review queue
+- **Quick review**: confirm or ignore captured payments one after another, with categories pre-filled from merchant memory
+- **Manual entry**: big-number amount entry, recent-merchant suggestions, category grid, people, date/time picker, notes
+- **History**: search, period chips, category/person filters, grouped by day with daily totals
+- **Insights**: week / month / 3-month / year views with period navigation, trend bars, category donut, top merchants, people split, highlights
+- **Recurring monthly budgets** per category, with progress shown on Home and Insights
+- **Custom categories (emoji + colour) and people**
+- **CSV export** via the system share sheet, and a full data reset
+- **Local-first**: everything stays in SQLite on the device
 
 ## Development Phases
 See `docs/project-status.md` for current phase and progress.

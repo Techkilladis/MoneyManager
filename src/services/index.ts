@@ -5,7 +5,7 @@ import { categoryRepository } from '../database/repositories/categoryRepository'
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
 import { merchantMemoryRepository } from '../database/repositories/merchantMemoryRepository';
-import { formatCurrency, formatDate, FormattedTransaction, HomeData, SourceType } from '../domain/transaction';
+import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
 import { notificationDetectionService } from './notificationDetection';
@@ -14,15 +14,81 @@ import { getClassificationSuggestion, recordClassification, recordCorrection, Cl
 import { normalizeMerchantFull } from './merchantNormalization';
 import * as budgetService from './budget';
 import * as analyticsService from './analytics';
+import * as ledgerService from './ledger';
 
 export const transactionService = {
   // Initialize database
   async initialize(): Promise<void> {
     await initializeDatabase();
-    await seedDevelopmentData();
-    
+
+    // Development sample data: only in debug builds, and only once — never
+    // on a database that already holds transactions, so real user data
+    // (including data created from sample rows) is never overwritten or
+    // re-seeded on subsequent launches.
+    if (__DEV__) {
+      const existingCount = await transactionRepository.count();
+      if (existingCount === 0) {
+        await seedDevelopmentData();
+      }
+    }
+
+    // Pull native pending events into the app database (see
+    // syncPendingNativeEvents) before recovery so events captured while the
+    // JS runtime was down are represented as pending captures.
+    await this.syncPendingNativeEvents();
+
     // Recovery: Handle CONFIRMED transactions that weren't consumed from native
     await this.recoverUnconsumedEvents();
+  },
+
+  // Sync native pending UPI events (moneymanager_notifications.db) into the
+  // app database as PENDING capture transactions. Idempotent: a native event
+  // is never turned into more than one app transaction, keyed by
+  // sourceEventId (ADR 001).
+  async syncPendingNativeEvents(): Promise<number> {
+    try {
+      await notificationDetectionService.initialize();
+      const events = await notificationDetectionService.getPendingUpiEvents();
+
+      let created = 0;
+      for (const event of events) {
+        const result = await transactionRepository.createWithIdempotency({
+          amountPaise: Number(event.amountPaise),
+          merchant: event.merchant || 'Unknown Merchant',
+          transactionTimestamp: event.transactionTimestamp,
+          categoryId: null,
+          memberId: null,
+          note: null,
+          status: 'PENDING' as const,
+          sourceApp: event.sourceApp,
+          // The Android notification id (sbn.id) is not unique across
+          // payments, so it must not participate in deduplication; the
+          // native event id (sourceEventId) is the idempotency key.
+          notificationId: null,
+          sourceEventId: event.id,
+          sourceType: 'UPI_NOTIFICATION' as const,
+          is_pending_capture: 1,
+          is_dismissed: 0,
+          dismissed_at: null,
+          parserMetadata: JSON.stringify({
+            parserName: event.parserName,
+            parserVersion: event.parserVersion,
+            confidence: event.confidence,
+          }),
+        });
+        if (result.isNew) created++;
+      }
+
+      if (events.length > 0) {
+        console.log(`[Sync] Native pending events: ${events.length} seen, ${created} new pending captures`);
+      }
+      return created;
+    } catch (error) {
+      // Native ingestion is an enhancement — the app must stay usable when
+      // the module is unavailable (e.g. non-Android platforms).
+      console.warn('[Sync] Failed to sync native pending events:', error);
+      return 0;
+    }
   },
 
   // Recovery: Find CONFIRMED transactions with unconsumed sourceEventId and consume them
@@ -30,25 +96,34 @@ export const transactionService = {
     try {
       const database = await openDatabase();
       
-      // Find all CONFIRMED transactions with sourceEventId that might not have been consumed
-      const rows = await database.getAllAsync<{ id: string; sourceEventId: string }>(
-        `SELECT id, sourceEventId FROM transactions 
-         WHERE status = 'CONFIRMED' 
-         AND sourceEventId IS NOT NULL 
-         AND sourceEventId != ''`
+      // Find all transactions with a sourceEventId whose native event may
+      // still be PENDING: CONFIRMED rows must be consumed, dismissed rows
+      // must be dismissed. Both calls are idempotent on the native side.
+      const rows = await database.getAllAsync<{ id: string; sourceEventId: string; status: string; is_dismissed: number }>(
+        `SELECT id, sourceEventId, status, is_dismissed FROM transactions 
+         WHERE sourceEventId IS NOT NULL 
+         AND sourceEventId != ''
+         AND (status = 'CONFIRMED' OR is_dismissed = 1)`
       );
 
       if (rows.length > 0) {
-        console.log(`[Recovery] Found ${rows.length} confirmed transactions with sourceEventId, checking native consumption...`);
+        console.log(`[Recovery] Found ${rows.length} settled transactions with sourceEventId, reconciling native event state...`);
         
         for (const row of rows) {
           try {
-            // Try to consume - if already consumed, this is idempotent
-            await notificationDetectionService.consumePendingUpiEvent(row.sourceEventId);
-            console.log(`[Recovery] Consumed native event for transaction ${row.id}: ${row.sourceEventId}`);
+            if (row.status === 'CONFIRMED') {
+              // Try to consume - if already consumed, this is idempotent
+              await notificationDetectionService.consumePendingUpiEvent(row.sourceEventId);
+              console.log(`[Recovery] Consumed native event for transaction ${row.id}: ${row.sourceEventId}`);
+            } else {
+              // Dismissed pending capture - mark the native event dismissed
+              await notificationDetectionService.dismissPendingUpiEvent(row.sourceEventId);
+              console.log(`[Recovery] Dismissed native event for transaction ${row.id}: ${row.sourceEventId}`);
+            }
           } catch (err) {
-            // If consume fails (e.g., event not found in native), that's OK - might already be consumed
-            console.log(`[Recovery] Native consume for ${row.sourceEventId} returned:`, err);
+            // If the native call fails (e.g. event not found natively), that's
+            // OK - it was likely already settled on a previous run.
+            console.log(`[Recovery] Native reconcile for ${row.sourceEventId} returned:`, err);
           }
         }
       }
@@ -63,17 +138,15 @@ export const transactionService = {
       totalSpending,
       pendingTransactions,
       recentTransactions,
-      pendingCount,
     ] = await Promise.all([
       transactionRepository.getTotalSpending(),
       transactionRepository.getPending(),
       transactionRepository.getRecent(5),
-      transactionRepository.count({ 
-        status: 'PENDING', 
-        is_pending_capture: 1  // Only pending captures, not dismissed
-      }),
     ]);
 
+    // Count from the same filtered set shown to the user (getPending
+    // excludes dismissed captures), so count and total can never disagree.
+    const pendingCount = pendingTransactions.length;
     const pendingTotal = pendingTransactions.reduce((sum, t) => sum + t.amountPaise, 0);
 
     return {
@@ -113,11 +186,28 @@ export const transactionService = {
     };
   },
 
+  // Resolve a pending capture by its native event id (deep-link path).
+  // Returns null when the event has no matching transaction (invalid or
+  // already-settled event id), which callers surface as a graceful error.
+  async getPendingCaptureBySourceEventId(sourceEventId: string): Promise<FormattedTransaction | null> {
+    const tx = await transactionRepository.getBySourceEventId(sourceEventId);
+    if (!tx) return null;
+    return this.getFormattedTransaction(tx.id);
+  },
+
+  // Oldest pending capture awaiting review (FIFO), used when Quick Capture
+  // is opened without parameters.
+  async getOldestPendingCapture(): Promise<FormattedTransaction | null> {
+    const pending = await transactionRepository.getPending();
+    if (pending.length === 0) return null;
+    const oldest = pending[pending.length - 1]; // list is ordered newest first
+    return this.getFormattedTransaction(oldest.id);
+  },
+
   // Get formatted transaction with category and member
   async getFormattedTransaction(id: string): Promise<FormattedTransaction | null> {
     const tx = await transactionRepository.getById(id);
     if (!tx) return null;
-
     const [category, member] = await Promise.all([
       tx.categoryId ? categoryRepository.getById(tx.categoryId) : Promise.resolve(null),
       tx.memberId ? memberRepository.getById(tx.memberId) : Promise.resolve(null),
@@ -214,6 +304,76 @@ export const transactionService = {
     return transactionRepository.create(input);
   },
 
+  // Manually entered expense: stored as CONFIRMED and taught to merchant
+  // memory so the next payment to the same merchant is pre-classified.
+  async createManualTransaction(input: {
+    amountPaise: number;
+    merchant: string;
+    transactionTimestamp: number;
+    categoryId: string | null;
+    memberId: string | null;
+    note: string | null;
+  }) {
+    const tx = await transactionRepository.create({
+      ...input,
+      currency: 'INR',
+      status: 'CONFIRMED',
+      sourceApp: 'Manual',
+      sourceType: 'MANUAL',
+      is_pending_capture: 0,
+      is_dismissed: 0,
+    });
+    await this.learnMerchant(input.merchant, input.categoryId, input.memberId);
+    return tx;
+  },
+
+  // Edit an existing transaction (any field, including the timestamp).
+  // Category/member changes update merchant memory.
+  async editTransaction(
+    id: string,
+    input: {
+      amountPaise: number;
+      merchant: string;
+      transactionTimestamp: number;
+      categoryId: string | null;
+      memberId: string | null;
+      note: string | null;
+    }
+  ) {
+    const existing = await transactionRepository.getById(id);
+    if (!existing) throw new Error('Transaction not found');
+
+    const updated = await transactionRepository.update(id, {
+      amountPaise: input.amountPaise,
+      merchant: input.merchant,
+      categoryId: input.categoryId,
+      memberId: input.memberId,
+      note: input.note,
+    });
+    if (input.transactionTimestamp !== existing.transactionTimestamp) {
+      const database = await openDatabase();
+      await database.runAsync(
+        'UPDATE transactions SET transactionTimestamp = ?, updatedAt = ? WHERE id = ?',
+        [input.transactionTimestamp, Date.now(), id]
+      );
+    }
+    if (input.categoryId !== existing.categoryId || input.memberId !== existing.memberId) {
+      await this.learnMerchant(input.merchant, input.categoryId, input.memberId);
+    }
+    return updated;
+  },
+
+  async learnMerchant(merchantName: string, categoryId: string | null, memberId: string | null) {
+    if (!merchantName.trim() || (!categoryId && !memberId)) return;
+    try {
+      const { normalizedKey, canonicalName } = normalizeMerchantFull(merchantName);
+      const merchant = await merchantRepository.getOrCreateByNormalizedKey(normalizedKey, canonicalName);
+      await recordClassification(merchant.id, categoryId, memberId, 'USER_CONFIRMED');
+    } catch (error) {
+      console.warn('[transactionService] Failed to record merchant memory:', error);
+    }
+  },
+
   // Create transaction with idempotency (for UPI notifications)
   async createTransactionWithIdempotency(input: any) {
     return transactionRepository.createWithIdempotency(input);
@@ -257,8 +417,11 @@ export const transactionService = {
 
       // Use transaction for atomicity: update status + consume native
       // We update DB first, then consume native. Recovery logic handles crashes.
+      // Clearing is_pending_capture moves the confirmed capture into the
+      // normal transaction list (which excludes pending captures).
       const updated = await transactionRepository.update(id, {
         status: 'CONFIRMED',
+        is_pending_capture: 0,
         categoryId: categoryId || undefined,
         memberId: memberId || undefined,
         amountPaise: amountPaise !== undefined ? amountPaise : undefined,
@@ -333,8 +496,16 @@ export const transactionService = {
   },
 };
 
+type Result = { success: boolean; error?: string };
+
+function friendlyError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/UNIQUE constraint/i.test(message)) return 'That name is already in use';
+  return fallback;
+}
+
 export const categoryService = {
-  async getAll(): Promise<any[]> {
+  async getAll(): Promise<Category[]> {
     return categoryRepository.getAll();
   },
 
@@ -342,25 +513,51 @@ export const categoryService = {
     return categoryRepository.getById(id);
   },
 
-  async create(input: any) {
-    return categoryRepository.create(input);
+  async create(input: { name: string; icon: string; color: string }): Promise<Result> {
+    const name = input.name.trim();
+    if (!name) return { success: false, error: 'Enter a category name' };
+    try {
+      const all = await categoryRepository.getAll();
+      const sortOrder = all.reduce((max, c) => Math.max(max, c.sortOrder), 0) + 1;
+      await categoryRepository.create({ name, icon: input.icon, color: input.color, sortOrder });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: friendlyError(error, 'Could not create category') };
+    }
   },
 
-  async update(id: string, input: any) {
-    return categoryRepository.update(id, input);
+  async update(id: string, input: { name: string; icon: string; color: string }): Promise<Result> {
+    const name = input.name.trim();
+    if (!name) return { success: false, error: 'Enter a category name' };
+    try {
+      await categoryRepository.update(id, { ...input, name });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: friendlyError(error, 'Could not update category') };
+    }
   },
 
-  async delete(id: string) {
-    return categoryRepository.delete(id);
+  async delete(id: string): Promise<Result> {
+    try {
+      await categoryRepository.delete(id);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: /Cannot delete/i.test(String(error))
+          ? 'This category is used by transactions. Move them to another category first.'
+          : 'Could not delete category',
+      };
+    }
   },
 };
 
 export const memberService = {
-  async getAll(): Promise<any[]> {
+  async getAll(): Promise<Member[]> {
     return memberRepository.getAll();
   },
 
-  async getDefaults(): Promise<any[]> {
+  async getDefaults(): Promise<Member[]> {
     return memberRepository.getDefaults();
   },
 
@@ -368,16 +565,40 @@ export const memberService = {
     return memberRepository.getById(id);
   },
 
-  async create(input: any) {
-    return memberRepository.create(input);
+  async create(input: { name: string; color: string }): Promise<Result> {
+    const name = input.name.trim();
+    if (!name) return { success: false, error: 'Enter a name' };
+    try {
+      await memberRepository.create({ name, color: input.color, isDefault: false });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: friendlyError(error, 'Could not add member') };
+    }
   },
 
-  async update(id: string, input: any) {
-    return memberRepository.update(id, input);
+  async update(id: string, input: { name: string; color: string }): Promise<Result> {
+    const name = input.name.trim();
+    if (!name) return { success: false, error: 'Enter a name' };
+    try {
+      await memberRepository.update(id, { ...input, name });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: friendlyError(error, 'Could not update member') };
+    }
   },
 
-  async delete(id: string) {
-    return memberRepository.delete(id);
+  async delete(id: string): Promise<Result> {
+    try {
+      await memberRepository.delete(id);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: /Cannot delete/i.test(String(error))
+          ? "This person is assigned to transactions, so they can't be removed."
+          : 'Could not delete member',
+      };
+    }
   },
 };
 
@@ -440,8 +661,10 @@ export const services = {
   merchant: merchantService,
   budget: budgetService,
   analytics: analyticsService,
+  ledger: ledgerService,
 };
 
 // Export individual services for direct imports
 export { budgetService };
 export { analyticsService };
+export { ledgerService };

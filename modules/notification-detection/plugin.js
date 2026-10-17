@@ -1,4 +1,4 @@
-const { withAndroidManifest, withStringsXml } = require('@expo/config-plugins');
+const { withAndroidManifest, withStringsXml } = require('expo/config-plugins');
 
 /**
  * Expo Config Plugin for Money Manager Notification Detection.

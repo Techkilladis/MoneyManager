@@ -1,73 +1,125 @@
-// Quick Capture Screen - Polished capture workflow for pending UPI events
-// Phase 5: Added merchant memory suggestions with confidence indicators
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, ScrollView, Platform, StyleSheet, Keyboard, Animated, TouchableOpacity } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { 
-  Screen, 
-  Section, 
-  Card, 
-  Row, 
-  Column,
-  DisplayMedium,
-  Title1,
-  Title2,
-  Headline,
-  Body, 
-  BodyEmphasis, 
-  Subhead,
-  Caption1,
-  Caption2,
-  Micro,
-  Badge,
-  Divider,
-  Button,
-  Input,
-  TextPrimitive,
-  SectionHeader,
-} from '@/design/primitives';
-import { transactionService, categoryService, memberService, classificationService, merchantService } from '@/services';
-import { FormattedTransaction } from '@/domain/transaction';
+// Review queue for auto-captured UPI payments. Works through pending
+// captures oldest-first: confirm (with category/member/note) or ignore,
+// then moves straight to the next one.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing, radius, shadows, typography } from '@/design/tokens';
+import { colors, font, radius, space, tint } from '@/design/tokens';
+import { Category, Member } from '@/database/schema';
+import { transactionRepository } from '@/database/repositories/transactionRepository';
+import { categoryService, classificationService, memberService, transactionService } from '@/services';
+import { dataEvents } from '@/services/events';
+import { useScreenData } from '@/hooks/useScreenData';
+import { FormattedTransaction } from '@/domain/transaction';
+import { categoryGlyph } from '@/domain/glyphs';
+import {
+  amountToInput,
+  formatDayLabel,
+  formatINR,
+  formatSourceApp,
+  formatTime,
+  parseAmount,
+  sanitizeAmountInput,
+} from '@/utils/format';
+import { CategoryGrid, MemberChips } from '@/components/Pickers';
+import { Button, EmptyState, Icon, LoadingView, ScreenHeader, Text, TextField, useToast } from '@/components/ui';
 
 export default function QuickCaptureScreen() {
-  const router = useRouter();
+  const params = useLocalSearchParams<{ id?: string; sourceEventId?: string }>();
+  const toast = useToast();
+  const [reviewed, setReviewed] = useState<string[]>([]);
+
+  const fetcher = useCallback(async () => {
+    const pending = await transactionRepository.getPending(); // newest first
+    let startId = params.id ?? null;
+    if (!startId && params.sourceEventId) {
+      const tx = await transactionRepository.getBySourceEventId(params.sourceEventId);
+      startId = tx?.id ?? null;
+    }
+    return { queue: pending.map((t) => t.id).reverse(), startId };
+  }, [params.id, params.sourceEventId]);
+
+  const { data } = useScreenData(fetcher);
+
+  const onReviewed = useCallback((id: string) => setReviewed((r) => [...r, id]), []);
+
+  if (!data) return <LoadingView />;
+
+  const remaining = data.queue.filter((id) => !reviewed.includes(id));
+  const current =
+    data.startId && remaining.includes(data.startId) ? data.startId : data.startId && reviewed.length === 0 ? null : remaining[0] ?? null;
+  const total = remaining.length + reviewed.length;
+
+  if (!current) {
+    const done = reviewed.length > 0;
+    const requestedMissing = !!data.startId && reviewed.length === 0;
+    return (
+      <View style={styles.screen}>
+        <ScreenHeader title="Review" back />
+        <EmptyState
+          icon={done ? 'check' : requestedMissing ? 'info' : 'inbox'}
+          title={done ? 'All caught up!' : requestedMissing ? 'Already reviewed' : 'Nothing to review'}
+          message={
+            done
+              ? `You reviewed ${reviewed.length === 1 ? '1 payment' : `${reviewed.length} payments`}. They're in your history now.`
+              : requestedMissing
+                ? 'This payment has already been confirmed or ignored.'
+                : 'New UPI payments detected from your notifications will appear here.'
+          }
+          actionLabel="Done"
+          onAction={() => {
+            if (done) toast.show('All payments reviewed');
+            router.back();
+          }}
+        />
+      </View>
+    );
+  }
+
+  return <ReviewCard key={current} id={current} position={reviewed.length + 1} total={total} onReviewed={onReviewed} />;
+}
+
+// ---------------------------------------------------------------- card
+
+interface Suggestion {
+  categoryId: string | null;
+  memberId: string | null;
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+function ReviewCard({
+  id,
+  position,
+  total,
+  onReviewed,
+}: {
+  id: string;
+  position: number;
+  total: number;
+  onReviewed: (id: string) => void;
+}) {
   const insets = useSafeAreaInsets();
-  const { id, sourceEventId } = useLocalSearchParams<{ id?: string; sourceEventId?: string }>();
-  
+  const toast = useToast();
   const [tx, setTx] = useState<FormattedTransaction | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [confirming, setConfirming] = useState(false);
-  const [dismissing, setDismissing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Form state
+  const [missing, setMissing] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+
   const [amount, setAmount] = useState('');
   const [merchant, setMerchant] = useState('');
-  const [note, setNote] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
-  const [categories, setCategories] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
-  const [members, setMembers] = useState<Array<{ id: string; label: string; color: string | null }>>([]);
-  
-  // Suggestion state
-  const [suggestion, setSuggestion] = useState<{
-    categoryId: string | null;
-    memberId: string | null;
-    confidence: 'LOW' | 'MEDIUM' | 'HIGH';
-    source: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED';
-    merchantId?: string;
-    merchantName?: string;
-  } | null>(null);
-  const [merchantEntity, setMerchantEntity] = useState<{ id: string; canonicalName: string; normalizedKey: string } | null>(null);
-  
-  // Picker modal state
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showMemberPicker, setShowMemberPicker] = useState(false);
+  const [note, setNote] = useState('');
+  const [editingAmount, setEditingAmount] = useState(false);
+  const [busy, setBusy] = useState<'confirm' | 'dismiss' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  // Track mount state so late-arriving async results are ignored after unmount
+  const [celebrate] = useState(() => new Animated.Value(0));
   const mountedRef = useRef(true);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -75,731 +127,353 @@ export default function QuickCaptureScreen() {
     };
   }, []);
 
-  // Loads the pending transaction and its classification suggestion.
-  // Pure data loading with no state updates, so it is safe to call from effects.
-  const fetchTransactionData = useCallback(async (): Promise<{
-    data: FormattedTransaction | null;
-    classification: Awaited<ReturnType<typeof classificationService.getSuggestion>> | null;
-  }> => {
-    let data: FormattedTransaction | null = null;
-
-    if (id) {
-      data = await transactionService.getFormattedTransaction(id);
-    } else if (sourceEventId) {
-      // Pending-capture events without a transaction id have nothing to load yet.
-      data = null;
-    }
-
-    if (!data) {
-      return { data: null, classification: null };
-    }
-
-    // Get classification suggestion from merchant memory (Phase 5)
-    try {
-      const classification = await classificationService.getSuggestion({
-        merchant: data.merchant,
-        amountPaise: data.amountPaise,
-        categoryId: data.category?.id || null,
-        memberId: data.member?.id || null,
-        sourceEventId: data.sourceEventId || undefined,
-      });
-      return { data, classification };
-    } catch (classificationError) {
-      // Classification is an enhancement, not critical — warn and continue
-      console.warn('[QuickCapture] Classification failed:', classificationError);
-      return { data, classification: null };
-    }
-  }, [id, sourceEventId]);
-
-  // Applies the fetched transaction (and suggestion) to the form state.
-  // All setState calls live inside promise callbacks, never in the
-  // synchronous body, so this can be called from effects without
-  // triggering cascading renders.
-  const loadTransaction = useCallback((): void => {
-    fetchTransactionData()
-      .then(({ data, classification }) => {
+  useEffect(() => {
+    Promise.all([transactionService.getFormattedTransaction(id), categoryService.getAll(), memberService.getAll()])
+      .then(async ([data, cats, mems]) => {
         if (!mountedRef.current) return;
-
+        setCategories(cats);
+        setMembers(mems);
         if (!data) {
-          setError('Payment not found');
+          setMissing(true);
           return;
         }
-
         setTx(data);
+        setAmount(amountToInput(data.amountPaise));
+        setMerchant(data.merchant === 'Unknown Merchant' ? '' : data.merchant);
+        setNote(data.note ?? '');
+        setCategoryId(data.category?.id ?? null);
+        setMemberId(data.member?.id ?? null);
 
-        setAmount(formatPaiseForInput(data.amountPaise));
-        setMerchant(data.merchant);
-        setNote(data.note || '');
-        setCategoryId(data.category?.id || null);
-        setMemberId(data.member?.id || null);
-
-        if (classification) {
-          if (classification.suggestion) {
-            setSuggestion(classification.suggestion);
-
-            // Pre-fill if confidence is sufficient and user hasn't explicitly chosen
-            if (!data.category?.id && classification.suggestion.categoryId &&
-                classificationService.shouldPrefill(classification.suggestion.confidence)) {
-              setCategoryId(classification.suggestion.categoryId);
-            }
-            if (!data.member?.id && classification.suggestion.memberId &&
-                classificationService.shouldPrefill(classification.suggestion.confidence)) {
-              setMemberId(classification.suggestion.memberId);
-            }
-          }
-          setMerchantEntity(classification.merchant);
+        try {
+          const { suggestion: s } = await classificationService.getSuggestion({ merchant: data.merchant, amountPaise: data.amountPaise });
+          if (!mountedRef.current || !s) return;
+          setSuggestion({ categoryId: s.categoryId, memberId: s.memberId, confidence: s.confidence });
+          if (!data.category && s.categoryId && classificationService.shouldPrefill(s.confidence)) setCategoryId(s.categoryId);
+          if (!data.member && s.memberId && classificationService.shouldPrefill(s.confidence)) setMemberId(s.memberId);
+        } catch (e) {
+          console.warn('[QuickCapture] suggestion failed:', e);
         }
       })
-      .catch((err) => {
-        if (!mountedRef.current) return;
-        console.error('[QuickCapture] Load error:', err);
-        setError('Failed to load payment');
-      })
-      .finally(() => {
-        if (!mountedRef.current) return;
-        setLoading(false);
+      .catch((e) => {
+        console.error('[QuickCapture] load failed:', e);
+        if (mountedRef.current) setMissing(true);
       });
-  }, [fetchTransactionData]);
+  }, [id]);
 
-  // Loads category/member options for the pickers.
-  // setState only happens in promise callbacks.
-  const loadFilterData = useCallback((): void => {
-    Promise.all([
-      categoryService.getAll(),
-      memberService.getAll(),
-    ])
-      .then(([cats, mems]) => {
-        if (!mountedRef.current) return;
-        setCategories(cats.map(c => ({ id: c.id, label: c.name, color: c.color })));
-        setMembers(mems.map(m => ({ id: m.id, label: m.name, color: m.color })));
-      })
-      .catch((err) => {
-        console.error('[QuickCapture] Filter data load error:', err);
-      });
-  }, []);
+  const finish = (message: string) => {
+    setSuccess(message);
+    Animated.sequence([
+      Animated.spring(celebrate, { toValue: 1, useNativeDriver: true, damping: 12, stiffness: 180 }),
+      Animated.delay(550),
+    ]).start(() => {
+      dataEvents.emit();
+      onReviewed(id);
+    });
+  };
 
-  useEffect(() => {
-    loadTransaction();
-    loadFilterData();
-  }, [loadTransaction, loadFilterData]);
-
-  const handleCategorySelect = useCallback((newCategoryId: string | null) => {
-    const oldCategoryId = categoryId;
-    setCategoryId(newCategoryId);
-    setShowCategoryPicker(false);
-    Keyboard.dismiss();
-    
-    // Record correction if user changed from suggestion
-    if (suggestion && oldCategoryId !== newCategoryId && merchantEntity) {
-      classificationService.recordCorrection(
-        merchantEntity.id,
-        oldCategoryId,
-        memberId,
-        newCategoryId,
-        memberId
-      ).catch(console.warn);
-    }
-  }, [categoryId, memberId, merchantEntity, suggestion]);
-
-  const handleMemberSelect = useCallback((newMemberId: string | null) => {
-    const oldMemberId = memberId;
-    setMemberId(newMemberId);
-    setShowMemberPicker(false);
-    Keyboard.dismiss();
-    
-    // Record correction if user changed from suggestion
-    if (suggestion && oldMemberId !== newMemberId && merchantEntity) {
-      classificationService.recordCorrection(
-        merchantEntity.id,
-        categoryId,
-        oldMemberId,
-        categoryId,
-        newMemberId
-      ).catch(console.warn);
-    }
-  }, [memberId, categoryId, merchantEntity, suggestion]);
-
-  const handleConfirm = async () => {
+  const confirm = async () => {
     if (!tx) return;
-    
-    const amountPaise = parseAmountInput(amount);
-    if (amountPaise <= 0) {
-      setError('Please enter a valid amount');
+    const amountPaise = parseAmount(amount);
+    if (!amountPaise || amountPaise <= 0) {
+      setError('Enter a valid amount');
       return;
     }
     if (!merchant.trim()) {
-      setError('Please enter a merchant name');
+      setError('Add who you paid');
       return;
     }
-    
-    setConfirming(true);
+    setBusy('confirm');
     setError(null);
-    
-    try {
-      const result = await transactionService.confirmTransaction(
-        tx.id,
-        categoryId || undefined,
-        memberId || undefined,
-        amountPaise,
-        merchant.trim(),
-        note.trim() || undefined
-      );
-      
-      if (result.success) {
-        router.back();
-      } else {
-        setError(result.error || 'Failed to confirm payment');
-      }
-    } catch (err) {
-      console.error('[QuickCapture] Confirm error:', err);
-      setError('Failed to confirm payment');
-    } finally {
-      setConfirming(false);
+    const result = await transactionService.confirmTransaction(
+      tx.id,
+      categoryId ?? undefined,
+      memberId ?? undefined,
+      amountPaise,
+      merchant.trim(),
+      note.trim() || undefined
+    );
+    if (!mountedRef.current) return;
+    setBusy(null);
+    if (!result.success) {
+      setError(result.error ?? 'Could not save this payment');
+      return;
     }
+    // Teach merchant memory under the (possibly corrected) merchant name too.
+    if (merchant.trim() !== tx.merchant) transactionService.learnMerchant(merchant.trim(), categoryId, memberId);
+    const cat = categories.find((c) => c.id === categoryId);
+    finish(cat ? `Saved to ${cat.name}` : 'Saved');
   };
 
-  const handleDismiss = async () => {
+  const dismiss = async () => {
     if (!tx) return;
-    
-    setDismissing(true);
-    setError(null);
-    
-    try {
-      const result = await transactionService.dismissTransaction(tx.id);
-      
-      if (result.success) {
-        router.back();
-      } else {
-        setError(result.error || 'Failed to dismiss payment');
-      }
-    } catch (err) {
-      console.error('[QuickCapture] Dismiss error:', err);
-      setError('Failed to dismiss payment');
-    } finally {
-      setDismissing(false);
+    setBusy('dismiss');
+    const result = await transactionService.dismissTransaction(tx.id);
+    if (!mountedRef.current) return;
+    setBusy(null);
+    if (!result.success) {
+      toast.show('Could not ignore this payment', 'error');
+      return;
     }
+    dataEvents.emit();
+    onReviewed(id);
   };
 
-  const renderCategoryOption = (cat: { id: string; label: string; color: string | null }, isSelected: boolean) => (
-    <TouchableOpacity
-      key={cat.id}
-      style={styles.pickerOption}
-      onPress={() => handleCategorySelect(cat.id)}
-      activeOpacity={0.7}
-    >
-      <Row align="center" gap={spacing[3]} style={{ flex: 1 }}>
-        <View
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 10,
-            borderWidth: isSelected ? 2 : 1,
-            borderColor: isSelected ? cat.color || colors.accent : colors.borderDefault,
-            backgroundColor: isSelected ? (cat.color || colors.accent) + '20' : 'transparent',
-          }}
-        >
-          {isSelected && (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <TextPrimitive variant="micro" color={cat.color || colors.accent}>✓</TextPrimitive>
-            </View>
-          )}
-        </View>
-        <View style={{ flex: 1 }}>
-          <BodyEmphasis>{cat.label}</BodyEmphasis>
-          {isSelected && suggestion?.categoryId === cat.id && (
-            <Caption2 color={colors.accent}>
-              {getSuggestionLabel(suggestion.confidence, suggestion.source)}
-            </Caption2>
-          )}
-        </View>
-      </Row>
-    </TouchableOpacity>
-  );
+  const counter = total > 1 ? `${position} of ${total}` : undefined;
 
-  const renderMemberOption = (mem: { id: string; label: string; color: string | null }, isSelected: boolean) => (
-    <TouchableOpacity
-      key={mem.id}
-      style={styles.pickerOption}
-      onPress={() => handleMemberSelect(mem.id)}
-      activeOpacity={0.7}
-    >
-      <Row align="center" gap={spacing[3]} style={{ flex: 1 }}>
-        <View
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 10,
-            borderWidth: isSelected ? 2 : 1,
-            borderColor: isSelected ? mem.color || colors.accent : colors.borderDefault,
-            backgroundColor: isSelected ? (mem.color || colors.accent) + '20' : 'transparent',
-          }}
-        >
-          {isSelected && (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <TextPrimitive variant="micro" color={mem.color || colors.accent}>✓</TextPrimitive>
-            </View>
-          )}
-        </View>
-        <View style={{ flex: 1 }}>
-          <BodyEmphasis>{mem.label}</BodyEmphasis>
-          {isSelected && suggestion?.memberId === mem.id && (
-            <Caption2 color={colors.accent}>
-              {getSuggestionLabel(suggestion.confidence, suggestion.source)}
-            </Caption2>
-          )}
-        </View>
-      </Row>
-    </TouchableOpacity>
-  );
-
-  if (loading) {
+  if (missing) {
     return (
-      <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Body color={colors.textTertiary}>Loading…</Body>
-      </Screen>
+      <View style={styles.screen}>
+        <ScreenHeader title="Review payment" back />
+        <EmptyState icon="alert" title="Payment not found" message="It may have been reviewed already." actionLabel="Skip" onAction={() => onReviewed(id)} />
+      </View>
     );
   }
+  if (!tx) return <LoadingView />;
 
-  if (error && !tx) {
-    return (
-      <Screen>
-        <Section paddedHorizontal style={{ paddingTop: spacing[20] }}>
-          <Card variant="outlined">
-            <Section padded>
-              <BodyEmphasis color={colors.error} style={{ textAlign: 'center' }}>
-                {error}
-              </BodyEmphasis>
-              <Button 
-                variant="primary" 
-                fullWidth 
-                onPress={() => router.back()}
-                style={{ marginTop: spacing[4] }}
-              >
-                Go Back
-              </Button>
-            </Section>
-          </Card>
-        </Section>
-      </Screen>
-    );
-  }
-
-  if (!tx) return null;
-
-  const sourceAppLabel = tx.sourceApp || 'Unknown';
-  const isSeedData = tx.sourceType === 'SEED_DATA';
+  const source = formatSourceApp(tx.sourceApp) ?? 'UPI';
+  const suggestedCategory = suggestion?.categoryId ? categories.find((c) => c.id === suggestion.categoryId) : null;
+  const amountPaise = parseAmount(amount) ?? 0;
 
   return (
-    <Screen>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: spacing[25] + insets.bottom }}
-        keyboardShouldPersistTaps="handled"
-        onScroll={Keyboard.dismiss}
-      >
-        {/* Header */}
-        <Section paddedHorizontal style={{ paddingTop: spacing[2], paddingBottom: spacing[2] }}>
-          <Row justify="space-between" align="center">
-            <Title1 style={{ letterSpacing: typography.letterSpacing.display }}>Quick Capture</Title1>
-            <Button variant="ghost" size="small" onPress={() => router.back()}>
-              <TextPrimitive variant="micro">✕</TextPrimitive>
-            </Button>
-          </Row>
-        </Section>
+    <View style={styles.screen}>
+      <ScreenHeader
+        title="Review payment"
+        back
+        right={
+          counter ? (
+            <View style={styles.counter}>
+              <Text variant="caption" color={colors.brand} style={{ fontWeight: '600' }}>
+                {counter}
+              </Text>
+            </View>
+          ) : null
+        }
+      />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={styles.receipt}>
+            <View style={styles.sourcePill}>
+              <Icon name="zap" size={13} color={colors.brand} />
+              <Text variant="caption" color={colors.brand} style={{ fontWeight: '600' }}>
+                Detected from {source}
+              </Text>
+            </View>
+            {editingAmount ? (
+              <View style={styles.amountRow}>
+                <Text style={styles.amountText}>₹</Text>
+                <TextInput
+                  value={amount}
+                  onChangeText={(t) => setAmount(sanitizeAmountInput(t))}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  onBlur={() => setEditingAmount(false)}
+                  selectionColor={colors.brand}
+                  style={[styles.amountText, styles.amountInput]}
+                />
+              </View>
+            ) : (
+              <Pressable onPress={() => setEditingAmount(true)} style={styles.amountRow} accessibilityLabel="Edit amount" accessibilityRole="button">
+                <Text style={styles.amountText} numeric>
+                  {formatINR(amountPaise)}
+                </Text>
+                <View style={styles.editBadge}>
+                  <Icon name="pencil" size={12} color={colors.textTertiary} />
+                </View>
+              </Pressable>
+            )}
+            <Text variant="label" align="center">
+              {formatDayLabel(tx.timestamp)} at {formatTime(tx.timestamp)}
+            </Text>
+          </View>
 
-        {/* Payment Card - Large Amount Display */}
-        <Section paddedHorizontal>
-          <Card variant="elevated" style={{ padding: spacing[6] }}>
-            <Column gap={spacing[2]} align="center">
-              {/* Source App Badge */}
-              <Row gap={spacing[2]} align="center">
-                <Badge variant="indigo" size="small" dot>
-                  <Caption2>{sourceAppLabel}</Caption2>
-                </Badge>
-                {isSeedData && (
-                  <Badge variant="neutral" size="small">
-                    <Caption2>Test Data</Caption2>
-                  </Badge>
-                )}
-              </Row>
-
-              {/* Amount - Large */}
-              <DisplayMedium style={{ letterSpacing: typography.letterSpacing.display, color: colors.textPrimary }}>
-                {amount}
-              </DisplayMedium>
-              <Body color={colors.textTertiary}>INR</Body>
-
-              {/* Merchant */}
-              <Title2 style={{ textAlign: 'center' }}>
-                {merchant || 'Unknown Merchant'}
-              </Title2>
-
-              {/* Time */}
-              <Subhead color={colors.textTertiary} style={{ textAlign: 'center' }}>
-                {tx.date}, {tx.time}
-              </Subhead>
-            </Column>
-          </Card>
-        </Section>
-
-        {/* Form Fields */}
-        <Section paddedHorizontal style={{ paddingTop: spacing[4] }}>
-          <Card variant="outlined">
-            <Section padded>
-              {/* Amount Input */}
-              <SectionHeader title="Amount" subtitle="Edit if incorrect" />
-              <Input
-                value={amount}
-                onChangeText={setAmount}
-                placeholder="0.00"
-                keyboardType="decimal-pad"
-                label="Amount (₹)"
-                leftIcon={<TextPrimitive variant="micro" color={colors.textTertiary}>₹</TextPrimitive>}
-              />
-
-              <Divider inset style={{ marginVertical: spacing[3] }} />
-
-              {/* Merchant Input */}
-              <SectionHeader title="Merchant" />
-              <Input
-                value={merchant}
-                onChangeText={setMerchant}
-                placeholder="Enter merchant name"
-                label="Merchant"
-                leftIcon={<TextPrimitive variant="micro" color={colors.textTertiary}>🏪</TextPrimitive>}
-              />
-
-              <Divider inset style={{ marginVertical: spacing[3] }} />
-
-              {/* Category Selector - Polished inline picker */}
-              <SectionHeader 
-                title="Category" 
-                subtitle={suggestion?.categoryId && !tx.category?.id ? 
-                  `Suggested: ${categories.find(c => c.id === suggestion.categoryId)?.label} (${getConfidenceLabel(suggestion.confidence)})` 
-                  : undefined} 
-              />
-              <Button
-                variant={categoryId ? 'secondary' : 'subtle'}
-                fullWidth
-                onPress={() => setShowCategoryPicker(true)}
-                style={{ marginTop: spacing[1] }}
-              >
-                <Row justify="space-between" align="center">
-                  <Column gap={spacing[1]}>
-                    <BodyEmphasis>Category</BodyEmphasis>
-                    <Row gap={spacing[2]} align="center">
-                      <Caption1 color={colors.textTertiary}>
-                        {categoryId 
-                          ? categories.find(c => c.id === categoryId)?.label || 'Select category'
-                          : 'Choose a category (optional)'}
-                      </Caption1>
-                      {suggestion?.categoryId === categoryId && categoryId && (
-                        <Badge variant="indigo" size="small">
-                          <Caption2>{getConfidenceLabel(suggestion.confidence)}</Caption2>
-                        </Badge>
-                      )}
-                    </Row>
-                  </Column>
-                  <TextPrimitive variant="micro" color={colors.textTertiary}>▼</TextPrimitive>
-                </Row>
-              </Button>
-
-              <Divider inset style={{ marginVertical: spacing[3] }} />
-
-              {/* Member Selector - Polished inline picker */}
-              <SectionHeader 
-                title="Member" 
-                subtitle={suggestion?.memberId && !tx.member?.id ? 
-                  `Suggested: ${members.find(m => m.id === suggestion.memberId)?.label} (${getConfidenceLabel(suggestion.confidence)})` 
-                  : undefined} 
-              />
-              <Button
-                variant={memberId ? 'secondary' : 'subtle'}
-                fullWidth
-                onPress={() => setShowMemberPicker(true)}
-                style={{ marginTop: spacing[1] }}
-              >
-                <Row justify="space-between" align="center">
-                  <Column gap={spacing[1]}>
-                    <BodyEmphasis>Member</BodyEmphasis>
-                    <Row gap={spacing[2]} align="center">
-                      <Caption1 color={colors.textTertiary}>
-                        {memberId 
-                          ? members.find(m => m.id === memberId)?.label || 'Select member'
-                          : 'Select member (optional)'}
-                      </Caption1>
-                      {suggestion?.memberId === memberId && memberId && (
-                        <Badge variant="indigo" size="small">
-                          <Caption2>{getConfidenceLabel(suggestion.confidence)}</Caption2>
-                        </Badge>
-                      )}
-                    </Row>
-                  </Column>
-                  <TextPrimitive variant="micro" color={colors.textTertiary}>▼</TextPrimitive>
-                </Row>
-              </Button>
-
-              <Divider inset style={{ marginVertical: spacing[3] }} />
-
-              {/* Note Input */}
-              <SectionHeader title="Note" subtitle="Add a note (optional)" />
-              <Input
-                value={note}
-                onChangeText={setNote}
-                placeholder="Add a note..."
-                label="Note"
-                maxLength={200}
-              />
-            </Section>
-          </Card>
-        </Section>
-
-        {/* Action Buttons */}
-        <Section paddedHorizontal style={{ paddingTop: spacing[4] }}>
-          <Row gap={spacing[3]}>
-            <Button
-              variant="destructive"
-              size="standard"
-              fullWidth
-              onPress={handleDismiss}
-              disabled={dismissing}
-            >
-              {dismissing ? (
-                <>
-                  <TextPrimitive variant="micro">⏳</TextPrimitive>
-                  <TextPrimitive variant="buttonSmall">Dismissing…</TextPrimitive>
-                </>
-              ) : (
-                <>
-                  <TextPrimitive variant="micro">✕</TextPrimitive>
-                  <TextPrimitive variant="buttonSmall">Dismiss</TextPrimitive>
-                </>
-              )}
-            </Button>
-            
-            <Button
-              variant="primary"
-              size="standard"
-              fullWidth
-              onPress={handleConfirm}
-              disabled={confirming}
-            >
-              {confirming ? (
-                <>
-                  <TextPrimitive variant="micro">⏳</TextPrimitive>
-                  <TextPrimitive variant="buttonSmall">Confirming…</TextPrimitive>
-                </>
-              ) : (
-                <>
-                  <TextPrimitive variant="micro">✓</TextPrimitive>
-                  <TextPrimitive variant="buttonSmall">Confirm Payment</TextPrimitive>
-                </>
-              )}
-            </Button>
-          </Row>
-        </Section>
-
-        {error && (
-          <Section paddedHorizontal style={{ paddingTop: spacing[2] }}>
-            <Card variant="outlined" style={{ backgroundColor: colors.errorBackground }}>
-              <Section padded>
-                <Body color={colors.error} style={{ textAlign: 'center' }}>
-                  {error}
-                </Body>
-              </Section>
-            </Card>
-          </Section>
-        )}
-
-        {/* Category Picker Modal */}
-        {showCategoryPicker && (
-          <PickerModal
-            visible={showCategoryPicker}
-            onClose={() => setShowCategoryPicker(false)}
-            title="Select Category"
-            subtitle="Choose a category for this payment"
-            options={categories}
-            selectedId={categoryId}
-            suggestionId={suggestion?.categoryId ?? null}
-            suggestionConfidence={suggestion?.confidence ?? 'LOW'}
-            suggestionSource={suggestion?.source ?? 'USER_CONFIRMED'}
-            onSelect={handleCategorySelect}
-            renderOption={renderCategoryOption}
-            onClear={() => handleCategorySelect(null)}
+          <TextField
+            label="Paid to"
+            icon="store"
+            value={merchant}
+            onChangeText={setMerchant}
+            placeholder="Who did you pay?"
+            autoCapitalize="words"
           />
-        )}
 
-        {/* Member Picker Modal */}
-        {showMemberPicker && (
-          <PickerModal
-            visible={showMemberPicker}
-            onClose={() => setShowMemberPicker(false)}
-            title="Select Member"
-            subtitle="Choose a member for this payment"
-            options={members}
-            selectedId={memberId}
-            suggestionId={suggestion?.memberId ?? null}
-            suggestionConfidence={suggestion?.confidence ?? 'LOW'}
-            suggestionSource={suggestion?.source ?? 'USER_CONFIRMED'}
-            onSelect={handleMemberSelect}
-            renderOption={renderMemberOption}
-            onClear={() => handleMemberSelect(null)}
+          {suggestedCategory ? (
+            <View style={[styles.suggestion, { backgroundColor: tint(suggestedCategory.color, 0.12) }]}>
+              <Icon name="sparkles" size={16} color={colors.brand} />
+              <Text variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
+                {suggestion?.confidence === 'HIGH' ? 'You usually file' : 'Last time you filed'} {tx.merchant} under{' '}
+                <Text variant="caption" color={colors.text} style={{ fontWeight: '600' }}>
+                  {categoryGlyph(suggestedCategory.icon)} {suggestedCategory.name}
+                </Text>
+              </Text>
+            </View>
+          ) : null}
+
+          <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+            What was it for?
+          </Text>
+          <CategoryGrid
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+            suggestedId={suggestion?.categoryId}
+            onManage={() => router.push('/categories')}
           />
-        )}
-      </ScrollView>
-    </Screen>
-  );
-}
 
-// Helper functions for suggestion display
-function getConfidenceLabel(confidence: 'LOW' | 'MEDIUM' | 'HIGH'): string {
-  switch (confidence) {
-    case 'HIGH': return 'High confidence';
-    case 'MEDIUM': return 'Suggested';
-    case 'LOW': return 'Low confidence';
-    default: return '';
-  }
-}
+          {members.length > 0 ? (
+            <>
+              <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+                Spent on
+              </Text>
+              <MemberChips members={members} value={memberId} onChange={setMemberId} />
+            </>
+          ) : null}
 
-function getSuggestionLabel(confidence: 'LOW' | 'MEDIUM' | 'HIGH', source: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED'): string {
-  const sourceLabel = source === 'USER_CONFIRMED' ? 'Your choice' : source === 'SYSTEM_DEFAULT' ? 'Default' : 'AI';
-  return `${sourceLabel} • ${getConfidenceLabel(confidence)}`;
-}
+          <TextField
+            label="Note"
+            value={note}
+            onChangeText={setNote}
+            placeholder="Optional"
+            maxLength={200}
+            containerStyle={{ marginTop: space.lg }}
+          />
 
-// Picker Modal Component
-interface PickerModalProps {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  subtitle: string;
-  options: Array<{ id: string; label: string; color: string | null }>;
-  selectedId: string | null;
-  suggestionId: string | null;
-  suggestionConfidence: 'LOW' | 'MEDIUM' | 'HIGH' | undefined;
-  suggestionSource: 'USER_CONFIRMED' | 'SYSTEM_DEFAULT' | 'AI_SUGGESTED' | undefined;
-  onSelect: (id: string | null) => void;
-  renderOption: (option: { id: string; label: string; color: string | null }, isSelected: boolean) => React.ReactElement;
-  onClear: () => void;
-}
+          {error ? (
+            <Text variant="label" color={colors.negative} align="center" style={{ marginTop: space.md }}>
+              {error}
+            </Text>
+          ) : null}
+        </ScrollView>
 
-function PickerModal({
-  visible,
-  onClose,
-  title,
-  subtitle,
-  options,
-  selectedId,
-  suggestionId,
-  suggestionConfidence,
-  suggestionSource,
-  onSelect,
-  renderOption,
-  onClear,
-}: PickerModalProps) {
-  const [animValue] = useState(new Animated.Value(0));
-
-  useEffect(() => {
-    if (visible) {
-      Animated.timing(animValue, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [visible, animValue]);
-
-  if (!visible) return null;
-
-  return (
-      <Animated.View style={[styles.modalOverlay, { opacity: animValue }]}>
-        <Animated.View style={[
-          styles.modalContent,
-          {
-            transform: [{
-              translateY: animValue.interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              }),
-            }],
-          },
-        ]}>
-        <Section padded style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderDefault }}>
-          <Row justify="space-between" align="center">
-            <Title2>{title}</Title2>
-            <Button variant="ghost" size="small" onPress={onClose}>
-              <TextPrimitive variant="micro">✕</TextPrimitive>
-            </Button>
-          </Row>
-          <Body color={colors.textTertiary} style={{ marginTop: spacing[1] }}>{subtitle}</Body>
-          {suggestionId && (
-            <Badge variant="indigo" size="small" style={{ marginTop: spacing[2], alignSelf: 'flex-start' }}>
-              <Caption2>Suggested: {getConfidenceLabel(suggestionConfidence!)} ({suggestionSource})</Caption2>
-            </Badge>
-          )}
-        </Section>
-
-        <Section padded>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
           <Button
-            variant={selectedId ? 'destructive' : 'subtle'}
-            fullWidth
-            onPress={onClear}
-            style={{ marginBottom: spacing[3] }}
+            title="Ignore"
+            variant="outline"
+            size="lg"
+            loading={busy === 'dismiss'}
+            disabled={busy !== null || !!success}
+            onPress={dismiss}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="Confirm"
+            icon="check"
+            size="lg"
+            loading={busy === 'confirm'}
+            disabled={busy !== null || !!success}
+            onPress={confirm}
+            style={{ flex: 2 }}
+          />
+        </View>
+      </KeyboardAvoidingView>
+
+      {success ? (
+        <Animated.View style={[StyleSheet.absoluteFill, styles.successScrim, { opacity: celebrate }]} pointerEvents="none">
+          <Animated.View
+            style={[
+              styles.successBadge,
+              { transform: [{ scale: celebrate.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }] },
+            ]}
           >
-            <Row justify="center" align="center" gap={spacing[2]}>
-              <TextPrimitive variant="micro">✕</TextPrimitive>
-              <TextPrimitive variant="buttonSmall">Clear Selection</TextPrimitive>
-            </Row>
-          </Button>
-        </Section>
-
-        <Section style={{ maxHeight: 300 }}>
-          {options.map(option => 
-            renderOption(option, selectedId === option.id)
-          )}
-        </Section>
-
-        <Section padded style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.borderDefault }}>
-          <Button variant="secondary" fullWidth onPress={onClose}>
-            <TextPrimitive variant="buttonSmall">Done</TextPrimitive>
-          </Button>
-        </Section>
-      </Animated.View>
-    </Animated.View>
+            <Icon name="check" size={44} color={colors.textOnBrand} strokeWidth={3} />
+          </Animated.View>
+          <Text variant="heading" style={{ marginTop: space.lg }}>
+            {success}
+          </Text>
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  pickerOption: {
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-    borderRadius: radius.large,
-    backgroundColor: colors.surface,
-    marginBottom: spacing[1],
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-    zIndex: 1000,
-  },
-  modalContent: {
+  screen: {
+    flex: 1,
     backgroundColor: colors.background,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    paddingBottom: spacing[4],
-    maxHeight: '80%',
+  },
+  content: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxl,
+  },
+  counter: {
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+  },
+  receipt: {
+    alignItems: 'center',
+    paddingVertical: space.lg,
+    marginBottom: space.md,
+    borderRadius: radius.xxl,
+    backgroundColor: colors.surface,
+  },
+  sourcePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: space.xs,
+    minHeight: 60,
+  },
+  amountText: {
+    fontSize: 44,
+    lineHeight: 54,
+    fontWeight: font.weight.bold,
+    letterSpacing: -1,
+    color: colors.text,
+  },
+  amountInput: {
+    minWidth: 60,
+    padding: 0,
+  },
+  editBadge: {
+    marginLeft: space.xs,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.md,
+    padding: space.sm,
+    borderRadius: radius.lg,
+  },
+  label: {
+    marginTop: space.lg,
+    marginBottom: space.xs,
+  },
+  footer: {
+    flexDirection: 'row',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  successScrim: {
+    backgroundColor: 'rgba(245,246,250,0.96)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBadge: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.positive,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
-
-const formatPaiseForInput = (paise: number) => {
-  return (paise / 100).toFixed(2);
-};
-
-const parseAmountInput = (value: string) => {
-  const rupees = parseFloat(value.replace(/[₹,\s]/g, ''));
-  return isNaN(rupees) ? 0 : Math.round(rupees * 100);
-};

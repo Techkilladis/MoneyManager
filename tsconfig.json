@@ -15,7 +15,6 @@
     }
   },
   "exclude": [
-    "node_modules",
-    "modules/local-ai/android/src/main/cpp/llama.cpp/examples"
+    "node_modules"
   ]
 }

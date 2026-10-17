@@ -284,13 +284,15 @@ export async function getMemberSpending(period: PeriodRange): Promise<MemberSpen
 export async function getDailySpendingTrend(period: PeriodRange): Promise<DailySpending[]> {
   const database = await openDatabase();
   
+  // Bucket by the device's local calendar day. Integer division of the UTC
+  // timestamp would split days at UTC midnight (05:30 in India).
   const rows = await database.getAllAsync<{
-    day: number;
+    day: string;
     total: number;
     count: number;
   }>(
-    `SELECT 
-      (transactionTimestamp / 86400000) * 86400000 as day,
+    `SELECT
+      strftime('%Y-%m-%d', transactionTimestamp / 1000, 'unixepoch', 'localtime') as day,
       COALESCE(SUM(amountPaise), 0) as total,
       COUNT(*) as count
      FROM transactions
@@ -303,13 +305,17 @@ export async function getDailySpendingTrend(period: PeriodRange): Promise<DailyS
      ORDER BY day ASC`,
     [period.start, period.end]
   );
-  
-  return rows.map(r => ({
-    date: r.day,
-    dateLabel: new Date(r.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
-    totalPaise: r.total,
-    transactionCount: r.count,
-  }));
+
+  return rows.map(r => {
+    const [y, m, d] = r.day.split('-').map(Number);
+    const date = new Date(y, m - 1, d).getTime();
+    return {
+      date,
+      dateLabel: new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+      totalPaise: r.total,
+      transactionCount: r.count,
+    };
+  });
 }
 
 /**

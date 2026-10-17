@@ -1,237 +1,246 @@
-// Transaction Detail Screen
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Linking, Platform, Alert, ScrollView } from 'react-native';
-import { 
-  Screen, 
-  Section, 
-  Card, 
-  Row, 
-  Body, 
-  BodyEmphasis, 
-  Footnote, 
-  Badge,
-  Divider,
-  DisplayLarge,
+import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { colors, radius, space } from '@/design/tokens';
+import { transactionService } from '@/services';
+import { dataEvents } from '@/services/events';
+import { useScreenData } from '@/hooks/useScreenData';
+import { formatFullDate, formatINR, formatSourceApp, formatTime, splitINR } from '@/utils/format';
+import {
   Button,
-  EmptyState
-} from '@/design/primitives';
-import { transactionService, categoryService, memberService } from '@/services';
-import { FormattedTransaction } from '@/domain/transaction';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { colors } from '@/design/tokens';
+  Card,
+  CategoryAvatar,
+  Divider,
+  EmptyState,
+  IconButton,
+  LoadingView,
+  MemberAvatar,
+  ScreenHeader,
+  Text,
+  UncategorizedAvatar,
+  useToast,
+} from '@/components/ui';
 
 export default function TransactionDetailScreen() {
-  const router = useRouter();
-  const params = useLocalSearchParams<{ id: string }>();
-  const transactionId = params?.id;
-  
-  const [transaction, setTransaction] = useState<FormattedTransaction | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const fetcher = useCallback(async () => ({ tx: await transactionService.getFormattedTransaction(id) }), [id]);
+  const { data, loading } = useScreenData(fetcher);
+  const tx = data?.tx;
 
-  // Track mount state so late-arriving async results are ignored after unmount
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  if (loading) return <LoadingView />;
+  if (!tx) {
+    return (
+      <View style={styles.screen}>
+        <ScreenHeader title="Expense" back />
+        <EmptyState icon="alert" title="Expense not found" message="It may have been deleted." actionLabel="Go back" onAction={() => router.back()} />
+      </View>
+    );
+  }
 
-  // Loads the transaction from the database. All setState calls live inside
-  // promise callbacks (never in the synchronous body), so this is safe to
-  // call from an effect.
-  const loadTransaction = useCallback((): void => {
-    if (!transactionId) return;
+  const isPending = tx.status === 'PENDING' && tx.is_pending_capture === 1 && tx.is_dismissed === 0;
+  const [whole, fraction] = splitINR(tx.amountPaise);
+  const source =
+    tx.sourceType === 'UPI_NOTIFICATION'
+      ? `Auto-captured from ${formatSourceApp(tx.sourceApp) ?? 'UPI'}`
+      : tx.sourceType === 'SEED_DATA'
+        ? 'Sample data'
+        : 'Added manually';
 
-    transactionService.getFormattedTransaction(transactionId)
-      .then((tx) => {
-        if (!mountedRef.current) return;
-        if (tx) {
-          setTransaction(tx);
-        } else {
-          setError('Transaction not found');
-        }
+  const remove = () => {
+    Alert.alert('Delete this expense?', `${formatINR(tx.amountPaise)} to ${tx.merchant} will be removed permanently.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setBusy(true);
+          transactionService
+            .deleteTransaction(tx.id)
+            .then(() => {
+              dataEvents.emit();
+              toast.show('Expense deleted');
+              router.back();
+            })
+            .catch(() => {
+              setBusy(false);
+              toast.show('Could not delete', 'error');
+            });
+        },
+      },
+    ]);
+  };
+
+  const dismiss = () => {
+    setBusy(true);
+    transactionService
+      .dismissTransaction(tx.id)
+      .then((r) => {
+        if (!r.success) throw new Error(r.error);
+        dataEvents.emit();
+        toast.show('Payment ignored', 'info');
+        router.back();
       })
-      .catch((err) => {
-        if (!mountedRef.current) return;
-        console.error('[TransactionDetail] Error:', err);
-        setError('Failed to load transaction');
-      })
-      .finally(() => {
-        if (!mountedRef.current) return;
-        setLoading(false);
+      .catch(() => {
+        setBusy(false);
+        toast.show('Could not dismiss', 'error');
       });
-  }, [transactionId]);
-
-  useEffect(() => {
-    loadTransaction();
-  }, [loadTransaction]);
-
-  const handleEdit = () => {
-    if (transactionId) {
-      router.push(`/transactions/edit/${transactionId}`);
-    }
-  };
-
-  const handleDelete = () => {
-    Alert.alert(
-      'Delete Transaction',
-      'Are you sure you want to delete this transaction? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
-          style: 'destructive',
-          onPress: () => confirmDelete()
-        }
-      ]
-    );
-  };
-
-  const confirmDelete = async () => {
-    if (!transactionId) return;
-    
-    try {
-      setDeleting(true);
-      await transactionService.deleteTransaction(transactionId);
-      router.back();
-    } catch (err) {
-      console.error('[TransactionDetail] Delete error:', err);
-      Alert.alert('Error', 'Failed to delete transaction');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Body color="rgba(0,0,0,0.38)">Loading…</Body>
-      </Screen>
-    );
-  }
-
-  if (error || !transaction) {
-    return (
-      <Screen>
-        <EmptyState
-          title={error || 'Transaction not found'}
-          action={{ label: 'Go Back', onPress: () => router.back() }}
-        />
-      </Screen>
-    );
-  }
-
-  const { 
-    id, amount, amountPaise, currency, merchant, date, time, timestamp,
-    category, member, note, status, sourceApp 
-  } = transaction;
-
-  const getCategoryDisplay = () => {
-    if (!category) return null;
-    return (
-      <Row gap={6} align="center">
-        <Badge variant={status === 'PENDING' ? 'pending' : 'success'} size="small">
-          {category.name}
-        </Badge>
-      </Row>
-    );
-  };
-
-  const getMemberDisplay = () => {
-    if (!member) return null;
-    return (
-      <Row gap={6} align="center">
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: member.color || colors.accent,
-          }}
-        />
-        <Footnote color="rgba(0,0,0,0.54)">{member.name}</Footnote>
-      </Row>
-    );
   };
 
   return (
-    <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-        <Section paddedHorizontal style={{ paddingTop: 8, paddingBottom: 4 }}>
-          <DisplayLarge style={{ letterSpacing: -0.8 }}>{merchant}</DisplayLarge>
-          <Body color="rgba(0,0,0,0.38)" style={{ marginTop: 4 }}>
-            {date} at {time}
-          </Body>
-        </Section>
+    <View style={styles.screen}>
+      <ScreenHeader
+        title=""
+        back
+        right={
+          !isPending ? (
+            <IconButton icon="pencil" accessibilityLabel="Edit" onPress={() => router.push(`/transactions/edit/${tx.id}`)} />
+          ) : null
+        }
+      />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.hero}>
+          {tx.category ? <CategoryAvatar icon={tx.category.icon} color={tx.category.color} size={72} /> : <UncategorizedAvatar size={72} />}
+          <Text variant="heading" align="center" style={{ marginTop: space.md }}>
+            {tx.merchant}
+          </Text>
+          <View style={styles.amountRow}>
+            <Text variant="hero" numeric>
+              {whole}
+            </Text>
+            <Text variant="heading" color={colors.textTertiary} numeric style={{ marginBottom: 4 }}>
+              {fraction}
+            </Text>
+          </View>
+          <Text variant="label" align="center">
+            {formatFullDate(tx.timestamp)} · {formatTime(tx.timestamp)}
+          </Text>
+          {isPending ? (
+            <View style={styles.pendingPill}>
+              <Text variant="caption" color={colors.warning} style={{ fontWeight: '600' }}>
+                Waiting for your review
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
-        {/* Amount Card */}
-        <Section paddedHorizontal>
-          <Card>
-            <Row justify="space-between" align="center" style={{ paddingVertical: 20 }}>
-              <BodyEmphasis>Amount</BodyEmphasis>
-              <DisplayLarge style={{ letterSpacing: -0.8 }}>{amount}</DisplayLarge>
-            </Row>
-          </Card>
-        </Section>
-
-        {/* Details */}
-        <Section paddedHorizontal>
-          <Card>
-            <Row justify="space-between" align="center" style={{ paddingVertical: 14 }}>
-              <BodyEmphasis>Category</BodyEmphasis>
-              {getCategoryDisplay()}
-            </Row>
-            <Divider inset />
-            <Row justify="space-between" align="center" style={{ paddingVertical: 14 }}>
-              <BodyEmphasis>Member</BodyEmphasis>
-              {getMemberDisplay() || <Footnote color="rgba(0,0,0,0.38)">Not assigned</Footnote>}
-            </Row>
-            {note && (
-              <>
-                <Divider inset />
-                <Row justify="space-between" align="center" style={{ paddingVertical: 14 }}>
-                  <BodyEmphasis>Note</BodyEmphasis>
-                  <Body color="rgba(0,0,0,0.54)" style={{ maxWidth: '60%', textAlign: 'right' }}>
-                    {note}
-                  </Body>
-                </Row>
-              </>
+        <Card padded={false}>
+          <DetailRow label="Category">
+            <Text variant="bodyStrong" color={tx.category ? colors.text : colors.textTertiary}>
+              {tx.category?.name ?? 'Uncategorized'}
+            </Text>
+          </DetailRow>
+          <Divider inset={space.md} />
+          <DetailRow label="Spent on">
+            {tx.member ? (
+              <View style={styles.inline}>
+                <MemberAvatar name={tx.member.name} color={tx.member.color} size={24} />
+                <Text variant="bodyStrong">{tx.member.name}</Text>
+              </View>
+            ) : (
+              <Text variant="bodyStrong" color={colors.textTertiary}>
+                Not set
+              </Text>
             )}
-            <Divider inset />
-            <Row justify="space-between" align="center" style={{ paddingVertical: 14 }}>
-              <BodyEmphasis>Status</BodyEmphasis>
-              <Badge 
-                variant={status === 'PENDING' ? 'pending' : status === 'CONFIRMED' ? 'success' : 'neutral'}
-                size="standard"
-              >
-                {status}
-              </Badge>
-            </Row>
-            {sourceApp && (
-              <>
-                <Divider inset />
-                <Row justify="space-between" align="center" style={{ paddingVertical: 14 }}>
-                  <BodyEmphasis>Source</BodyEmphasis>
-                  <Footnote color="rgba(0,0,0,0.38)">{sourceApp}</Footnote>
-                </Row>
-              </>
-            )}
-          </Card>
-        </Section>
+          </DetailRow>
+          {tx.note ? (
+            <>
+              <Divider inset={space.md} />
+              <DetailRow label="Note">
+                <Text variant="body" style={styles.note}>
+                  {tx.note}
+                </Text>
+              </DetailRow>
+            </>
+          ) : null}
+          <Divider inset={space.md} />
+          <DetailRow label="Source">
+            <Text variant="body" color={colors.textSecondary} style={styles.note}>
+              {source}
+            </Text>
+          </DetailRow>
+        </Card>
 
-        {/* Actions */}
-        <Section paddedHorizontal>
-          <Button variant="secondary" size="large" fullWidth onPress={handleEdit}>
-            Edit Transaction
-          </Button>
-          <Button variant="destructive" size="large" fullWidth onPress={handleDelete} style={{ marginTop: 12 }} disabled={deleting}>
-            {deleting ? 'Deleting…' : 'Delete Transaction'}
-          </Button>
-        </Section>
+        <View style={styles.actions}>
+          {isPending ? (
+            <>
+              <Button title="Review payment" icon="check" size="lg" fullWidth onPress={() => router.push(`/quick-capture?id=${tx.id}`)} />
+              <Button title="Ignore payment" variant="ghost" fullWidth disabled={busy} onPress={dismiss} />
+            </>
+          ) : (
+            <>
+              <Button title="Edit expense" icon="pencil" variant="secondary" size="lg" fullWidth onPress={() => router.push(`/transactions/edit/${tx.id}`)} />
+              <Button title="Delete" icon="trash" variant="dangerSoft" size="lg" fullWidth loading={busy} onPress={remove} />
+            </>
+          )}
+        </View>
       </ScrollView>
-    </Screen>
+    </View>
   );
 }
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text variant="label" color={colors.textTertiary}>
+        {label}
+      </Text>
+      <View style={styles.detailValue}>{children}</View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxxl,
+  },
+  hero: {
+    alignItems: 'center',
+    paddingTop: space.xs,
+    paddingBottom: space.xl,
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginTop: space.xxs,
+    marginBottom: space.xxs,
+  },
+  pendingPill: {
+    marginTop: space.sm,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.warningSoft,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 56,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    gap: space.md,
+  },
+  detailValue: {
+    flexShrink: 1,
+    alignItems: 'flex-end',
+  },
+  inline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+  note: {
+    textAlign: 'right',
+  },
+  actions: {
+    gap: space.sm,
+    marginTop: space.xl,
+  },
+});

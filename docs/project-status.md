@@ -1,6 +1,32 @@
 # Money Manager - Project Status
 
-## Current Phase: PHASE 6 — ANALYTICS-FIRST REDESIGN & AI REMOVAL (COMPLETED)
+## Current Phase: PHASE 9 — UI REDESIGN & FEATURE COMPLETION (COMPLETED, October 2026)
+
+Every screen was rebuilt on a new design system. The SQLite / native-capture data layer was kept.
+
+**Design system** (`src/design/tokens.ts`, `src/components/ui/`): indigo brand on a cool off-white canvas, 5-size type scale with tabular figures for money, 4-pt spacing, soft ink-tinted shadows. Kit: Text, Button/IconButton, Card, ListRow, Chip, SegmentedControl, TextField, ProgressBar, Category/Member avatars (emoji glyphs), bottom Sheet, Toast, ScreenHeader (owns safe-area insets), Empty/Loading/Error states, and a react-native-svg icon set (no icon font or new native module needed).
+
+**Screens**
+- Home: gradient hero (month total, honest "vs same point last month" delta, combined budget bar, today/week/daily avg), UPI review card, auto-capture nudge when notification access is off, category breakdown, recent expenses, first-run empty state.
+- History: search, period chips, category/person filter sheet, day-grouped list with daily totals, paging.
+- Insights: week / month / 3-month / year with back/forward navigation, trend bars (tap for detail), category donut, budgets, top merchants, people split, highlights.
+- Quick Capture: queue-based review (oldest first, "1 of N"), merchant-memory prefill with an explanation, editable amount/merchant, success animation, "All caught up" end state.
+- Add/Edit expense: shared form with big amount entry, recent-merchant chips, category grid, people chips, pure-JS calendar + time sheet, note. Manual entries teach merchant memory.
+- Expense detail, Budgets (recurring monthly), Categories (emoji + colour), People, Settings (auto-capture status, CSV export via share sheet, delete all data, dev tools in `__DEV__`).
+- Custom tab bar with a centre "add" button; app renamed to "Money Manager".
+
+**Data-layer fixes made along the way**
+- Budget spending summed only the first 50 transactions (repository default page size); now aggregated in SQL.
+- Daily trend grouped by UTC day (wrong after 00:00–05:30 IST); now uses local calendar days.
+- Budgets were tied to their creation month; monthly budgets now recur.
+- Home "Today/Week/Month" figures were computed from the 5 most recent rows, with hard-coded fake trend percentages; now real SQL aggregates.
+- Screens refresh via a `dataEvents` bus plus `useScreenData` (focus-aware, stale-response safe); the root layout pulls new native UPI events on foreground and every 20 s while open.
+
+**Validation (Pixel_10 emulator, debug build):** `tsc --noEmit` clean; `expo lint` 0 errors (17 pre-existing warnings in older service files); `expo run:android` BUILD SUCCESSFUL. Manually exercised Home, History, Insights, Settings, budget create, manual add (with merchant-memory learning), the Quick Capture queue confirming both pending captures, detail, edit with date change, and category create. No runtime errors in Metro logs.
+
+**Not done / next:** dark mode (`userInterfaceStyle` is `light`), backup/restore import, receipt attachments.
+
+## Previous Phase: PHASE 6 — ANALYTICS-FIRST REDESIGN & AI REMOVAL (COMPLETED)
 
 ## Completed Work
 - ✅ Clean Expo SDK 52 project at `C:\Users\suriy\money-manager\MoneyManagerExpo52`

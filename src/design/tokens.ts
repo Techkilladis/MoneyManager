@@ -1,239 +1,132 @@
-// Design Tokens - Apple/Linear inspired design system for Money Manager
-// Refined for premium, minimal, professional Android app experience
+// Design tokens for Money Manager.
+//
+// Visual direction: calm, trustworthy fintech. A cool off-white canvas,
+// deep "ink" text, and a single indigo brand accent used sparingly for
+// primary actions and key indicators. Category colours (stored per
+// category in the database) carry the remaining colour in the UI.
 
-// Color Palette - Apple/Linear inspired
 export const colors = {
-  // Primary surfaces - Light mode
-  background: '#fafafa',
-  backgroundAlt: '#f5f5f7',
-  surface: '#ffffff',
-  surfaceElevated: '#ffffff',
-  surfaceHover: '#f5f5f5',
-  backgroundDark: '#0a0a0b',
-  backgroundAltDark: '#111113',
-  surfaceDark: '#161618',
-  surfaceElevatedDark: '#1c1c1f',
-  surfaceHoverDark: '#222226',
-  textPrimary: '#0d0d0e',
-  textSecondary: '#555558',
-  textTertiary: '#8e8e93',
-  textQuaternary: '#bdbdbd',
-  textOnAccent: '#ffffff',
-  textOnDark: '#f5f5f7',
-  textOnDarkSecondary: '#a1a1a6',
-  textOnDarkTertiary: '#6e6e73',
-  textOnDarkQuaternary: '#48484a',
-  accent: '#0066cc',
-  accentHover: '#0052a3',
-  accentActive: '#004080',
-  accentLight: '#e8f0fe',
-  accentLightDark: '#1a2a4a',
-  accentIndigo: '#5e6ad2',
-  accentIndigoHover: '#7170ff',
-  linkOnLight: '#0066cc',
-  linkOnDark: '#6fa3ff',
-  success: '#1e7e34',
-  successBackground: 'rgba(30, 126, 52, 0.12)',
-  successBorder: 'rgba(30, 126, 52, 0.3)',
-  warning: '#b06000',
-  warningBackground: 'rgba(176, 96, 0, 0.12)',
-  warningBorder: 'rgba(176, 96, 0, 0.3)',
-  error: '#c5161a',
-  errorBackground: 'rgba(197, 22, 26, 0.12)',
-  errorBorder: 'rgba(197, 22, 26, 0.3)',
-  borderLight: 'rgba(0, 0, 0, 0.04)',
-  borderDefault: 'rgba(0, 0, 0, 0.06)',
-  borderStrong: 'rgba(0, 0, 0, 0.12)',
-  borderDark: 'rgba(255, 255, 255, 0.06)',
-  borderDarkStrong: 'rgba(255, 255, 255, 0.12)',
-  dividerLight: 'rgba(0, 0, 0, 0.06)',
-  dividerDark: 'rgba(255, 255, 255, 0.06)',
-  shadowNone: 'none',
-  shadowAmbient: 'rgba(0, 0, 0, 0.04) 0px 2px 8px',
-  shadowCard: 'rgba(0, 0, 0, 0.06) 0px 4px 20px',
-  shadowElevated: 'rgba(0, 0, 0, 0.08) 0px 8px 30px',
-  shadowModal: 'rgba(0, 0, 0, 0.12) 0px 20px 60px',
-  shadowFocus: '0 0 0 3px rgba(0, 102, 204, 0.4)',
-  pending: '#0066cc',
-  pendingBackground: 'rgba(0, 102, 204, 0.12)',
-  pendingBorder: 'rgba(0, 102, 204, 0.3)',
-  // Additional colors for primitives
-  borderAccent: '#b9b9f9',
+  // Surfaces
+  background: '#F5F6FA',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F0F1F6',
+  surfacePressed: '#E9EBF2',
+
+  // Text (ink at descending emphasis)
+  text: '#0F1222',
+  textSecondary: '#555B70',
+  textTertiary: '#8B90A3',
+  textDisabled: '#B9BDCB',
+  textOnBrand: '#FFFFFF',
+  textOnDark: '#FFFFFF',
+  textOnDarkMuted: 'rgba(255,255,255,0.72)',
+  textOnDarkSubtle: 'rgba(255,255,255,0.52)',
+
+  // Brand
+  brand: '#4F46E5',
+  brandPressed: '#4338CA',
+  brandSoft: '#EEEDFD',
+  brandSoftBorder: '#DCDAFB',
+  heroStart: '#1E1B4B',
+  heroEnd: '#4338CA',
+
+  // Semantic
+  positive: '#0E9F6E',
+  positiveSoft: '#E5F6EF',
+  negative: '#E5484D',
+  negativeSoft: '#FDECEC',
+  warning: '#D97706',
+  warningSoft: '#FEF3E2',
+  info: '#2563EB',
+  infoSoft: '#E8F0FE',
+
+  // Lines
+  border: '#E6E8EF',
+  borderStrong: '#D5D8E2',
+  divider: '#EEF0F4',
+
+  // Overlays
+  scrim: 'rgba(15,18,34,0.45)',
+  shadow: '#1E1B4B',
 } as const;
 
-// Typography - Apple/Linear inspired with optical sizing
-export const typography = {
-  fontFamily: {
-    primary: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-    mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-  },
+// Type scale: five sizes, three weights. Amounts use tabular figures so
+// columns of numbers line up.
+export const font = {
   size: {
-    displayHero: 56,
-    displayLarge: 40,
-    displayMedium: 28,
-    displaySmall: 24,
-    title1: 22,
-    title2: 20,
-    headline: 17,
-    body: 17,
-    callout: 16,
-    subhead: 15,
-    footnote: 13,
-    caption1: 12,
-    caption2: 11,
-    micro: 10,
+    hero: 36,
+    title: 22,
+    body: 16,
+    label: 14,
+    caption: 12,
   },
   weight: {
-    light: '300',
-    regular: '400',
-    medium: '500',
-    semibold: '600',
-    bold: '700',
-  },
-  lineHeight: {
-    tight: 1.07,
-    snug: 1.14,
-    normal: 1.47,
-    relaxed: 1.5,
-    button: 1.0,
-  },
-  letterSpacing: {
-    tight: -0.28,
-    display: -0.24,
-    body: -0.374,
-    caption: -0.224,
-    micro: -0.12,
-    normal: 0,
+    regular: '400' as const,
+    medium: '500' as const,
+    semibold: '600' as const,
+    bold: '700' as const,
   },
 } as const;
 
-// Spacing System (8px base unit with Apple/Linear refinements)
-export const spacing = {
-  0: 0,
-  1: 2,
-  2: 4,
-  3: 6,
-  4: 7,
-  5: 8,
-  6: 9,
-  7: 10,
-  8: 11,
-  9: 12,
-  10: 13,
-  11: 14,
-  12: 15,
-  13: 16,
-  14: 17,
-  15: 18,
-  16: 20,
-  17: 24,
-  18: 28,
-  19: 32,
-  20: 40,
-  21: 48,
-  22: 56,
-  23: 64,
-  24: 80,
-  25: 96,
+// 4-point spacing scale
+export const space = {
+  xxs: 4,
+  xs: 8,
+  sm: 12,
+  md: 16,
+  lg: 20,
+  xl: 24,
+  xxl: 32,
+  xxxl: 48,
 } as const;
 
-// Border Radius Scale - Apple/Linear
 export const radius = {
-  micro: 4,
-  small: 6,
-  standard: 8,
-  comfortable: 11,
-  large: 12,
-  xl: 16,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 28,
   pill: 999,
-  circle: '50%',
 } as const;
 
-// Shadow definitions - Apple-style (soft, diffused)
-export const shadows = {
-  none: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  },
-  ambient: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
+// Soft, ink-tinted shadows
+export const shadow = {
   card: {
-    shadowColor: '#000000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
-    shadowRadius: 20,
+    shadowRadius: 16,
     elevation: 2,
   },
-  elevated: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 30,
-    elevation: 4,
-  },
-  modal: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.12,
-    shadowRadius: 60,
+  raised: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
     elevation: 8,
   },
-  focus: {
-    shadowColor: '#0066cc',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 3,
-    elevation: 0,
+  brand: {
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.32,
+    shadowRadius: 16,
+    elevation: 8,
   },
 } as const;
 
-// Z-index scale
-export const zIndex = {
-  base: 0,
-  dropdown: 100,
-  sticky: 200,
-  modal: 300,
-  popover: 400,
-  toast: 500,
-  tooltip: 600,
-} as const;
+// Palette offered when creating categories and members
+export const swatches = [
+  '#F97316', '#EF4444', '#EC4899', '#A855F7', '#6366F1', '#3B82F6',
+  '#0EA5E9', '#14B8A6', '#10B981', '#84CC16', '#EAB308', '#78716C',
+] as const;
 
-// Animation durations - Apple-style (smooth, purposeful)
-export const animation = {
-  fast: 150,
-  normal: 250,
-  slow: 350,
-  spring: { damping: 15, stiffness: 150 },
-} as const;
-
-// Breakpoints (for reference)
-export const breakpoints = {
-  mobile: 360,
-  mobileLarge: 480,
-  tablet: 640,
-  tabletLarge: 834,
-  desktop: 1024,
-  desktopLarge: 1440,
-} as const;
-
-// Export all tokens
-export const designTokens = {
-  colors,
-  typography,
-  spacing,
-  radius,
-  shadows,
-  zIndex,
-  animation,
-  breakpoints,
-} as const;
-
-export type DesignTokens = typeof designTokens;
+/** Mixes a hex colour with white; `amount` 0..1 is the share of the colour. */
+export function tint(hex: string | null | undefined, amount = 0.14): string {
+  const fallback = colors.brand;
+  const value = (hex && /^#([0-9a-f]{6})$/i.test(hex) ? hex : fallback).slice(1);
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  const mix = (c: number) => Math.round(255 - (255 - c) * amount);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}

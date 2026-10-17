@@ -114,7 +114,7 @@ export const memberRepository = {
   async list(): Promise<Member[]> {
     const database = await openDatabase();
     const rows = await database.getAllAsync(
-      'SELECT * FROM members ORDER BY isDefault DESC, name ASC'
+      "SELECT * FROM members ORDER BY CASE WHEN name = 'Self' THEN 0 ELSE 1 END, isDefault DESC, name ASC"
     );
     
     return rows.map(mapMemberRow);

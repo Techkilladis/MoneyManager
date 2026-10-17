@@ -1,409 +1,339 @@
-// Home Screen - Premium Dashboard
-import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { ScrollView, RefreshControl, View, Platform } from 'react-native';
-import { 
-  Screen, 
-  Section, 
-  Card, 
-  Row, 
-  Column,
-  DisplayLarge, 
-  DisplayMedium,
-  DisplaySmall,
-  Title1,
-  Title2,
-  Headline,
-  Body, 
-  BodyEmphasis, 
-  Callout,
-  Subhead,
-  Footnote, 
-  Caption1,
-  Caption2,
-  Micro,
-  Badge,
+import React, { useCallback } from 'react';
+import { Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { colors, radius, space, tint } from '@/design/tokens';
+import { ledgerService, services } from '@/services';
+import { useScreenData } from '@/hooks/useScreenData';
+import { HomeSummary } from '@/services/ledger';
+import { FormattedTransaction } from '@/domain/transaction';
+import { formatINR, greeting, pluralize, splitINR } from '@/utils/format';
+import { StackedBar } from '@/components/Charts';
+import { TransactionRow } from '@/components/TransactionRow';
+import {
+  Button,
+  Card,
+  CategoryAvatar,
   Divider,
   EmptyState,
-  Button,
-  Avatar,
-  Input,
-  TextPrimitive,
-  SectionHeader,
-} from '@/design/primitives';
-import { transactionService } from '@/services';
-import { HomeData, FormattedTransaction } from '@/domain/transaction';
-import { useRouter } from 'expo-router';
-import { colors, spacing, radius, shadows, typography } from '@/design/tokens';
+  ErrorView,
+  Icon,
+  IconTile,
+  LoadingView,
+  ProgressBar,
+  ScreenHeader,
+  SectionTitle,
+  Text,
+  UncategorizedAvatar,
+} from '@/components/ui';
 
-const formatPaise = (paise: number) => {
-  return `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+type HomeData = HomeSummary & { captureEnabled: boolean | null };
+
+async function fetchHome(): Promise<HomeData> {
+  const [summary, captureEnabled] = await Promise.all([
+    ledgerService.getHomeSummary(),
+    Platform.OS === 'android'
+      ? services.notification.isNotificationAccessEnabled().catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  return { ...summary, captureEnabled };
+}
 
 export default function HomeScreen() {
-  const [homeData, setHomeData] = useState<HomeData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const { data, error, refreshing, refresh, reload } = useScreenData(fetchHome);
+  const openTx = useCallback((tx: FormattedTransaction) => router.push(`/transaction/${tx.id}`), []);
 
-  // Track mount state and the latest in-flight request so stale responses
-  // never overwrite newer results and results are ignored after unmount.
-  const mountedRef = useRef(true);
-  const requestIdRef = useRef(0);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  if (error && !data) return <ErrorView message={error} onRetry={reload} />;
+  if (!data) return <LoadingView />;
 
-  // Loads home data from the database, retrying once if the tables are still
-  // being created. Pure data loading — no state updates.
-  const fetchHomeData = useCallback(async (): Promise<HomeData> => {
-    try {
-      return await transactionService.getHomeData();
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('no such table')) {
-        // Database may still be initializing — wait briefly and retry once
-        await new Promise(resolve => setTimeout(resolve, 500));
-        try {
-          return await transactionService.getHomeData();
-        } catch (retryErr) {
-          console.error('[HomeScreen] Retry failed:', retryErr);
-        }
-      }
-      throw err;
-    }
-  }, []);
+  const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+  const showCaptureNudge = data.captureEnabled === false;
 
-  // Fetches home data and applies it to state. All setState calls happen in
-  // promise callbacks (never in the synchronous body), so this is safe to
-  // call from effects as well as event handlers.
-  const loadData = useCallback((): void => {
-    const requestId = ++requestIdRef.current;
-    const isCurrent = () => mountedRef.current && requestId === requestIdRef.current;
+  return (
+    <View style={styles.screen}>
+      <ScreenHeader large eyebrow={greeting()} title="Your spending" />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} tintColor={colors.brand} />}
+      >
+        <HeroCard data={data} monthName={monthName} />
 
-    fetchHomeData()
-      .then((data) => {
-        if (!isCurrent()) return;
-        setHomeData(data);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!isCurrent()) return;
-        console.error('[HomeScreen] Error loading data:', err);
-        setError('Failed to load data');
-      })
-      .finally(() => {
-        if (!isCurrent()) return;
-        setLoading(false);
-        setRefreshing(false);
-      });
-  }, [fetchHomeData]);
+        {data.pending.length > 0 ? <PendingCard data={data} /> : null}
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadData();
-  };
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // Spending insights - always called to maintain hook order
-  const spendingInsights = useMemo(() => {
-    if (!homeData) return { today: 0, week: 0, month: 0 };
-    const { recentTransactions } = homeData;
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-    const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay()).getTime();
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
-
-    const todaySpending = recentTransactions
-      .filter(t => t.timestamp >= todayStart)
-      .reduce((sum, t) => sum + t.amountPaise, 0);
-    
-    const weekSpending = recentTransactions
-      .filter(t => t.timestamp >= weekStart)
-      .reduce((sum, t) => sum + t.amountPaise, 0);
-
-    const monthSpending = recentTransactions
-      .filter(t => t.timestamp >= monthStart)
-      .reduce((sum, t) => sum + t.amountPaise, 0);
-
-    return {
-      today: todaySpending,
-      week: weekSpending,
-      month: monthSpending,
-    };
-  }, [homeData]);
-
-  const renderTransactionRow = (tx: FormattedTransaction, index: number, isLast: boolean) => {
-    const showDivider = !isLast;
-    const { date, time } = { date: tx.date, time: tx.time };
-
-    return (
-      <View key={tx.id}>
-        <Row justify="space-between" align="center" style={{ paddingVertical: spacing[3] }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Row gap={spacing[2]} align="center" style={{ marginBottom: spacing[1], flexWrap: 'wrap' }}>
-              <BodyEmphasis numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</BodyEmphasis>
-              {tx.category && (
-                <Badge 
-                  variant={tx.status === 'PENDING' ? 'pending' : tx.status === 'CONFIRMED' ? 'success' : 'neutral'} 
-                  size="small"
-                >
-                  {tx.category.name}
-                </Badge>
-              )}
-              {tx.status === 'PENDING' && !tx.category && (
-                <Badge variant="pending" size="small">Pending</Badge>
-              )}
-            </Row>
-            <Row gap={spacing[2]} align="center">
-              <Caption2 color={colors.textTertiary}>{date}</Caption2>
-              {tx.member && (
-                <>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textQuaternary }} />
-                  <Caption2 color={colors.textTertiary}>{tx.member.name}</Caption2>
-                </>
-              )}
-            </Row>
-          </View>
-          <Column align="flex-end" style={{ marginLeft: spacing[4] }}>
-            <BodyEmphasis style={{ textAlign: 'right' }}>{tx.amount}</BodyEmphasis>
-            {tx.status === 'PENDING' && (
-              <Micro color={colors.accent} style={{ textAlign: 'right', marginTop: 1 }}>
-                Pending
-              </Micro>
-            )}
-          </Column>
-        </Row>
-        {showDivider && <Divider inset />}
-      </View>
-    );
-  };
-
-  const renderInsightCard = (title: string, value: string, subtitle: string, trend?: 'up' | 'down' | 'neutral', iconColor?: string) => (
-    <Card variant="outlined" style={{ flex: 1, minWidth: 120 }}>
-      <Column gap={spacing[1]} style={{ padding: spacing[4] }}>
-        <Row align="center" justify="space-between">
-          <Body color={colors.textSecondary} style={{ flex: 1 }}>{title}</Body>
-          {trend && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-              <TextPrimitive 
-                variant="caption2" 
-                color={trend === 'up' ? colors.error : trend === 'down' ? colors.success : colors.textTertiary}
-              >
-                {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}
-                {subtitle}
-              </TextPrimitive>
+        {showCaptureNudge ? (
+          <Card style={styles.block} onPress={() => router.push('/settings')}>
+            <View style={styles.nudge}>
+              <IconTile icon="zap" color={colors.warning} />
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong">Turn on auto-capture</Text>
+                <Text variant="caption" style={{ marginTop: 2 }}>
+                  Log UPI payments from Google Pay, PhonePe, Paytm and more automatically.
+                </Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colors.textDisabled} />
             </View>
-          )}
-        </Row>
-        <Headline color={colors.textPrimary} style={{ marginTop: spacing[1] }}>{value}</Headline>
-        {iconColor && (
-          <View style={{ 
-            width: 32, 
-            height: 32, 
-            borderRadius: radius.large, 
-            backgroundColor: iconColor + '20',
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginTop: spacing[2]
-          }}>
-            <TextPrimitive variant="title1" color={iconColor}>₹</TextPrimitive>
-          </View>
+          </Card>
+        ) : null}
+
+        {!data.hasAnyTransactions ? (
+          <Card style={styles.block}>
+            <EmptyState
+              compact
+              icon="wallet"
+              title="Start tracking your money"
+              message="Add an expense now, or let auto-capture log your UPI payments as they happen."
+              actionLabel="Add first expense"
+              onAction={() => router.push('/transactions/new')}
+            />
+          </Card>
+        ) : (
+          <>
+            {data.topCategories.length > 0 ? <CategoryCard data={data} monthName={monthName} /> : null}
+
+            <View style={styles.block}>
+              <SectionTitle title="Recent" action="See all" onAction={() => router.push('/transactions')} />
+              <Card padded={false} style={styles.listCard}>
+                {data.recent.length === 0 ? (
+                  <EmptyState compact icon="receipt" title="No confirmed expenses yet" message="Review your pending payments to see them here." />
+                ) : (
+                  data.recent.map((tx, i) => (
+                    <View key={tx.id}>
+                      {i > 0 ? <Divider inset={72} /> : null}
+                      <TransactionRow tx={tx} onPress={openTx} showDate />
+                    </View>
+                  ))
+                )}
+              </Card>
+            </View>
+          </>
         )}
-      </Column>
+      </ScrollView>
+    </View>
+  );
+}
+
+function HeroCard({ data, monthName }: { data: HomeData; monthName: string }) {
+  const [whole, fraction] = splitINR(data.monthTotal);
+  const base = data.lastMonthToDate;
+  const change = base > 0 ? (data.monthTotal - base) / base : null;
+  const up = change !== null && change > 0;
+
+  return (
+    <LinearGradient colors={[colors.heroStart, colors.heroEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+      <Text variant="overline" color={colors.textOnDarkMuted}>
+        Spent in {monthName}
+      </Text>
+      <View style={styles.heroAmount}>
+        <Text variant="hero" color={colors.textOnDark} numeric style={{ fontSize: 40, lineHeight: 46 }}>
+          {whole}
+        </Text>
+        <Text variant="heading" color={colors.textOnDarkSubtle} numeric style={{ marginBottom: 5 }}>
+          {fraction}
+        </Text>
+      </View>
+
+      <View style={styles.deltaRow}>
+        {change !== null && Math.abs(change) >= 0.005 ? (
+          <View style={[styles.deltaPill, { backgroundColor: up ? 'rgba(255,107,107,0.22)' : 'rgba(52,211,153,0.22)' }]}>
+            <Icon name={up ? 'trendingUp' : 'trendingDown'} size={14} color={up ? '#FFB4B4' : '#A7F3D0'} />
+            <Text variant="caption" color={colors.textOnDark}>
+              {Math.round(Math.abs(change) * 100)}% {up ? 'more' : 'less'} than last month so far
+            </Text>
+          </View>
+        ) : (
+          <Text variant="caption" color={colors.textOnDarkMuted}>
+            {data.monthCount > 0 ? `${pluralize(data.monthCount, 'expense')} this month` : 'No spending yet this month'}
+          </Text>
+        )}
+      </View>
+
+      {data.budget ? (
+        <View style={styles.heroBudget}>
+          <View style={styles.heroBudgetText}>
+            <Text variant="caption" color={colors.textOnDarkMuted}>
+              Budget {formatINR(data.budget.spent, { decimals: 'never' })} of {formatINR(data.budget.limit, { decimals: 'never' })}
+            </Text>
+            <Text variant="caption" color={data.budget.spent > data.budget.limit ? '#FFB4B4' : colors.textOnDark}>
+              {data.budget.spent > data.budget.limit
+                ? `${formatINR(data.budget.spent - data.budget.limit, { decimals: 'never' })} over`
+                : `${formatINR(data.budget.limit - data.budget.spent, { decimals: 'never' })} left`}
+            </Text>
+          </View>
+          <ProgressBar
+            value={data.budget.limit > 0 ? data.budget.spent / data.budget.limit : 0}
+            color={data.budget.spent > data.budget.limit ? '#FF8A8A' : '#FFFFFF'}
+            track="rgba(255,255,255,0.18)"
+            height={6}
+          />
+        </View>
+      ) : null}
+
+      <View style={styles.heroStats}>
+        <HeroStat label="Today" value={formatINR(data.todayTotal, { decimals: 'never' })} />
+        <View style={styles.heroDivider} />
+        <HeroStat label="This week" value={formatINR(data.weekTotal, { decimals: 'never' })} />
+        <View style={styles.heroDivider} />
+        <HeroStat label="Daily avg" value={formatINR(data.dailyAverage, { decimals: 'never' })} />
+      </View>
+    </LinearGradient>
+  );
+}
+
+function HeroStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text variant="caption" color={colors.textOnDarkSubtle}>
+        {label}
+      </Text>
+      <Text variant="bodyStrong" color={colors.textOnDark} numeric numberOfLines={1} adjustsFontSizeToFit style={{ marginTop: 2 }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function PendingCard({ data }: { data: HomeData }) {
+  const count = data.pending.length;
+  const preview = data.pending.slice(0, 3).map((t) => t.merchant).join(', ');
+  return (
+    <Card style={[styles.block, styles.pendingCard]} flat>
+      <View style={styles.pendingTop}>
+        <View style={styles.pendingIcon}>
+          <Icon name="zap" size={20} color={colors.textOnBrand} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="bodyStrong">
+            {count === 1 ? '1 payment to review' : `${count} payments to review`}
+          </Text>
+          <Text variant="caption" numberOfLines={1} style={{ marginTop: 2 }}>
+            {formatINR(data.pendingTotal)} detected · {preview}
+          </Text>
+        </View>
+      </View>
+      <Button title={count === 1 ? 'Review payment' : 'Review payments'} icon="check" fullWidth onPress={() => router.push('/quick-capture')} />
     </Card>
   );
-
-  const renderEmptyState = () => (
-    <Section paddedHorizontal>
-      <EmptyState
-        title="No transactions yet"
-        subtitle="Your transactions will appear here once you start spending"
-        action={{ 
-          label: 'Add Transaction', 
-          onPress: () => router.push('/transactions/new'), 
-          variant: 'primary' 
-        }}
-        style={{ paddingVertical: spacing[12] }}
-      />
-    </Section>
-  );
-
-  const renderLoadingState = () => (
-    <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-      <Body color={colors.textTertiary}>Loading…</Body>
-    </Screen>
-  );
-
-  const renderErrorState = () => (
-    <Screen>
-      <EmptyState
-        title="Unable to load"
-        subtitle={error ?? undefined}
-        action={{ label: 'Retry', onPress: () => { setError(null); loadData(); }, variant: 'primary' }}
-      />
-    </Screen>
-  );
-
-  const renderNoDataState = () => (
-    <Screen>
-      <EmptyState title="No data available" />
-    </Screen>
-  );
-
-  const renderContent = () => {
-    if (!homeData) return null;
-
-    const { 
-      totalSpendingFormatted, 
-      pendingCount, 
-      pendingTotalFormatted,
-      recentTransactions, 
-      pendingTransactions 
-    } = homeData;
-    const totalSpendingValue = totalSpendingFormatted.replace('₹', '').replace(',', '');
-
-    return (
-      <Screen>
-        <ScrollView
-          refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh} 
-              colors={[colors.accent]}
-              progressViewOffset={Platform.OS === 'ios' ? 20 : 0}
-            />
-          }
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: spacing[25] }}
-        >
-          {/* Hero Section - Total Confirmed Spending */}
-          <Section paddedHorizontal paddedVertical={false} variant="default" style={{ paddingTop: spacing[6], paddingBottom: spacing[4] }}>
-            <Row justify="space-between" align="flex-end">
-              <Column gap={spacing[1]} style={{ flex: 1 }}>
-                <DisplayMedium style={{ letterSpacing: typography.letterSpacing.display, color: colors.textPrimary }}>
-                  {totalSpendingValue}
-                </DisplayMedium>
-                <Body color={colors.textTertiary}>Confirmed spending</Body>
-              </Column>
-              <Badge variant="indigo" dot>
-                <Caption2>Confirmed</Caption2>
-              </Badge>
-            </Row>
-          </Section>
-
-          {/* Pending Section - Prominent but separate */}
-          {pendingCount > 0 && (
-            <Section paddedHorizontal variant="alt" style={{ paddingBottom: spacing[2] }}>
-              <Card variant="outlined" style={{ padding: spacing[4] }}>
-                <Row justify="space-between" align="center">
-                  <Column gap={spacing[1]}>
-                    <Row gap={spacing[2]} align="center">
-                      <Badge variant="pending" dot>
-                        <Caption2>Pending</Caption2>
-                      </Badge>
-                      <Title1 style={{ letterSpacing: typography.letterSpacing.display }}>
-                        {pendingTotalFormatted}
-                      </Title1>
-                    </Row>
-                    <Body color={colors.textTertiary}>
-                      {pendingCount} payment{pendingCount > 1 ? 's' : ''} need review
-                    </Body>
-                  </Column>
-                  <Button 
-                    variant="primary" 
-                    size="small" 
-                    onPress={() => router.push('/quick-capture')}
-                  >
-                    <TextPrimitive variant="micro">→</TextPrimitive>
-                    <TextPrimitive variant="buttonSmall">Review</TextPrimitive>
-                  </Button>
-                </Row>
-              </Card>
-            </Section>
-          )}
-
-          {/* Spending Insights Grid */}
-          <Section paddedHorizontal variant="default" style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Spending Overview" subtitle={`${recentTransactions.length} confirmed transactions this period`} />
-            <Row gap={spacing[3]} style={{ marginTop: spacing[2] }}>
-              {renderInsightCard(
-                'Today', 
-                formatPaise(spendingInsights.today), 
-                '+12%', 
-                'up', 
-                colors.error
-              )}
-              {renderInsightCard(
-                'This Week', 
-                formatPaise(spendingInsights.week), 
-                '-3%', 
-                'down', 
-                colors.success
-              )}
-              {renderInsightCard(
-                'This Month', 
-                formatPaise(spendingInsights.month), 
-                '+8%', 
-                'up', 
-                colors.accentIndigo
-              )}
-            </Row>
-          </Section>
-
-          {/* Recent Confirmed Transactions */}
-          <Section paddedHorizontal variant="default">
-            <SectionHeader 
-              title="Recent Confirmed" 
-              subtitle={`${recentTransactions.length} transactions`}
-              action={{ label: 'View all', onPress: () => router.push('/transactions') }}
-            />
-            {recentTransactions.length === 0 ? (
-              renderEmptyState()
-            ) : (
-              recentTransactions.slice(0, 5).map((tx, i) => 
-                renderTransactionRow(tx, i, i === Math.min(4, recentTransactions.length - 1))
-              )
-            )}
-          </Section>
-
-          {/* Quick Actions */}
-          <Section paddedHorizontal variant="alt" style={{ paddingTop: spacing[4], paddingBottom: spacing[6] }}>
-            <SectionHeader title="Quick Actions" />
-            <Row gap={spacing[3]} style={{ marginTop: spacing[2] }}>
-              <Button variant="primary" size="standard" fullWidth iconPosition="left" onPress={() => router.push('/transactions/new')}>
-                <TextPrimitive variant="micro">+</TextPrimitive>
-                <TextPrimitive variant="buttonSmall">New Transaction</TextPrimitive>
-              </Button>
-              <Button variant="secondary" size="standard" fullWidth iconPosition="left" onPress={() => router.push('/quick-capture')}>
-                <TextPrimitive variant="micro">🕐</TextPrimitive>
-                <TextPrimitive variant="buttonSmall">Review Pending</TextPrimitive>
-              </Button>
-            </Row>
-            <Row gap={spacing[3]} style={{ marginTop: spacing[3] }}>
-              <Button variant="subtle" size="standard" fullWidth onPress={() => router.push('/categories')}>
-                <TextPrimitive variant="micro">🏷️</TextPrimitive>
-                <TextPrimitive variant="buttonSmall">Categories</TextPrimitive>
-              </Button>
-              <Button variant="subtle" size="standard" fullWidth onPress={() => router.push('/settings')}>
-                <TextPrimitive variant="micro">⚙️</TextPrimitive>
-                <TextPrimitive variant="buttonSmall">Settings</TextPrimitive>
-              </Button>
-            </Row>
-          </Section>
-        </ScrollView>
-      </Screen>
-    );
-  };
-
-  // Always render the same hooks, conditional content inside
-  if (loading) return renderLoadingState();
-  if (error) return renderErrorState();
-  if (!homeData) return renderNoDataState();
-  return renderContent();
 }
+
+function CategoryCard({ data, monthName }: { data: HomeData; monthName: string }) {
+  const top = data.topCategories.slice(0, 4);
+  return (
+    <View style={styles.block}>
+      <SectionTitle title={`${monthName} by category`} action="Insights" onAction={() => router.push('/analytics')} />
+      <Card>
+        <StackedBar slices={data.topCategories.map((c) => ({ key: c.categoryId ?? 'none', value: c.totalPaise, color: c.color ?? colors.textTertiary }))} />
+        <View style={{ marginTop: space.sm }}>
+          {top.map((c) => (
+            <View key={c.categoryId ?? 'none'} style={styles.catRow}>
+              {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
+              <View style={{ flex: 1 }}>
+                <Text variant="labelStrong">{c.name}</Text>
+                <Text variant="caption">{pluralize(c.count, 'expense')}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text variant="labelStrong" numeric>
+                  {formatINR(c.totalPaise, { decimals: 'never' })}
+                </Text>
+                <Text variant="caption" numeric>
+                  {Math.round(c.share * 100)}%
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      </Card>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxxl,
+  },
+  block: {
+    marginTop: space.xl,
+  },
+  listCard: {
+    overflow: 'hidden',
+    paddingVertical: space.xxs,
+  },
+  hero: {
+    borderRadius: radius.xxl,
+    padding: space.xl,
+  },
+  heroAmount: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginTop: space.xs,
+  },
+  deltaRow: {
+    flexDirection: 'row',
+    marginTop: space.xs,
+  },
+  deltaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+  },
+  heroBudget: {
+    marginTop: space.lg,
+    gap: space.xs,
+  },
+  heroBudgetText: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  heroStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+    gap: space.sm,
+  },
+  heroDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  pendingCard: {
+    backgroundColor: tint(colors.brand, 0.08),
+    borderWidth: 1,
+    borderColor: colors.brandSoftBorder,
+    gap: space.md,
+  },
+  pendingTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  pendingIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.xs,
+  },
+});

@@ -4,12 +4,6 @@
   "description": "Android native UPI notification detection for Money Manager",
   "main": "index.ts",
   "types": "index.ts",
-  "scripts": {
-    "build": "expo-module build",
-    "clean": "expo-module clean",
-    "lint": "expo-module lint",
-    "test": "expo-module test"
-  },
   "keywords": [
     "react-native",
     "expo",
@@ -31,9 +25,6 @@
       "android"
     ],
     "hasNativeCode": true
-  },
-  "devDependencies": {
-    "expo-module-scripts": "^4.0.0"
   },
   "peerDependencies": {
     "expo": "*",

@@ -1,885 +1,522 @@
-// Analytics Screen - Comprehensive financial analytics with interactive charts
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, RefreshControl, ActivityIndicator } from 'react-native';
-import { 
-  Screen, 
-  Section, 
-  Card, 
-  Row, 
-  Column,
-  BodyEmphasis, 
-  Body, 
-  Footnote, 
-  Badge,
-  Divider,
-  Button,
-  Title1,
-  Title2,
-  Headline,
-  Caption1,
-  Caption2,
-  Micro,
-  SectionHeader,
-  TextPrimitive,
-  ListItem,
-  DisplayMedium,
-} from '@/design/primitives';
-import { analyticsService, budgetService } from '@/services';
-import { formatCurrency } from '@/domain/transaction';
-import { colors, spacing, radius, shadows, typography } from '@/design/tokens';
-import { PieChart, LineChart, BarChart, yAxisSides } from 'react-native-gifted-charts';
-import { openDatabase } from '@/database/db';
+import React, { useCallback, useMemo, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { colors, radius, space } from '@/design/tokens';
+import { analyticsService, budgetService, ledgerService } from '@/services';
+import { useScreenData } from '@/hooks/useScreenData';
+import { weekBounds } from '@/services/ledger';
+import { BarChart, BarDatum, Donut } from '@/components/Charts';
+import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, startOfDay } from '@/utils/format';
+import {
+  Card,
+  CategoryAvatar,
+  EmptyState,
+  ErrorView,
+  Icon,
+  IconButton,
+  IconName,
+  IconTile,
+  LoadingView,
+  MemberAvatar,
+  ProgressBar,
+  ScreenHeader,
+  SectionTitle,
+  SegmentedControl,
+  Text,
+  UncategorizedAvatar,
+} from '@/components/ui';
 
-type PeriodPreset = '7d' | '1m' | '3m' | '6m' | '1y' | 'custom';
+type Mode = 'week' | 'month' | 'quarter' | 'year';
 
-interface PeriodRange {
-  start: number;
-  end: number;
-  label: string;
-}
-
-interface AnalyticsData {
-  total: { totalPaise: number; transactionCount: number };
-  categories: Array<{
-    categoryId: string;
-    categoryName: string;
-    categoryIcon: string | null;
-    categoryColor: string | null;
-    totalPaise: number;
-    transactionCount: number;
-    percentage: number;
-  }>;
-  merchants: Array<{
-    merchantId: string;
-    merchantName: string;
-    canonicalName: string;
-    totalPaise: number;
-    transactionCount: number;
-  }>;
-  members: Array<{
-    memberId: string;
-    memberName: string;
-    memberColor: string | null;
-    totalPaise: number;
-    transactionCount: number;
-    percentage: number;
-  }>;
-  dailyTrend: Array<{
-    date: number;
-    dateLabel: string;
-    totalPaise: number;
-    transactionCount: number;
-  }>;
-  uncategorized: { totalPaise: number; transactionCount: number; percentage?: number };
-  monthlyComparison: {
-    currentMonth: { totalPaise: number; transactionCount: number };
-    previousMonth: { totalPaise: number; transactionCount: number };
-    differencePaise: number;
-    differencePercent: number;
-    direction: 'higher' | 'lower' | 'same';
-  };
-  insights: Array<{
-    type: string;
-    title: string;
-    description: string;
-    severity: 'info' | 'warning' | 'alert';
-    relatedData?: any;
-  }>;
-}
-
-interface MonthlySpending {
-  month: number;
-  year: number;
-  totalPaise: number;
-  transactionCount: number;
-  label: string;
-}
-
-const PRESET_OPTIONS: { value: PeriodPreset; label: string }[] = [
-  { value: '7d', label: '7D' },
-  { value: '1m', label: '1M' },
-  { value: '3m', label: '3M' },
-  { value: '6m', label: '6M' },
-  { value: '1y', label: '1Y' },
-  { value: 'custom', label: 'Custom' },
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'quarter', label: '3 Months' },
+  { value: 'year', label: 'Year' },
 ];
 
-const CATEGORY_COLORS: Record<string, string> = {
-  'Food': '#FF9500',
-  'Travel': '#007AFF',
-  'Shopping': '#AF52DE',
-  'Bills': '#FF3B30',
-  'Entertainment': '#FF2D92',
-  'Health': '#34C759',
-  'Education': '#5856D6',
-  'Subscriptions': '#00C7BE',
-  'Family': '#FF9F0A',
-  'Personal': '#8E8E93',
-  'Miscellaneous': '#C7C7CC',
-  'Uncategorized': '#8E8E93',
-};
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-function getMonthlyPeriodBounds(year: number, month: number): { start: number; end: number } {
-  const start = new Date(year, month, 1, 0, 0, 0, 0).getTime();
-  const end = new Date(year, month + 1, 1, 0, 0, 0, 0).getTime();
-  return { start, end };
+function rangeFor(mode: Mode, offset: number): { start: number; end: number; label: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const short = (ts: number, withYear = false) =>
+    new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: withYear ? 'numeric' : undefined });
+
+  switch (mode) {
+    case 'week': {
+      const base = weekBounds(now);
+      const start = new Date(base.start).setDate(new Date(base.start).getDate() + offset * 7);
+      const end = new Date(start).setDate(new Date(start).getDate() + 7);
+      const label = offset === 0 ? 'This week' : offset === -1 ? 'Last week' : `${short(start)} – ${short(end - DAY_MS)}`;
+      return { start, end, label };
+    }
+    case 'month': {
+      const start = new Date(y, m + offset, 1).getTime();
+      const end = new Date(y, m + offset + 1, 1).getTime();
+      return { start, end, label: new Date(start).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) };
+    }
+    case 'quarter': {
+      const start = new Date(y, m - 2 + offset * 3, 1).getTime();
+      const end = new Date(y, m + 1 + offset * 3, 1).getTime();
+      const a = new Date(start).toLocaleDateString('en-IN', { month: 'short' });
+      const b = new Date(end - DAY_MS).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+      return { start, end, label: `${a} – ${b}` };
+    }
+    case 'year': {
+      const start = new Date(y + offset, 0, 1).getTime();
+      const end = new Date(y + offset + 1, 0, 1).getTime();
+      return { start, end, label: String(y + offset) };
+    }
+  }
 }
 
-// Loads the last 12 months of confirmed spending directly from the database.
-// Module-level: it does not depend on component state, so effects can call it
-// without capturing stale closures.
-async function loadMonthlySpending(period: PeriodRange): Promise<MonthlySpending[]> {
-  const database = await openDatabase();
-  const now = new Date();
-  const months: MonthlySpending[] = [];
-
-  for (let i = 11; i >= 0; i--) {
-    const year = now.getMonth() - i < 0 ? now.getFullYear() - 1 : now.getFullYear();
-    const month = (now.getMonth() - i + 12) % 12;
-
-    const { start, end } = getMonthlyPeriodBounds(year, month);
-
-    const row = await database.getFirstAsync<{ total: number; count: number }>(
-      `SELECT 
-          COALESCE(SUM(amountPaise), 0) as total,
-          COUNT(*) as count
-         FROM transactions 
-         WHERE status = 'CONFIRMED'
-         AND is_pending_capture = 0
-         AND is_dismissed = 0
-         AND transactionTimestamp >= ?
-         AND transactionTimestamp < ?`,
-      [start, end]
-    );
-
-    months.push({
-      month,
-      year,
-      totalPaise: row?.total || 0,
-      transactionCount: row?.count || 0,
-      label: new Date(year, month).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),
+async function loadSeries(mode: Mode, start: number, end: number): Promise<BarDatum[]> {
+  const today = startOfDay(Date.now());
+  if (mode === 'year') {
+    const points = await ledgerService.getSpendingSeries(start, end, 'month');
+    const now = new Date();
+    return points.map((p) => {
+      const d = new Date(p.start);
+      return {
+        key: p.start,
+        label: p.label.charAt(0),
+        detail: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+        value: p.totalPaise,
+        highlight: d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(),
+      };
     });
   }
 
-  return months;
-}
-
-// Loads all budgets with their spending progress for a period.
-async function loadBudgets(period: PeriodRange) {
-  const budgetResults = await budgetService.getAllBudgetsWithSpending(period.start, period.end);
-  return budgetResults;
-}
-
-
-export default function AnalyticsScreen() {
-  const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('1m');
-  const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(null);
-  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
-  const [monthlySpending, setMonthlySpending] = useState<MonthlySpending[]>([]);
-  const [budgets, setBudgets] = useState<Array<{
-    budget: any;
-    spentPaise: number;
-    remainingPaise: number;
-    percentageUsed: number;
-    status: 'HEALTHY' | 'WARNING' | 'EXCEEDED';
-  }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const periodRange = useMemo((): PeriodRange => {
-    const now = new Date();
-    
-    switch (selectedPreset) {
-      case '7d': {
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-        const start = end - 7 * 24 * 60 * 60 * 1000;
-        return { start, end, label: 'Last 7 Days' };
-      }
-      case '1m': {
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-        const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-        return { start, end, label: 'This Month' };
-      }
-      case '3m': {
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-        const start = new Date(now.getFullYear(), now.getMonth() - 2, 1).getTime();
-        return { start, end, label: 'Last 3 Months' };
-      }
-      case '6m': {
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-        const start = new Date(now.getFullYear(), now.getMonth() - 5, 1).getTime();
-        return { start, end, label: 'Last 6 Months' };
-      }
-      case '1y': {
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-        const start = new Date(now.getFullYear() - 1, now.getMonth(), 1).getTime();
-        return { start, end, label: 'Last Year' };
-      }
-      case 'custom': {
-        if (customRange) {
-          const start = new Date(customRange.start).setHours(0, 0, 0, 0);
-          const end = new Date(customRange.end).setHours(23, 59, 59, 999);
-          return { start, end, label: 'Custom Range' };
-        }
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-        const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-        return { start, end, label: 'This Month' };
-      }
-    }
-  }, [selectedPreset, customRange]);
-
-  // Track mount state and the latest in-flight request so stale responses
-  // never overwrite newer results and results are ignored after unmount.
-  const mountedRef = useRef(true);
-  const requestIdRef = useRef(0);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // Fetches all analytics data for a period. Pure data loading — no state
-  // updates, so it is safe to call from effects.
-  const fetchAnalyticsData = useCallback(async (period: PeriodRange): Promise<{
-    analyticsData: AnalyticsData;
-    monthlyData: MonthlySpending[];
-    budgetData: Awaited<ReturnType<typeof budgetService.getAllBudgetsWithSpending>>;
-  }> => {
-    const [analyticsData, monthlyData, budgetData] = await Promise.all([
-      analyticsService.getAnalytics(period),
-      loadMonthlySpending(period),
-      loadBudgets(period),
-    ]);
-    return { analyticsData, monthlyData, budgetData };
-  }, []);
-
-  // Fetches and applies analytics data. All setState calls happen in promise
-  // callbacks (never in the synchronous body), so this is safe to call from
-  // effects as well as event handlers.
-  const loadAnalytics = useCallback((period: PeriodRange): void => {
-    const requestId = ++requestIdRef.current;
-    const isCurrent = () => mountedRef.current && requestId === requestIdRef.current;
-
-    fetchAnalyticsData(period)
-      .then(({ analyticsData, monthlyData, budgetData }) => {
-        if (!isCurrent()) return;
-        setAnalytics(analyticsData);
-        setMonthlySpending(monthlyData);
-        setBudgets(budgetData);
-      })
-      .catch((err) => {
-        if (!isCurrent()) return;
-        console.error('[Analytics] Load error:', err);
-      })
-      .finally(() => {
-        if (!isCurrent()) return;
-        setLoading(false);
-        setRefreshing(false);
+  const days = await ledgerService.getSpendingSeries(start, end, 'day');
+  if (mode === 'quarter') {
+    const weeks: BarDatum[] = [];
+    for (let i = 0; i < days.length; i += 7) {
+      const chunk = days.slice(i, i + 7);
+      const first = chunk[0].start;
+      const last = chunk[chunk.length - 1].start;
+      weeks.push({
+        key: first,
+        label: new Date(first).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        detail: `${new Date(first).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(last).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+        value: chunk.reduce((s, d) => s + d.totalPaise, 0),
+        highlight: today >= first && today <= last,
       });
-  }, [fetchAnalyticsData]);
-
-  useEffect(() => {
-    loadAnalytics(periodRange);
-  }, [loadAnalytics, periodRange]);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadAnalytics(periodRange);
-  };
-
-  const onPresetChange = (preset: PeriodPreset) => {
-    // Enter the loading state while reloading, but only when the period will
-    // actually change (a no-op tap triggers no reload, so it must not set a
-    // loading state that would never be cleared).
-    if (preset !== selectedPreset) {
-      setLoading(true);
     }
-    setSelectedPreset(preset);
-    if (preset !== 'custom') {
-      setCustomRange(null);
-    }
-  };
-
-  const onCustomRangeSelect = (range: { start: Date; end: Date }) => {
-    setCustomRange(range);
-    setSelectedPreset('custom');
-    setLoading(true);
-  };
-
-  const formatPaise = (paise: number): string => {
-    return `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
-
-  const formatCompactPaise = (paise: number): string => {
-    const rupees = paise / 100;
-    if (rupees >= 100000) {
-      return `₹${(rupees / 100000).toFixed(1)}L`;
-    } else if (rupees >= 1000) {
-      return `₹${(rupees / 1000).toFixed(1)}K`;
-    }
-    return `₹${rupees.toFixed(0)}`;
-  };
-
-  // Prepare chart data
-  const donutChartData = useMemo(() => {
-    if (!analytics) return [];
-    return analytics.categories
-      .filter(c => c.totalPaise > 0)
-      .map((c, i) => ({
-        value: c.totalPaise,
-        color: c.categoryColor || CATEGORY_COLORS[c.categoryName] || colors.accent,
-        text: c.categoryName,
-        tooltipText: `${c.categoryName}: ${formatPaise(c.totalPaise)} (${c.percentage.toFixed(1)}%)`,
-      }));
-  }, [analytics]);
-
-  const trendChartData = useMemo(() => {
-    if (!analytics) return [];
-    // Keep index-based spacing: do not pass explicit `x` values. Combined with
-    // the `gifted-charts-core` override in package.json (0.1.43, the version
-    // react-native-gifted-charts 1.4.28 is built against), this keeps data
-    // point positions finite for every possible point count, including a
-    // single trend point.
-    return analytics.dailyTrend.map((d) => ({
-      value: d.totalPaise,
-      label: d.dateLabel,
-    }));
-  }, [analytics]);
-
-  const categoryBarChartData = useMemo(() => {
-    if (!analytics) return [];
-    return analytics.categories
-      .filter(c => c.totalPaise > 0)
-      .map((c, i) => ({
-        value: c.totalPaise,
-        label: c.categoryName,
-        color: c.categoryColor || CATEGORY_COLORS[c.categoryName] || colors.accent,
-      }));
-  }, [analytics]);
-
-  const monthlyBarChartData = useMemo(() => {
-    return monthlySpending.map((m, i) => ({
-      value: m.totalPaise,
-      label: m.label,
-      color: m.month === new Date().getMonth() && m.year === new Date().getFullYear() 
-        ? colors.accent 
-        : colors.accentLight,
-    }));
-  }, [monthlySpending]);
-
-  const memberBarChartData = useMemo(() => {
-    if (!analytics) return [];
-    return analytics.members
-      .filter(m => m.totalPaise > 0)
-      .map((m, i) => ({
-        value: m.totalPaise,
-        label: m.memberName,
-        color: m.memberColor || colors.accent,
-      }));
-  }, [analytics]);
-
-  if (loading && !analytics) {
-    return (
-      <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Body color={colors.textTertiary}>Loading analytics…</Body>
-      </Screen>
-    );
+    return weeks;
   }
 
-  const totalSpending = analytics?.total.totalPaise || 0;
-  const avgDaily = analytics?.dailyTrend.length 
-    ? Math.round(totalSpending / Math.max(1, analytics.dailyTrend.length))
-    : 0;
-  const transactionCount = analytics?.total.transactionCount || 0;
-  const monthlyComp = analytics?.monthlyComparison;
+  return days.map((p) => ({
+    key: p.start,
+    label: mode === 'week' ? new Date(p.start).toLocaleDateString('en-IN', { weekday: 'short' }) : p.label,
+    detail: formatDayLabel(p.start),
+    value: p.totalPaise,
+    highlight: p.start === today,
+  }));
+}
+
+export default function InsightsScreen() {
+  const [mode, setMode] = useState<Mode>('month');
+  const [offset, setOffset] = useState(0);
+
+  const range = useMemo(() => rangeFor(mode, offset), [mode, offset]);
+
+  const fetcher = useCallback(async () => {
+    // For the current (unfinished) period, compare against the same elapsed
+    // span of the previous one, not its full length.
+    const prevFull = rangeFor(mode, offset - 1);
+    const elapsed = Date.now() - range.start;
+    const prev =
+      offset === 0 && elapsed < range.end - range.start
+        ? { start: prevFull.start, end: Math.min(prevFull.end, prevFull.start + elapsed) }
+        : prevFull;
+    const period = { start: range.start, end: range.end, label: range.label };
+    const [totals, prevTotals, series, categories, merchants, members, largest, budgets] = await Promise.all([
+      ledgerService.getHistoryTotals({ start: range.start, end: range.end }),
+      ledgerService.getHistoryTotals({ start: prev.start, end: prev.end }),
+      loadSeries(mode, range.start, range.end),
+      ledgerService.getCategoryShares(range.start, range.end),
+      analyticsService.getMerchantSpending(period, 5),
+      analyticsService.getMemberSpending(period),
+      ledgerService.getLargestExpense(range.start, range.end),
+      mode === 'month' ? budgetService.getMonthlyBudgets(new Date(range.start)) : Promise.resolve([]),
+    ]);
+    const elapsedDays = Math.max(1, Math.ceil((Math.min(Date.now(), range.end) - range.start) / DAY_MS));
+    return { totals, prevTotals, series, categories, merchants, members, largest, budgets, elapsedDays, partial: prev !== prevFull };
+  }, [mode, offset, range]);
+
+  const { data, error, refreshing, refresh, reload } = useScreenData(fetcher);
+
+  const changeMode = (next: Mode) => {
+    setMode(next);
+    setOffset(0);
+  };
+
+  if (error && !data) return <ErrorView message={error} onRetry={reload} />;
+  if (!data) return <LoadingView />;
+
+  const { totals, prevTotals } = data;
+  const [whole, fraction] = splitINR(totals.total);
+  const change = prevTotals.total > 0 ? (totals.total - prevTotals.total) / prevTotals.total : null;
+  const perDay = Math.round(totals.total / data.elapsedDays);
+  const previousLabel = { week: 'last week', month: 'last month', quarter: 'previous 3 months', year: 'last year' }[mode];
+  const isEmpty = totals.count === 0;
+
+  // Derived observations
+  const insights: { icon: IconName; color: string; title: string; body: string }[] = [];
+  const topCategory = data.categories.find((c) => c.categoryId);
+  if (topCategory) {
+    insights.push({
+      icon: 'pie',
+      color: topCategory.color ?? colors.brand,
+      title: `${topCategory.name} leads your spending`,
+      body: `${Math.round(topCategory.share * 100)}% of the total, ${formatINR(topCategory.totalPaise)} across ${pluralize(topCategory.count, 'expense')}.`,
+    });
+  }
+  const frequent = [...data.merchants].sort((a, b) => b.transactionCount - a.transactionCount)[0];
+  if (frequent && frequent.transactionCount >= 2) {
+    insights.push({
+      icon: 'store',
+      color: colors.info,
+      title: `You paid ${frequent.canonicalName} ${frequent.transactionCount} times`,
+      body: `${formatINR(frequent.totalPaise)} in total, about ${formatINR(Math.round(frequent.totalPaise / frequent.transactionCount))} each time.`,
+    });
+  }
+  if (data.largest) {
+    insights.push({
+      icon: 'zap',
+      color: colors.warning,
+      title: `Biggest expense: ${formatINR(data.largest.amountPaise)}`,
+      body: `${data.largest.merchant} on ${formatDayLabel(data.largest.timestamp)}.`,
+    });
+  }
+  const uncategorized = data.categories.find((c) => !c.categoryId);
+  if (uncategorized && uncategorized.count > 0) {
+    insights.push({
+      icon: 'tag',
+      color: colors.textTertiary,
+      title: `${pluralize(uncategorized.count, 'expense')} without a category`,
+      body: 'Categorize them for more accurate insights and budgets.',
+    });
+  }
 
   return (
-    <Screen>
+    <View style={styles.screen}>
+      <ScreenHeader large title="Insights" />
       <ScrollView
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[colors.accent]}
-            progressViewOffset={Platform.OS === 'ios' ? 20 : 0}
-          />
-        }
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: spacing[25] }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} tintColor={colors.brand} />}
       >
-        {/* Header with Period Selector */}
-        <Section paddedHorizontal style={{ paddingTop: spacing[2], paddingBottom: spacing[2] }}>
-          <Row justify="space-between" align="center">
-            <Title1 style={{ letterSpacing: typography.letterSpacing.display }}>Analytics</Title1>
-          </Row>
-          
-          {/* Period Picker */}
-          <View style={{ marginTop: spacing[3] }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', gap: spacing[2] }}>
-              {PRESET_OPTIONS.map(opt => (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[
-                    styles.periodButton,
-                    selectedPreset === opt.value && styles.periodButtonActive,
-                  ]}
-                  onPress={() => onPresetChange(opt.value)}
-                >
-                  <TextPrimitive
-                    variant="caption1"
-                    style={[
-                      styles.periodButtonText,
-                      selectedPreset === opt.value && styles.periodButtonTextActive,
-                    ]}
-                  >
-                    {opt.label}
-                  </TextPrimitive>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            
-            {/* Custom Range Display */}
-            {selectedPreset === 'custom' && customRange && (
-              <Body color={colors.textTertiary} style={{ marginTop: spacing[2], textAlign: 'center' }}>
-                {customRange.start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                {' — '}
-                {customRange.end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-              </Body>
-            )}
+        <SegmentedControl options={MODES} value={mode} onChange={changeMode} />
+
+        <View style={styles.periodNav}>
+          <IconButton icon="chevronLeft" size={36} accessibilityLabel="Previous period" onPress={() => setOffset((o) => o - 1)} />
+          <Text variant="bodyStrong">{range.label}</Text>
+          <IconButton
+            icon="chevronRight"
+            size={36}
+            accessibilityLabel="Next period"
+            disabled={offset >= 0}
+            color={offset >= 0 ? colors.textDisabled : colors.text}
+            onPress={() => setOffset((o) => Math.min(0, o + 1))}
+          />
+        </View>
+
+        {/* Summary */}
+        <Card>
+          <Text variant="overline">Total spent</Text>
+          <View style={styles.amountRow}>
+            <Text variant="hero" numeric>
+              {whole}
+            </Text>
+            <Text variant="heading" color={colors.textTertiary} numeric style={{ marginBottom: 4 }}>
+              {fraction}
+            </Text>
           </View>
-        </Section>
-
-        {/* Spending Summary Cards */}
-        <Section paddedHorizontal style={{ paddingBottom: spacing[3] }}>
-          <Row gap={spacing[2]} style={{ flexWrap: 'wrap' }}>
-            <Card variant="outlined" style={{ flex: 1, minWidth: 140, padding: spacing[4] }}>
-              <Column gap={spacing[1]} align="center">
-                <Micro color={colors.textSecondary}>TOTAL SPENDING</Micro>
-                <Headline color={colors.textPrimary}>{formatPaise(totalSpending)}</Headline>
-                {monthlyComp && (
-                  <Caption1 
-                    color={monthlyComp.direction === 'higher' ? colors.error : monthlyComp.direction === 'lower' ? colors.success : colors.textTertiary}
-                    style={{ textAlign: 'center' }}
-                  >
-                    {monthlyComp.direction === 'higher' ? '▲' : monthlyComp.direction === 'lower' ? '▼' : '→'}
-                    {monthlyComp.differencePercent}% vs last month
-                  </Caption1>
-                )}
-              </Column>
-            </Card>
-            
-            <Card variant="outlined" style={{ flex: 1, minWidth: 140, padding: spacing[4] }}>
-              <Column gap={spacing[1]} align="center">
-                <Micro color={colors.textSecondary}>AVG PER DAY</Micro>
-                <Headline color={colors.textPrimary}>{formatPaise(avgDaily)}</Headline>
-                <Caption1 color={colors.textTertiary}>
-                  {analytics?.dailyTrend.length || 0} active days
-                </Caption1>
-              </Column>
-            </Card>
-            
-            <Card variant="outlined" style={{ flex: 1, minWidth: 140, padding: spacing[4] }}>
-              <Column gap={spacing[1]} align="center">
-                <Micro color={colors.textSecondary}>TRANSACTIONS</Micro>
-                <Headline color={colors.textPrimary}>{transactionCount}</Headline>
-                <Caption1 color={colors.textTertiary}>
-                  Confirmed
-                </Caption1>
-              </Column>
-            </Card>
-            
-            <Card variant="outlined" style={{ flex: 1, minWidth: 140, padding: spacing[4] }}>
-              <Column gap={spacing[1]} align="center">
-                <Micro color={colors.textSecondary}>AVG TXN</Micro>
-                <Headline color={colors.textPrimary}>
-                  {transactionCount > 0 ? formatPaise(Math.round(totalSpending / transactionCount)) : '₹0'}
-                </Headline>
-                <Caption1 color={colors.textTertiary}>
-                  Per transaction
-                </Caption1>
-              </Column>
-            </Card>
-          </Row>
-        </Section>
-
-        {/* Category Distribution - Donut Chart */}
-        {analytics && analytics.categories.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Spending by Category" subtitle={`${analytics.categories.filter(c => c.totalPaise > 0).length} categories`} />
-            <Card variant="outlined" style={{ padding: spacing[4] }}>
-              <View style={{ height: 220, justifyContent: 'center', alignItems: 'center' }}>
-                <PieChart
-                  data={donutChartData}
-                  radius={100}
-                  innerRadius={70}
-                  donut={true}
-                  isAnimated={true}
-                  animationDuration={800}
-                  showText={false}
-                  showTooltip={true}
-                  showValuesAsTooltipText={true}
-                  centerLabelComponent={() => (
-                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
-                      <DisplayMedium style={{ letterSpacing: typography.letterSpacing.display }}>{formatPaise(totalSpending)}</DisplayMedium>
-                      <Caption1 color={colors.textTertiary}>Total</Caption1>
-                    </View>
-                  )}
-                />
-              </View>
-              
-              {/* Category Legend */}
-              <View style={{ marginTop: spacing[4], flexWrap: 'wrap', flexDirection: 'row', gap: spacing[2], justifyContent: 'center' }}>
-                {analytics.categories
-                  .filter(c => c.totalPaise > 0)
-                  .map((c, i) => (
-                    <TouchableOpacity
-                      key={c.categoryId}
-                      style={styles.legendItem}
-                      onPress={() => {}}
-                    >
-                      <View style={[
-                        styles.legendColorDot,
-                        { backgroundColor: c.categoryColor || CATEGORY_COLORS[c.categoryName] || colors.accent }
-                      ]} />
-                      <TextPrimitive variant="caption2" color={colors.textSecondary}>
-                        {c.categoryName} {c.percentage.toFixed(1)}%
-                      </TextPrimitive>
-                    </TouchableOpacity>
-                  ))}
-                {analytics.uncategorized.totalPaise > 0 && (
-                  <TouchableOpacity style={styles.legendItem}>
-                    <View style={[styles.legendColorDot, { backgroundColor: CATEGORY_COLORS.Uncategorized }]} />
-                    <TextPrimitive variant="caption2" color={colors.textTertiary}>
-                      Uncategorized {analytics.uncategorized.percentage?.toFixed(1) || 0}%
-                    </TextPrimitive>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </Card>
-          </Section>
-        )}
-
-        {/* Spending Trend - Line Chart */}
-        {analytics && analytics.dailyTrend.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Spending Trend" subtitle="Daily totals" />
-            <Card variant="outlined" style={{ padding: spacing[4] }}>
-              <View style={{ height: 200 }}>
-                <LineChart
-                  data={trendChartData}
-                  width={340}
-                  height={200}
-                  isAnimated={true}
-                  animationDuration={800}
-                  color={colors.accent}
-                  areaChart={true}
-                  startFillColor={colors.accent + '40'}
-                  endFillColor={colors.accent + '00'}
-                  hideDataPoints={false}
-                  dataPointsColor={colors.accent}
-                  dataPointsRadius={4}
-                  dataPointsWidth={8}
-                  dataPointsHeight={8}
-                  showXAxisIndices={true}
-                  xAxisLabelsAtBottom={true}
-                  xAxisTextNumberOfLines={1}
-                  hideYAxisText={false}
-                  yAxisTextStyle={{ fontSize: 10, color: colors.textTertiary }}
-                  curved={true}
-                  curvature={0.35}
-                  thickness={2}
-                  rulesColor={colors.dividerLight}
-                  rulesLength={4}
-                />
-              </View>
-            </Card>
-          </Section>
-        )}
-
-        {/* Category Comparison - Horizontal Bar Chart */}
-        {analytics && analytics.categories.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Category Comparison" subtitle="Sorted by spending" />
-            <Card variant="outlined" style={{ padding: spacing[4] }}>
-              <View style={{ height: Math.max(200, analytics.categories.filter(c => c.totalPaise > 0).length * 35 + 40) }}>
-                <BarChart
-                  data={categoryBarChartData}
-                  width={340}
-                  height={Math.max(200, analytics.categories.filter(c => c.totalPaise > 0).length * 35 + 40)}
-                  horizontal={true}
-                  isAnimated={true}
-                  animationDuration={800}
-                  spacing={8}
-                  barWidth={28}
-                  showXAxisIndices={true}
-                  showYAxisIndices={true}
-                  xAxisLabelsAtBottom={false}
-                  yAxisSide={yAxisSides.LEFT}
-                  yAxisLabelWidth={100}
-                  showValuesAsTopLabel={true}
-                  topLabelTextStyle={{ fontSize: 10, color: colors.textPrimary }}
-                  formatYLabel={(label) => formatCompactPaise(parseFloat(label))}
-                  rulesColor={colors.dividerLight}
-                  rulesLength={4}
-                  hideYAxisText={false}
-                  yAxisTextStyle={{ fontSize: 10, color: colors.textTertiary }}
-                />
-              </View>
-            </Card>
-          </Section>
-        )}
-
-        {/* Monthly Spending - Vertical Bar Chart */}
-        <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-          <SectionHeader title="Monthly Spending" subtitle="Last 12 months" />
-          <Card variant="outlined" style={{ padding: spacing[4] }}>
-            <View style={{ height: 200 }}>
-              <BarChart
-                data={monthlyBarChartData}
-                width={340}
-                height={200}
-                horizontal={false}
-                isAnimated={true}
-                animationDuration={800}
-                spacing={8}
-                barWidth={20}
-                showXAxisIndices={true}
-                showYAxisIndices={true}
-                xAxisLabelsAtBottom={true}
-                xAxisTextNumberOfLines={1}
-                hideYAxisText={false}
-                yAxisTextStyle={{ fontSize: 10, color: colors.textTertiary }}
-                rulesColor={colors.dividerLight}
-                rulesLength={4}
-                showValuesAsTopLabel={true}
-                topLabelTextStyle={{ fontSize: 10, color: colors.textPrimary }}
-                formatYLabel={(label) => formatCompactPaise(parseFloat(label))}
+          {change !== null ? (
+            <View style={styles.changeRow}>
+              <Icon
+                name={change > 0 ? 'trendingUp' : 'trendingDown'}
+                size={16}
+                color={change > 0 ? colors.negative : colors.positive}
               />
+              <Text variant="label" color={change > 0 ? colors.negative : colors.positive}>
+                {Math.abs(change) >= 10 ? 'Far' : `${Math.round(Math.abs(change) * 100)}%`} {change > 0 ? 'more' : 'less'} than{' '}
+                {previousLabel}
+                {data.partial ? ' so far' : ''}
+              </Text>
             </View>
+          ) : (
+            <Text variant="label" style={{ marginTop: space.xxs }}>
+              Nothing to compare with {previousLabel}
+            </Text>
+          )}
+          <View style={styles.statRow}>
+            <Stat label="Expenses" value={String(totals.count)} />
+            <Stat label="Per day" value={formatCompactINR(perDay)} />
+            <Stat label="Average" value={totals.count ? formatCompactINR(Math.round(totals.total / totals.count)) : '₹0'} />
+          </View>
+        </Card>
+
+        {isEmpty ? (
+          <Card style={styles.block}>
+            <EmptyState
+              compact
+              icon="chart"
+              title="No spending in this period"
+              message="Pick another period, or add expenses to see trends and breakdowns."
+            />
           </Card>
-        </Section>
+        ) : (
+          <>
+            <View style={styles.block}>
+              <SectionTitle title="Spending trend" />
+              <Card>
+                <BarChart data={data.series} labelEvery={mode === 'month' ? 5 : mode === 'quarter' ? 3 : 1} />
+              </Card>
+            </View>
 
-        {/* Top Merchants */}
-        {analytics && analytics.merchants.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader 
-              title="Top Merchants" 
-              subtitle={`${analytics.merchants.length} merchants`}
-              action={{ label: 'View All', onPress: () => {} }}
-            />
-            <Card variant="outlined">
-              {analytics.merchants.slice(0, 5).map((merchant, i) => (
-                <TouchableOpacity
-                  key={merchant.merchantId}
-                  style={[styles.merchantRow, i === analytics.merchants.length - 1 ? { borderBottomWidth: 0 } : {}]}
-                  activeOpacity={0.8}
-                >
-                  <Column gap={spacing[1]} style={{ flex: 1, minWidth: 0 }}>
-                    <BodyEmphasis numberOfLines={1} ellipsizeMode="tail">{merchant.canonicalName}</BodyEmphasis>
-                    <Caption1 color={colors.textTertiary}>
-                      {merchant.transactionCount} transaction{merchant.transactionCount > 1 ? 's' : ''} • {((merchant.totalPaise / totalSpending) * 100).toFixed(1)}%
-                    </Caption1>
-                  </Column>
-                  <BodyEmphasis style={{ textAlign: 'right', marginLeft: spacing[3] }}>{formatPaise(merchant.totalPaise)}</BodyEmphasis>
-                </TouchableOpacity>
-              ))}
-              {analytics.merchants.length > 5 && (
-                <TouchableOpacity style={styles.viewAllButton} onPress={() => {}}>
-                  <TextPrimitive variant="buttonSmall" color={colors.accent}>View all {analytics.merchants.length} merchants</TextPrimitive>
-                </TouchableOpacity>
-              )}
-            </Card>
-          </Section>
-        )}
-
-        {/* Member Breakdown */}
-        {analytics && analytics.members.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Spending by Member" subtitle={`${analytics.members.length} members`} />
-            <Card variant="outlined" style={{ padding: spacing[4] }}>
-              <View style={{ height: Math.max(180, analytics.members.filter(m => m.totalPaise > 0).length * 35 + 40) }}>
-                <BarChart
-                  data={memberBarChartData}
-                  width={340}
-                  height={Math.max(180, analytics.members.filter(m => m.totalPaise > 0).length * 35 + 40)}
-                  horizontal={true}
-                  isAnimated={true}
-                  animationDuration={800}
-                  spacing={8}
-                  barWidth={28}
-                  showXAxisIndices={true}
-                  showYAxisIndices={true}
-                  xAxisLabelsAtBottom={false}
-                  yAxisSide={yAxisSides.LEFT}
-                  yAxisLabelWidth={80}
-                  showValuesAsTopLabel={true}
-                  topLabelTextStyle={{ fontSize: 10, color: colors.textPrimary }}
-                  formatYLabel={(label) => formatCompactPaise(parseFloat(label))}
-                  rulesColor={colors.dividerLight}
-                  rulesLength={4}
-                  hideYAxisText={false}
-                  yAxisTextStyle={{ fontSize: 10, color: colors.textTertiary }}
-                />
-              </View>
-              
-              {/* Unassigned */}
-              {analytics.uncategorized.totalPaise > 0 && (
-                <View style={{ marginTop: spacing[3], paddingTop: spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.dividerLight }}>
-                  <Row justify="space-between" align="center">
-                    <Row gap={spacing[2]} align="center">
-                      <View style={[styles.legendColorDot, { backgroundColor: colors.textQuaternary }]} />
-                      <BodyEmphasis>Unassigned</BodyEmphasis>
-                    </Row>
-                    <BodyEmphasis>{formatPaise(analytics.uncategorized.totalPaise)}</BodyEmphasis>
-                  </Row>
+            <View style={styles.block}>
+              <SectionTitle title="Where it went" />
+              <Card>
+                <View style={styles.donutWrap}>
+                  <Donut
+                    slices={data.categories.map((c) => ({ key: c.categoryId ?? 'none', value: c.totalPaise, color: c.color ?? colors.textTertiary }))}
+                  >
+                    <Text variant="caption">{pluralize(data.categories.length, 'category', 'categories')}</Text>
+                    <Text variant="heading" numeric>
+                      {formatCompactINR(totals.total)}
+                    </Text>
+                  </Donut>
                 </View>
-              )}
-            </Card>
-          </Section>
-        )}
-
-        {/* Budget Progress */}
-        {budgets && budgets.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader 
-              title="Budget Progress" 
-              subtitle={`${budgets.length} active budget${budgets.length > 1 ? 's' : ''}`}
-              action={{ label: 'Manage', onPress: () => {} }}
-            />
-            <Card variant="outlined">
-              {budgets.map((b, i) => (
-                <View key={b.budget.id} style={[styles.budgetRow, i > 0 && { paddingTop: spacing[3], marginTop: spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.dividerLight }]}>
-                  <Row justify="space-between" align="center" style={{ marginBottom: spacing[2] }}>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <BodyEmphasis>{b.budget.category?.name || 'Budget'}</BodyEmphasis>
-                      <Caption1 color={colors.textTertiary}>
-                        {formatPaise(b.spentPaise)} / {formatPaise(b.budget.amountPaise)}
-                      </Caption1>
+                {data.categories.map((c) => (
+                  <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
+                    {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <View style={styles.breakdownText}>
+                        <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
+                          {c.name}
+                        </Text>
+                        <Text variant="labelStrong" numeric>
+                          {formatINR(c.totalPaise, { decimals: 'never' })}
+                        </Text>
+                      </View>
+                      <View style={styles.breakdownText}>
+                        <View style={{ flex: 1 }}>
+                          <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
+                        </View>
+                        <Text variant="caption" numeric style={styles.pct}>
+                          {Math.round(c.share * 100)}%
+                        </Text>
+                      </View>
                     </View>
-                    <Badge 
-                      variant={b.status === 'HEALTHY' ? 'success' : b.status === 'WARNING' ? 'warning' : 'error'} 
-                      size="small"
-                    >
-                      <Caption2>{b.status}</Caption2>
-                    </Badge>
-                  </Row>
-                  <View style={{ height: 8, backgroundColor: colors.backgroundAlt, borderRadius: 4, overflow: 'hidden' }}>
-                    <View
-                      style={{
-                        width: `${Math.min(b.percentageUsed, 100)}%`,
-                        height: '100%',
-                        backgroundColor: b.status === 'HEALTHY' ? colors.success : b.status === 'WARNING' ? colors.warning : colors.error,
-                        borderRadius: 4,
-                      }}
-                    />
                   </View>
-                  <Caption1 color={colors.textTertiary} style={{ marginTop: spacing[1], textAlign: 'right' }}>
-                    {b.percentageUsed}% used • {b.remainingPaise >= 0 ? formatPaise(b.remainingPaise) + ' left' : formatPaise(Math.abs(b.remainingPaise)) + ' over'}
-                  </Caption1>
+                ))}
+              </Card>
+            </View>
+
+            {data.budgets.length > 0 ? (
+              <View style={styles.block}>
+                <SectionTitle title="Budgets" action="Manage" onAction={() => router.push('/budgets')} />
+                <Card>
+                  {data.budgets.map((b, i) => {
+                    const over = b.spentPaise > b.budget.amountPaise;
+                    const barColor = b.status === 'EXCEEDED' ? colors.negative : b.status === 'WARNING' ? colors.warning : colors.positive;
+                    return (
+                      <View key={b.budget.id} style={[styles.budgetRow, i > 0 && styles.budgetDivider]}>
+                        <View style={styles.breakdownText}>
+                          <Text variant="labelStrong" style={{ flex: 1 }}>
+                            {b.category?.name ?? b.budget.name}
+                          </Text>
+                          <Text variant="label" numeric>
+                            {formatCompactINR(b.spentPaise)} / {formatCompactINR(b.budget.amountPaise)}
+                          </Text>
+                        </View>
+                        <ProgressBar value={b.spentPaise / b.budget.amountPaise} color={barColor} />
+                        <Text variant="caption" color={over ? colors.negative : colors.textTertiary}>
+                          {over ? `${formatINR(-b.remainingPaise)} over budget` : `${formatINR(b.remainingPaise)} left`}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </Card>
+              </View>
+            ) : null}
+
+            {data.merchants.length > 0 ? (
+              <View style={styles.block}>
+                <SectionTitle title="Top merchants" />
+                <Card>
+                  {data.merchants.map((mch, i) => (
+                    <View key={mch.merchantId} style={styles.merchantRow}>
+                      <View style={styles.rank}>
+                        <Text variant="labelStrong" color={colors.brand}>
+                          {i + 1}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text variant="labelStrong" numberOfLines={1}>
+                          {mch.canonicalName}
+                        </Text>
+                        <Text variant="caption">{pluralize(mch.transactionCount, 'payment')}</Text>
+                      </View>
+                      <Text variant="labelStrong" numeric>
+                        {formatINR(mch.totalPaise, { decimals: 'never' })}
+                      </Text>
+                    </View>
+                  ))}
+                </Card>
+              </View>
+            ) : null}
+
+            {data.members.length > 0 ? (
+              <View style={styles.block}>
+                <SectionTitle title="Spent on" />
+                <Card>
+                  {data.members.map((mem) => (
+                    <View key={mem.memberId} style={styles.breakdownRow}>
+                      <MemberAvatar name={mem.memberName} color={mem.memberColor} size={36} />
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <View style={styles.breakdownText}>
+                          <Text variant="labelStrong" style={{ flex: 1 }}>
+                            {mem.memberName}
+                          </Text>
+                          <Text variant="labelStrong" numeric>
+                            {formatINR(mem.totalPaise, { decimals: 'never' })}
+                          </Text>
+                        </View>
+                        <ProgressBar value={mem.percentage / 100} color={mem.memberColor ?? colors.brand} height={6} />
+                      </View>
+                    </View>
+                  ))}
+                </Card>
+              </View>
+            ) : null}
+
+            {insights.length > 0 ? (
+              <View style={styles.block}>
+                <SectionTitle title="Highlights" />
+                <View style={{ gap: space.sm }}>
+                  {insights.map((ins) => (
+                    <Card key={ins.title} style={styles.insight}>
+                      <IconTile icon={ins.icon} color={ins.color} />
+                      <View style={{ flex: 1 }}>
+                        <Text variant="labelStrong">{ins.title}</Text>
+                        <Text variant="caption" style={{ marginTop: 2 }}>
+                          {ins.body}
+                        </Text>
+                      </View>
+                    </Card>
+                  ))}
                 </View>
-              ))}
-            </Card>
-          </Section>
-        )}
-
-        {/* Additional Insights */}
-        {analytics && analytics.insights.length > 0 && (
-          <Section paddedHorizontal style={{ paddingBottom: spacing[4] }}>
-            <SectionHeader title="Insights" subtitle={`${analytics.insights.length} observations`} />
-            <Card variant="outlined">
-              {analytics.insights.map((insight, i) => (
-                <TouchableOpacity
-                  key={insight.type + i}
-                  style={[styles.insightRow, i > 0 && { paddingTop: spacing[3], marginTop: spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.dividerLight }]}
-                  activeOpacity={0.8}
-                >
-                  <Row gap={spacing[3]} align="flex-start">
-                    <View style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: insight.severity === 'alert' ? colors.error : insight.severity === 'warning' ? colors.warning : colors.accent,
-                      marginTop: 4,
-                    }} />
-                    <Column gap={spacing[1]} style={{ flex: 1 }}>
-                      <BodyEmphasis>{insight.title}</BodyEmphasis>
-                      <Caption1 color={colors.textTertiary}>{insight.description}</Caption1>
-                    </Column>
-                  </Row>
-                </TouchableOpacity>
-              ))}
-            </Card>
-          </Section>
-        )}
-
-        {/* Empty State */}
-        {!analytics && (
-          <Section paddedHorizontal style={{ paddingTop: spacing[20], paddingBottom: spacing[20] }}>
-            <Card variant="subtle">
-              <Section padded style={{ alignItems: 'center' }}>
-                <TextPrimitive variant="displaySmall" color={colors.textTertiary} style={{ marginBottom: spacing[3] }}>📊</TextPrimitive>
-                <Title2 style={{ textAlign: 'center', marginBottom: spacing[2] }}>No Data Yet</Title2>
-                <Body color={colors.textTertiary} style={{ textAlign: 'center' }}>
-                  Analytics will appear once you have confirmed transactions.
-                </Body>
-              </Section>
-            </Card>
-          </Section>
+              </View>
+            ) : null}
+          </>
         )}
       </ScrollView>
-    </Screen>
+    </View>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text variant="caption">{label}</Text>
+      <Text variant="bodyStrong" numeric style={{ marginTop: 2 }}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  periodButton: {
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1],
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderDefault,
-    backgroundColor: colors.surface,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  periodButtonActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+  content: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxxl,
   },
-  periodButtonText: {
-    color: colors.textSecondary,
-    fontWeight: typography.weight.medium,
-  },
-  periodButtonTextActive: {
-    color: colors.textOnAccent,
-  },
-  legendItem: {
+  periodNav: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[1],
-    paddingHorizontal: spacing[2],
-    paddingVertical: spacing[1],
-  },
-  legendColorDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  merchantRow: {
-    padding: spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.dividerLight,
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    marginVertical: space.md,
   },
-  viewAllButton: {
-    padding: spacing[3],
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginTop: space.xxs,
+  },
+  changeRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    marginTop: space.xxs,
+  },
+  statRow: {
+    flexDirection: 'row',
+    marginTop: space.md,
+    paddingTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  stat: {
+    flex: 1,
+  },
+  block: {
+    marginTop: space.xl,
+  },
+  donutWrap: {
+    alignItems: 'center',
+    paddingVertical: space.sm,
+    marginBottom: space.sm,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.xs,
+  },
+  breakdownText: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+  pct: {
+    width: 36,
+    textAlign: 'right',
   },
   budgetRow: {
-    padding: spacing[3],
+    gap: space.xs,
+    paddingVertical: space.xs,
   },
-  insightRow: {
-    padding: spacing[3],
+  budgetDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: space.sm,
+    marginTop: space.xs,
+  },
+  merchantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.xs,
+  },
+  rank: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
 });

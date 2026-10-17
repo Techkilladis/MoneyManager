@@ -33,6 +33,11 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         initializeComponents()
+        android.util.Log.d(
+            "MoneyManagerNotif",
+            "listener service created; debuggable=" +
+                ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+        )
     }
 
     private fun initializeComponents() {
@@ -48,6 +53,9 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
+        // Diagnostic: confirms listener callbacks are delivered (package only,
+        // never content — content stays on-device in the pending-event store).
+        android.util.Log.d("MoneyManagerNotif", "onNotificationPosted: ${sbn.packageName} (id=${sbn.id})")
         processNotification(sbn)
     }
 
@@ -61,20 +69,29 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
         try {
             // Check if this is from a supported UPI app
             val packageName = sbn.packageName
-            if (!upiAppRegistry.isSupportedUpiApp(packageName)) {
+            val supported = upiAppRegistry.isSupportedUpiApp(packageName)
+            android.util.Log.d("MoneyManagerNotif", "processNotification: pkg=$packageName supported=$supported")
+            if (!supported) {
                 return
             }
 
             // Normalize the notification
             val normalized = NormalizedNotification.fromStatusBarNotification(sbn)
-            
+            android.util.Log.d(
+                "MoneyManagerNotif",
+                "normalized: titleLen=${normalized.title?.length ?: -1} textLen=${normalized.text?.length ?: -1} bigTextLen=${normalized.bigText?.length ?: -1} subTextLen=${normalized.subText?.length ?: -1}"
+            )
+
             // Try to parse with registered parsers
             val parsed = parserRegistry.tryParse(normalized)
-            
+            android.util.Log.d("MoneyManagerNotif", "parse result: ${parsed != null}")
+
             if (parsed != null) {
                 // Check for duplicates
                 val dedupeKey = dedupeEngine.generateKey(parsed)
-                if (dedupeEngine.isDuplicate(dedupeKey)) {
+                val isDuplicate = dedupeEngine.isDuplicate(dedupeKey)
+                android.util.Log.d("MoneyManagerNotif", "dedupe: key=$dedupeKey duplicate=$isDuplicate")
+                if (isDuplicate) {
                     // Update existing event if needed
                     dedupeEngine.updateExisting(dedupeKey, parsed)
                     return
@@ -86,6 +103,12 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
                     notificationId = sbn.id.toString(),
                     dedupeKey = dedupeKey
                 )
+                android.util.Log.d("MoneyManagerNotif", "stored pending event: ${event.id}")
+
+                // Register the key AFTER the event is durable so re-deliveries
+                // of this notification are recognized as duplicates (both in
+                // this process and after restarts, via SharedPreferences).
+                dedupeEngine.markSeen(dedupeKey)
 
                 // Broadcast to React Native if available
                 broadcastPendingEvent(event)

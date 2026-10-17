@@ -10,7 +10,8 @@ import android.content.pm.PackageManager
 class UpiAppRegistry private constructor(context: Context) {
 
     private val packageManager: PackageManager = context.packageManager
-    
+    private val appContext: Context = context.applicationContext
+
     // Map of supported UPI app package names to source identifiers
     private val supportedApps: Map<String, String> = mapOf(
         "com.google.android.apps.nbu.paisa.user" to "GOOGLE_PAY",       // Google Pay
@@ -32,6 +33,13 @@ class UpiAppRegistry private constructor(context: Context) {
         @Volatile
         private var INSTANCE: UpiAppRegistry? = null
 
+        // Notifications posted via `adb shell cmd notification post` carry
+        // the shell package. Accepting them lets the REAL listener path
+        // (service → normalizer → parser → dedupe → store) be exercised on
+        // debug builds without a UPI app installed. Release builds are never
+        // debuggable, so this changes nothing for production.
+        private const val ADB_SHELL_PACKAGE = "com.android.shell"
+
         fun getInstance(context: Context): UpiAppRegistry {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: UpiAppRegistry(context.applicationContext).also { INSTANCE = it }
@@ -40,9 +48,18 @@ class UpiAppRegistry private constructor(context: Context) {
     }
 
     /**
+     * True when the app is a debuggable (development) build. Test injection
+     * via adb is enabled only in this mode.
+     */
+    private val isDebugBuild: Boolean by lazy {
+        (appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    /**
      * Checks if a package name belongs to a supported UPI application.
      */
     fun isSupportedUpiApp(packageName: String): Boolean {
+        if (packageName == ADB_SHELL_PACKAGE) return isDebugBuild
         return supportedApps.containsKey(packageName)
     }
 

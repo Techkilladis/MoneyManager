@@ -221,7 +221,7 @@ export const schema = {
       merchant_id TEXT NOT NULL,
       category_id TEXT,
       member_id TEXT,
-      source TEXT NOT NULL CHECK (source IN ('USER_CONFIRMED', 'SYSTEM_DEFAULT', 'AI_SUGGESTED')),
+      source TEXT NOT NULL CHECK (source IN ('USER_CONFIRMED', 'SYSTEM_DEFAULT')),
       confidence TEXT NOT NULL CHECK (confidence IN ('LOW', 'MEDIUM', 'HIGH')),
       usage_count INTEGER NOT NULL DEFAULT 1,
       last_used_at INTEGER NOT NULL,
