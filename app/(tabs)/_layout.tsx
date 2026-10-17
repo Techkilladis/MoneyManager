@@ -1,10 +1,13 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Tabs, router } from 'expo-router';
+import { Redirect, Tabs, router } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, shadow, space } from '@/design/tokens';
+import { shadow, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Icon, IconName, Text } from '@/components/ui';
+import { session } from '@/services/session';
+import { haptic } from '@/utils/haptics';
 
 const TAB_META: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Home', icon: 'home' },
@@ -14,6 +17,7 @@ const TAB_META: Record<string, { label: string; icon: IconName }> = {
 };
 
 export default function TabLayout() {
+  if (session.needsOnboarding) return <Redirect href="/onboarding" />;
   return (
     <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <TabBar {...props} />}>
       <Tabs.Screen name="index" />
@@ -26,6 +30,8 @@ export default function TabLayout() {
 
 /** Four tabs with a raised "add expense" button in the centre (thumb zone). */
 function TabBar({ state, navigation }: BottomTabBarProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
 
   const renderTab = (index: number) => {
@@ -37,7 +43,10 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
 
     const onPress = () => {
       const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-      if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+      if (!focused && !event.defaultPrevented) {
+        haptic.select();
+        navigation.navigate(route.name);
+      }
     };
 
     return (
@@ -63,7 +72,10 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
       {renderTab(1)}
       <View style={styles.fabSlot}>
         <Pressable
-          onPress={() => router.push('/transactions/new')}
+          onPress={() => {
+            haptic.tap();
+            router.push('/transactions/new');
+          }}
           accessibilityRole="button"
           accessibilityLabel="Add expense"
           style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.94 }], backgroundColor: colors.brandPressed }]}
@@ -77,7 +89,7 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -115,4 +127,4 @@ const styles = StyleSheet.create({
     borderColor: colors.surface,
     ...shadow.brand,
   },
-});
+}));

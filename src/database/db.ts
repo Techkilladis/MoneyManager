@@ -2,7 +2,7 @@
 // Using Expo SQLite (expo-sqlite for SDK 52)
 
 import * as SQLite from 'expo-sqlite';
-import { schema, SCHEMA_VERSION, generateId, now, Transaction, Category, Member, Merchant, MerchantMemory, Budget } from './schema';
+import { schema, SCHEMA_VERSION, now, Transaction, Category, Member, Merchant, MerchantMemory, Budget, RecurringPayment, Split } from './schema';
 
 // Database instance
 let db: SQLite.SQLiteDatabase | null = null;
@@ -47,6 +47,9 @@ export async function initializeDatabase(): Promise<void> {
   
   // Run migrations (for existing installations upgrading from older versions)
   await runMigrations(database);
+
+  // v6 tables and columns (idempotent; also covers fresh installs)
+  await runMigrationV5ToV6(database);
   
   // Seed default data
   await seedDefaultData(database);
@@ -89,6 +92,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase): Promise<void> {
       await runMigrationV4ToV5(database);
     }
     
+    if (currentVersion < 6) {
+      console.log('[Database] Running migration v5 -> v6');
+      await runMigrationV5ToV6(database);
+    }
+
     // Update user_version
     await database.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
     console.log(`[Database] Migration complete, now at v${SCHEMA_VERSION}`);
@@ -168,6 +176,26 @@ async function runMigrationV4ToV5(database: SQLite.SQLiteDatabase): Promise<void
   }
 }
 
+// v6: income, splits, recurring payments and app settings. Idempotent.
+async function addColumnIfMissing(database: SQLite.SQLiteDatabase, table: string, column: string, ddl: string) {
+  const columns = await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${table});`);
+  if (!columns.some((c) => c.name === column)) {
+    await database.execAsync(`ALTER TABLE ${table} ADD COLUMN ${ddl};`);
+  }
+}
+
+async function runMigrationV5ToV6(database: SQLite.SQLiteDatabase): Promise<void> {
+  await addColumnIfMissing(database, 'transactions', 'kind', "kind TEXT NOT NULL DEFAULT 'EXPENSE'");
+  await addColumnIfMissing(database, 'transactions', 'shared_paise', 'shared_paise INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing(database, 'categories', 'kind', "kind TEXT NOT NULL DEFAULT 'EXPENSE'");
+  await database.execAsync(schema.createSettingsTable);
+  await database.execAsync(schema.createRecurringTable);
+  await database.execAsync(schema.createSplitsTable);
+  for (const indexSql of schema.createV6Indexes) {
+    await database.execAsync(indexSql);
+  }
+}
+
 // Seed default categories and members
 async function seedDefaultData(database: SQLite.SQLiteDatabase): Promise<void> {
   const timestamp = now();
@@ -188,6 +216,18 @@ async function seedDefaultData(database: SQLite.SQLiteDatabase): Promise<void> {
     }
   }
   
+  // v6: income categories
+  for (const cat of schema.seedIncomeCategories) {
+    const existing = await database.getFirstAsync<{ id: string }>('SELECT id FROM categories WHERE id = ?', [cat.id]);
+    if (!existing) {
+      await database.runAsync(
+        `INSERT OR IGNORE INTO categories (id, name, icon, color, sortOrder, kind, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'INCOME', ?, ?)`,
+        [cat.id, cat.name, cat.icon, cat.color, cat.sortOrder, timestamp, timestamp]
+      );
+    }
+  }
+
   // Seed members
   for (const member of schema.seedMembers) {
     const existing = await database.getFirstAsync<{ id: string }>(
@@ -220,9 +260,11 @@ export async function runInTransaction<T>(
   callback: () => Promise<T>
 ): Promise<T> {
   const database = await openDatabase();
-  // withTransactionAsync expects a callback that receives the database
-  // We'll just execute the callback directly since we already have the database
-  return callback();
+  let result: T | undefined;
+  await database.withTransactionAsync(async () => {
+    result = await callback();
+  });
+  return result as T;
 }
 
 // Utility: Convert paise to formatted currency string
@@ -268,6 +310,8 @@ export function mapTransactionRow(row: any): Transaction {
     is_pending_capture: row.is_pending_capture ?? 0,  // NEW
     is_dismissed: row.is_dismissed ?? 0,            // NEW
     dismissed_at: row.dismissed_at ?? null,         // NEW
+    kind: row.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
+    sharedPaise: row.shared_paise ?? 0,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -280,6 +324,7 @@ export function mapCategoryRow(row: any): Category {
     icon: row.icon,
     color: row.color,
     sortOrder: row.sortOrder,
+    kind: row.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -333,5 +378,31 @@ export function mapBudgetRow(row: any): Budget {
     isActive: Boolean(row.is_active),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+export function mapRecurringRow(row: any): RecurringPayment {
+  return {
+    id: row.id,
+    name: row.name,
+    merchantKey: row.merchant_key,
+    amountPaise: row.amount_paise,
+    cadence: row.cadence,
+    categoryId: row.category_id ?? null,
+    anchorDate: row.anchor_date,
+    remind: Boolean(row.remind),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapSplitRow(row: any): Split {
+  return {
+    id: row.id,
+    transactionId: row.transaction_id,
+    memberId: row.member_id,
+    sharePaise: row.share_paise,
+    settledAt: row.settled_at ?? null,
+    createdAt: row.created_at,
   };
 }

@@ -4,6 +4,9 @@
 
     <!-- Notification Listener Service permission -->
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+    <!-- Lets the app show the system "allow background activity" prompt so
+         OEM battery savers don't kill the listener (auto-capture reliability). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application>
         <!-- Notification Listener Service -->
@@ -16,6 +19,19 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Home-screen widget: today's spend + quick add -->
+        <receiver
+            android:name=".widget.SpendWidgetProvider"
+            android:exported="false"
+            android:label="@string/mm_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/mm_spend_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

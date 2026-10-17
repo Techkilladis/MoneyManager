@@ -14,6 +14,8 @@ import com.moneymanager.notification.store.PendingUpiEvent
 import com.moneymanager.notification.dedupe.DedupeEngine
 import com.moneymanager.notification.registry.UpiAppRegistry
 import com.moneymanager.notification.access.NotificationAccessManager
+import com.moneymanager.notification.health.CaptureHealth
+import com.moneymanager.notification.widget.SpendWidgetProvider
 
 /**
  * Android NotificationListenerService for detecting UPI payment notifications.
@@ -51,6 +53,18 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
         accessManager.onListenerCreated()
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        CaptureHealth.recordConnected(this)
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        CaptureHealth.recordDisconnected(this)
+        // Ask to be reconnected; OEM battery savers often unbind listeners.
+        CaptureHealth.requestRebind(this)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
         // Diagnostic: confirms listener callbacks are delivered (package only,
@@ -74,6 +88,7 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
             if (!supported) {
                 return
             }
+            CaptureHealth.recordUpiNotification(this)
 
             // Normalize the notification
             val normalized = NormalizedNotification.fromStatusBarNotification(sbn)
@@ -109,6 +124,8 @@ class MoneyManagerNotificationListenerService : NotificationListenerService() {
                 // of this notification are recognized as duplicates (both in
                 // this process and after restarts, via SharedPreferences).
                 dedupeEngine.markSeen(dedupeKey)
+                CaptureHealth.recordCapture(this)
+                SpendWidgetProvider.refreshAll(this)
 
                 // Broadcast to React Native if available
                 broadcastPendingEvent(event)

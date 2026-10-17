@@ -1,7 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, View } from 'react-native';
 import { router } from 'expo-router';
-import { colors, radius, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { categoryService, ledgerService, memberService } from '@/services';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { useScreenData } from '@/hooks/useScreenData';
@@ -18,10 +19,19 @@ import {
   Icon,
   LoadingView,
   ScreenHeader,
+  SegmentedControl,
   Sheet,
   Text,
   TextField,
 } from '@/components/ui';
+
+type KindFilter = 'all' | 'EXPENSE' | 'INCOME';
+
+const KINDS: { value: KindFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'EXPENSE', label: 'Spent' },
+  { value: 'INCOME', label: 'Received' },
+];
 
 const PAGE = 40;
 
@@ -54,7 +64,10 @@ function periodRange(p: Period): { start?: number; end?: number } {
 }
 
 export default function HistoryScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [period, setPeriod] = useState<Period>('month');
+  const [kind, setKind] = useState<KindFilter>('all');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -63,8 +76,14 @@ export default function HistoryScreen() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const filters = useMemo(
-    () => ({ ...periodRange(period), search: search || undefined, categoryId, memberId }),
-    [period, search, categoryId, memberId]
+    () => ({
+      ...periodRange(period),
+      kind: kind === 'all' ? undefined : kind,
+      search: search || undefined,
+      categoryId,
+      memberId,
+    }),
+    [period, kind, search, categoryId, memberId]
   );
   const filterKey = JSON.stringify(filters);
 
@@ -141,6 +160,15 @@ export default function HistoryScreen() {
 
   const header = (
     <View>
+      <SegmentedControl
+        options={KINDS}
+        value={kind}
+        onChange={(k) => {
+          setKind(k);
+          setCategoryId(null);
+        }}
+        style={styles.kinds}
+      />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.periods}>
         {PERIODS.map((p) => (
           <Chip key={p.value} label={p.label} selected={period === p.value} onPress={() => setPeriod(p.value)} />
@@ -183,12 +211,20 @@ export default function HistoryScreen() {
       ) : null}
 
       <View style={styles.summary}>
-        <Text variant="label">
-          {pluralize(data.totals.count, 'expense')}
-        </Text>
-        <Text variant="bodyStrong" numeric>
-          {formatINR(data.totals.total)}
-        </Text>
+        <Text variant="label">{pluralize(data.totals.count, kind === 'INCOME' ? 'payment' : kind === 'EXPENSE' ? 'expense' : 'transaction')}</Text>
+        <View style={styles.summaryValues}>
+          {kind !== 'INCOME' ? (
+            <Text variant="bodyStrong" numeric>
+              {kind === 'all' && data.totals.income > 0 ? 'Spent ' : ''}
+              {formatINR(data.totals.total)}
+            </Text>
+          ) : null}
+          {kind !== 'EXPENSE' && (data.totals.income > 0 || kind === 'INCOME') ? (
+            <Text variant="bodyStrong" numeric color={colors.positive}>
+              +{formatINR(data.totals.income)}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -243,9 +279,18 @@ export default function HistoryScreen() {
             <Text variant="labelStrong" color={colors.textSecondary}>
               {section.title}
             </Text>
-            <Text variant="label" numeric color={colors.textTertiary}>
-              {formatINR(data.daily.get(section.day) ?? 0)}
-            </Text>
+            <View style={styles.dayTotals}>
+              {(data.daily.get(section.day)?.spent ?? 0) > 0 ? (
+                <Text variant="label" numeric color={colors.textTertiary}>
+                  {formatINR(data.daily.get(section.day)?.spent ?? 0)}
+                </Text>
+              ) : null}
+              {(data.daily.get(section.day)?.income ?? 0) > 0 ? (
+                <Text variant="label" numeric color={colors.positive}>
+                  +{formatINR(data.daily.get(section.day)?.income ?? 0)}
+                </Text>
+              ) : null}
+            </View>
           </View>
         )}
         renderItem={({ item, index, section }) => {
@@ -287,7 +332,9 @@ export default function HistoryScreen() {
         </Text>
         <View style={styles.wrap}>
           <Chip label="All" selected={!categoryId} onPress={() => setCategoryId(null)} />
-          {data.categories.map((c) => (
+          {data.categories
+            .filter((c) => kind === 'all' || c.kind === kind)
+            .map((c) => (
             <Chip
               key={c.id}
               label={c.name}
@@ -313,7 +360,7 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -349,10 +396,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  kinds: {
+    marginHorizontal: space.lg,
+    marginTop: space.md,
+  },
   periods: {
     gap: space.xs,
     paddingHorizontal: space.lg,
-    paddingTop: space.md,
+    paddingTop: space.sm,
+  },
+  summaryValues: {
+    flexDirection: 'row',
+    gap: space.sm,
+  },
+  dayTotals: {
+    flexDirection: 'row',
+    gap: space.xs,
   },
   activeFilters: {
     flexDirection: 'row',
@@ -415,4 +474,4 @@ const styles = StyleSheet.create({
     gap: space.xs,
     marginBottom: space.md,
   },
-});
+}));

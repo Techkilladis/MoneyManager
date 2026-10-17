@@ -1,6 +1,8 @@
 import React from 'react';
 import { Text as RNText, TextProps as RNTextProps, TextStyle, StyleSheet } from 'react-native';
-import { colors, font } from '@/design/tokens';
+import { font } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
+import type { Palette } from '@/design/tokens';
 
 const variants = StyleSheet.create({
   hero: { fontSize: font.size.hero, lineHeight: 42, fontWeight: font.weight.bold, letterSpacing: -0.8 },
@@ -22,7 +24,7 @@ const variants = StyleSheet.create({
 
 export type TextVariant = keyof typeof variants;
 
-const defaultColor: Record<TextVariant, string> = {
+const defaultColor = (colors: Palette): Record<TextVariant, string> => ({
   hero: colors.text,
   title: colors.text,
   heading: colors.text,
@@ -32,7 +34,7 @@ const defaultColor: Record<TextVariant, string> = {
   labelStrong: colors.text,
   caption: colors.textTertiary,
   overline: colors.textTertiary,
-};
+});
 
 export interface TextProps extends RNTextProps {
   variant?: TextVariant;
@@ -43,12 +45,14 @@ export interface TextProps extends RNTextProps {
 }
 
 export function Text({ variant = 'body', color, align, numeric, style, ...rest }: TextProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <RNText
       {...rest}
       style={[
         variants[variant],
-        { color: color ?? defaultColor[variant] },
+        { color: color ?? defaultColor(colors)[variant] },
         align ? { textAlign: align } : null,
         numeric ? styles.numeric : null,
         style,
@@ -57,6 +61,6 @@ export function Text({ variant = 'body', color, align, numeric, style, ...rest }
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   numeric: { fontVariant: ['tabular-nums'] },
-});
+}));

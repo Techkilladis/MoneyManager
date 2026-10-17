@@ -2,14 +2,15 @@ import React, { forwardRef, useState } from 'react';
 import {
   Pressable,
   StyleProp,
-  StyleSheet,
   Switch as RNSwitch,
   TextInput,
   TextInputProps,
   View,
   ViewStyle,
 } from 'react-native';
-import { colors, font, radius, space, tint } from '@/design/tokens';
+import { font, radius, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
+import { haptic } from '@/utils/haptics';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
@@ -26,10 +27,19 @@ interface ChipProps {
 }
 
 export function Chip({ label, selected = false, onPress, color, emoji, icon, style }: ChipProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const accent = color ?? colors.brand;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              haptic.select();
+              onPress();
+            }
+          : undefined
+      }
       accessibilityRole="button"
       accessibilityState={{ selected }}
       style={({ pressed }) => [
@@ -60,6 +70,8 @@ interface SegmentedProps<T extends string> {
 }
 
 export function SegmentedControl<T extends string>({ options, value, onChange, style }: SegmentedProps<T>) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={[styles.segmented, style]}>
       {options.map((opt) => {
@@ -67,7 +79,10 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
         return (
           <Pressable
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => {
+              if (!active) haptic.select();
+              onChange(opt.value);
+            }}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
             style={[styles.segment, active && styles.segmentActive]}
@@ -85,13 +100,17 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
 // -------------------------------------------------------------- Switch
 
 export function Switch({ value, onValueChange, disabled }: { value: boolean; onValueChange: (v: boolean) => void; disabled?: boolean }) {
+  const { colors } = useTheme();
   return (
     <RNSwitch
       value={value}
-      onValueChange={onValueChange}
+      onValueChange={(v) => {
+        haptic.select();
+        onValueChange(v);
+      }}
       disabled={disabled}
       trackColor={{ false: colors.borderStrong, true: colors.brand }}
-      thumbColor={colors.surface}
+      thumbColor="#FFFFFF"
       ios_backgroundColor={colors.borderStrong}
     />
   );
@@ -111,6 +130,8 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   { label, error, icon, containerStyle, right, onFocus, onBlur, multiline, style, ...rest },
   ref
 ) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [focused, setFocused] = useState(false);
   const borderColor = error ? colors.negative : focused ? colors.brand : colors.border;
 
@@ -155,15 +176,18 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
 
 export function ProgressBar({
   value,
-  color = colors.brand,
+  color: colorProp,
   height = 8,
-  track = colors.surfaceMuted,
+  track: trackProp,
 }: {
   value: number; // 0..1, clamped
   color?: string;
   height?: number;
   track?: string;
 }) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.brand;
+  const track = trackProp ?? colors.surfaceMuted;
   const pct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   return (
     <View style={{ height, borderRadius: height / 2, backgroundColor: track, overflow: 'hidden' }}>
@@ -172,7 +196,7 @@ export function ProgressBar({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, scheme) => ({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -205,7 +229,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md - 2,
   },
   segmentActive: {
-    backgroundColor: colors.surface,
+    backgroundColor: scheme === 'dark' ? colors.borderStrong : colors.surface,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -243,4 +267,4 @@ const styles = StyleSheet.create({
   fieldError: {
     marginTop: space.xxs,
   },
-});
+}));

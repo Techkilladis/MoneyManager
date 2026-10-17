@@ -1,5 +1,5 @@
 // Budget Repository
-import { openDatabase, mapBudgetRow, generateId, now, runInTransaction } from '../db';
+import { openDatabase, mapBudgetRow, generateId, now } from '../db';
 import { Budget, BudgetPeriodType } from '../schema';
 
 export interface CreateBudgetInput {

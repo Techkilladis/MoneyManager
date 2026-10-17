@@ -1,5 +1,5 @@
 // Merchant Repository
-import { openDatabase, mapMerchantRow, generateId, now, runInTransaction } from '../db';
+import { openDatabase, mapMerchantRow, generateId, now } from '../db';
 import { Merchant } from '../schema';
 
 export interface CreateMerchantInput {

@@ -1,6 +1,7 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
-import { colors, tint } from '@/design/tokens';
+import { View } from 'react-native';
+import { tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { categoryGlyph, initials } from '@/domain/glyphs';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -15,6 +16,8 @@ export function CategoryAvatar({
   color: string | null | undefined;
   size?: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View
       style={[
@@ -29,6 +32,8 @@ export function CategoryAvatar({
 
 /** Placeholder avatar for transactions without a category yet. */
 export function UncategorizedAvatar({ size = 44 }: { size?: number }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View
       style={[
@@ -51,6 +56,8 @@ export function MemberAvatar({
   color: string | null | undefined;
   size?: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const base = color ?? colors.brand;
   return (
     <View
@@ -61,7 +68,7 @@ export function MemberAvatar({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   center: { alignItems: 'center', justifyContent: 'center' },
   dashed: {
     borderWidth: 1.5,
@@ -69,4 +76,4 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     backgroundColor: colors.surfaceMuted,
   },
-});
+}));

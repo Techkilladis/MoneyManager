@@ -2,7 +2,8 @@
 // native module or rebuild.
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { colors, radius, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Button, IconButton, Sheet, Text } from './ui';
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -25,6 +26,8 @@ export function DateTimeSheet({ visible, value, onClose, onChange, maxDate }: Pr
 }
 
 function DateTimeBody({ value, onClose, onChange, maxDate }: Omit<Props, 'visible'>) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const limit = maxDate ?? new Date();
   const [draft, setDraft] = useState(() => new Date(value));
   const [cursor, setCursor] = useState(() => new Date(value.getFullYear(), value.getMonth(), 1));
@@ -198,7 +201,7 @@ function DateTimeBody({ value, onClose, onChange, maxDate }: Omit<Props, 'visibl
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   quickRow: {
     flexDirection: 'row',
     gap: space.xs,
@@ -278,4 +281,4 @@ const styles = StyleSheet.create({
   meridiemActive: {
     backgroundColor: colors.surface,
   },
-});
+}));

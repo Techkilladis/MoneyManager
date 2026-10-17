@@ -4,7 +4,6 @@ import { transactionRepository } from '../database/repositories/transactionRepos
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
-import { merchantMemoryRepository } from '../database/repositories/merchantMemoryRepository';
 import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
@@ -15,6 +14,23 @@ import { normalizeMerchantFull } from './merchantNormalization';
 import * as budgetService from './budget';
 import * as analyticsService from './analytics';
 import * as ledgerService from './ledger';
+import * as splitService from './splits';
+import * as recurringService from './recurring';
+import * as alertsService from './alerts';
+import * as recapService from './recap';
+import * as backupService from './backup';
+import { TransactionKind } from '../database/schema';
+
+/** Everything needed to put a deleted transaction back (undo). */
+export interface TransactionSnapshot {
+  row: Record<string, string | number | null>;
+  splits: Record<string, string | number | null>[];
+}
+
+function afterSpendingChange() {
+  // Fire-and-forget: alerts must never block or fail a save.
+  void alertsService.checkBudgetAlerts();
+}
 
 export const transactionService = {
   // Initialize database
@@ -67,6 +83,8 @@ export const transactionService = {
           notificationId: null,
           sourceEventId: event.id,
           sourceType: 'UPI_NOTIFICATION' as const,
+          // Money received (CREDIT) is captured as income.
+          kind: event.direction === 'CREDIT' ? ('INCOME' as const) : ('EXPENSE' as const),
           is_pending_capture: 1,
           is_dismissed: 0,
           dismissed_at: null,
@@ -183,6 +201,8 @@ export const transactionService = {
       is_pending_capture: tx.is_pending_capture ?? 0,
       is_dismissed: tx.is_dismissed ?? 0,
       dismissed_at: tx.dismissed_at ?? null,
+      kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
+      sharedPaise: tx.sharedPaise ?? 0,
     };
   },
 
@@ -243,6 +263,8 @@ export const transactionService = {
       is_pending_capture: tx.is_pending_capture ?? 0,
       is_dismissed: tx.is_dismissed ?? 0,
       dismissed_at: tx.dismissed_at ?? null,
+      kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
+      sharedPaise: tx.sharedPaise ?? 0,
     };
   },
 
@@ -295,6 +317,8 @@ export const transactionService = {
         is_pending_capture: tx.is_pending_capture ?? 0,
         is_dismissed: tx.is_dismissed ?? 0,
         dismissed_at: tx.dismissed_at ?? null,
+        kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
+        sharedPaise: tx.sharedPaise ?? 0,
       };
     });
   },
@@ -313,9 +337,11 @@ export const transactionService = {
     categoryId: string | null;
     memberId: string | null;
     note: string | null;
+    kind?: TransactionKind;
   }) {
     const tx = await transactionRepository.create({
       ...input,
+      kind: input.kind ?? 'EXPENSE',
       currency: 'INR',
       status: 'CONFIRMED',
       sourceApp: 'Manual',
@@ -324,6 +350,7 @@ export const transactionService = {
       is_dismissed: 0,
     });
     await this.learnMerchant(input.merchant, input.categoryId, input.memberId);
+    if (tx.kind === 'EXPENSE') afterSpendingChange();
     return tx;
   },
 
@@ -338,18 +365,26 @@ export const transactionService = {
       categoryId: string | null;
       memberId: string | null;
       note: string | null;
+      kind?: TransactionKind;
     }
   ) {
     const existing = await transactionRepository.getById(id);
     if (!existing) throw new Error('Transaction not found');
 
+    const kind = input.kind ?? existing.kind;
     const updated = await transactionRepository.update(id, {
       amountPaise: input.amountPaise,
       merchant: input.merchant,
       categoryId: input.categoryId,
       memberId: input.memberId,
       note: input.note,
+      kind,
     });
+    if (kind === 'INCOME' && existing.sharedPaise > 0) {
+      await splitService.setSplits(id, []);
+    } else if (input.amountPaise !== existing.amountPaise && existing.sharedPaise > 0) {
+      await splitService.rescaleSplits(id, existing.amountPaise, input.amountPaise);
+    }
     if (input.transactionTimestamp !== existing.transactionTimestamp) {
       const database = await openDatabase();
       await database.runAsync(
@@ -360,7 +395,38 @@ export const transactionService = {
     if (input.categoryId !== existing.categoryId || input.memberId !== existing.memberId) {
       await this.learnMerchant(input.merchant, input.categoryId, input.memberId);
     }
+    afterSpendingChange();
     return updated;
+  },
+
+  /** Deletes a confirmed transaction and returns what's needed to undo it. */
+  async deleteWithUndo(id: string): Promise<{ success: boolean; snapshot?: TransactionSnapshot; error?: string }> {
+    const database = await openDatabase();
+    const row = await database.getFirstAsync<TransactionSnapshot['row']>('SELECT * FROM transactions WHERE id = ?', [id]);
+    if (!row) return { success: false, error: 'Transaction not found' };
+    if (row.is_pending_capture) {
+      return { success: false, error: 'Cannot delete pending capture transaction. Use dismiss instead.' };
+    }
+    const splits = await database.getAllAsync<TransactionSnapshot['row']>('SELECT * FROM splits WHERE transaction_id = ?', [id]);
+    await transactionRepository.delete(id);
+    afterSpendingChange();
+    return { success: true, snapshot: { row, splits } };
+  },
+
+  async restoreTransaction(snapshot: TransactionSnapshot): Promise<void> {
+    const database = await openDatabase();
+    const insert = async (table: string, row: TransactionSnapshot['row']) => {
+      const cols = Object.keys(row);
+      await database.runAsync(
+        `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+        cols.map((c) => row[c] ?? null)
+      );
+    };
+    await database.withTransactionAsync(async () => {
+      await insert('transactions', snapshot.row);
+      for (const split of snapshot.splits) await insert('splits', split);
+    });
+    afterSpendingChange();
   },
 
   async learnMerchant(merchantName: string, categoryId: string | null, memberId: string | null) {
@@ -402,8 +468,6 @@ export const transactionService = {
     merchant?: string,
     note?: string
   ): Promise<{ success: boolean; transaction?: any; error?: string }> {
-    const database = await openDatabase();
-    
     try {
       // First check if already confirmed (idempotency)
       const existing = await transactionRepository.getById(id);
@@ -448,6 +512,7 @@ export const transactionService = {
         }
       }
 
+      if (existing.kind === 'EXPENSE') afterSpendingChange();
       return { success: true, transaction: updated };
     } catch (error) {
       console.error('[transactionService] Confirm failed:', error);
@@ -513,13 +578,13 @@ export const categoryService = {
     return categoryRepository.getById(id);
   },
 
-  async create(input: { name: string; icon: string; color: string }): Promise<Result> {
+  async create(input: { name: string; icon: string; color: string; kind?: TransactionKind }): Promise<Result> {
     const name = input.name.trim();
     if (!name) return { success: false, error: 'Enter a category name' };
     try {
       const all = await categoryRepository.getAll();
       const sortOrder = all.reduce((max, c) => Math.max(max, c.sortOrder), 0) + 1;
-      await categoryRepository.create({ name, icon: input.icon, color: input.color, sortOrder });
+      await categoryRepository.create({ name, icon: input.icon, color: input.color, sortOrder, kind: input.kind ?? 'EXPENSE' });
       return { success: true };
     } catch (error) {
       return { success: false, error: friendlyError(error, 'Could not create category') };
@@ -535,6 +600,16 @@ export const categoryService = {
     } catch (error) {
       return { success: false, error: friendlyError(error, 'Could not update category') };
     }
+  },
+
+  /** Puts a deleted category back with its original id (undo). */
+  async restore(category: Category): Promise<void> {
+    const database = await openDatabase();
+    await database.runAsync(
+      `INSERT OR REPLACE INTO categories (id, name, icon, color, sortOrder, kind, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [category.id, category.name, category.icon, category.color, category.sortOrder, category.kind, category.createdAt, Date.now()]
+    );
   },
 
   async delete(id: string): Promise<Result> {
@@ -662,9 +737,15 @@ export const services = {
   budget: budgetService,
   analytics: analyticsService,
   ledger: ledgerService,
+  splits: splitService,
+  recurring: recurringService,
+  alerts: alertsService,
+  recap: recapService,
+  backup: backupService,
 };
 
 // Export individual services for direct imports
 export { budgetService };
 export { analyticsService };
 export { ledgerService };
+export { splitService, recurringService, alertsService, recapService, backupService };

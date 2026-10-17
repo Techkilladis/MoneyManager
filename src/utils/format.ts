@@ -10,7 +10,8 @@ export function formatINR(paise: number, options: { decimals?: 'auto' | 'always'
   const { decimals = 'auto', sign = false } = options;
   const negative = paise < 0;
   const abs = Math.abs(Math.round(paise));
-  const rupees = Math.floor(abs / 100);
+  // Without paise, round to the nearest rupee rather than truncating.
+  const rupees = decimals === 'never' ? Math.round(abs / 100) : Math.floor(abs / 100);
   const fraction = abs % 100;
 
   let body = groupFormatter.format(rupees);
@@ -143,4 +144,17 @@ export function formatSourceApp(source: string | null | undefined): string | nul
     .split(/[_\s]+/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+}
+
+/** "just now", "5 min ago", "3 hours ago", "2 days ago", then a date. */
+export function timeAgo(ts: number, now = Date.now()): string {
+  const diff = Math.max(0, now - ts);
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${pluralize(hours, 'hour')} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `${pluralize(days, 'day')} ago`;
+  return formatFullDate(ts);
 }

@@ -1,17 +1,18 @@
-// Shared add/edit expense form: big amount entry, merchant with recent
-// suggestions, category grid (pre-filled from merchant memory), member
-// chips, date/time and note.
+// Shared add/edit form for expenses and income: big amount entry, merchant
+// with recent suggestions, category grid (pre-filled from merchant memory),
+// member chips, date/time and note.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, font, radius, space } from '@/design/tokens';
-import { Category, Member } from '@/database/schema';
+import { font, radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
+import { Category, Member, TransactionKind } from '@/database/schema';
 import { categoryService, classificationService, ledgerService, memberService } from '@/services';
 import { formatDayLabel, formatTime, parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { DateTimeSheet } from './DateTimeSheet';
 import { CategoryGrid, MemberChips } from './Pickers';
-import { Button, Chip, Icon, ScreenHeader, Text, TextField } from './ui';
+import { Button, Chip, Icon, ScreenHeader, SegmentedControl, Text, TextField } from './ui';
 
 export interface TransactionFormValues {
   amountPaise: number;
@@ -20,6 +21,7 @@ export interface TransactionFormValues {
   memberId: string | null;
   note: string | null;
   transactionTimestamp: number;
+  kind: TransactionKind;
 }
 
 interface Props {
@@ -31,6 +33,8 @@ interface Props {
   smartDefaults?: boolean;
   onSubmit: (values: TransactionFormValues) => Promise<void>;
   headerRight?: React.ReactNode;
+  /** Show the Expense / Income switch. */
+  allowKindChange?: boolean;
 }
 
 export function TransactionForm({
@@ -41,7 +45,10 @@ export function TransactionForm({
   smartDefaults = false,
   onSubmit,
   headerRight,
+  allowKindChange = true,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [amount, setAmount] = useState(initial?.amountText ?? '');
   const [merchant, setMerchant] = useState(initial?.merchant ?? '');
@@ -49,6 +56,8 @@ export function TransactionForm({
   const [memberId, setMemberId] = useState<string | null>(initial?.memberId ?? null);
   const [note, setNote] = useState(initial?.note ?? '');
   const [date, setDate] = useState(() => new Date(initial?.transactionTimestamp ?? Date.now()));
+  const [kind, setKind] = useState<TransactionKind>(initial?.kind ?? 'EXPENSE');
+  const income = kind === 'INCOME';
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -134,7 +143,7 @@ export function TransactionForm({
     const amountPaise = parseAmount(amount);
     const next: typeof errors = {};
     if (!amountPaise || amountPaise <= 0) next.amount = 'Enter an amount';
-    if (!merchant.trim()) next.merchant = 'Who did you pay?';
+    if (!merchant.trim()) next.merchant = income ? 'Who paid you?' : 'Who did you pay?';
     setErrors(next);
     if (next.amount || next.merchant || !amountPaise) return;
 
@@ -144,9 +153,10 @@ export function TransactionForm({
         amountPaise,
         merchant: merchant.trim(),
         categoryId,
-        memberId,
+        memberId: income ? null : memberId,
         note: note.trim() || null,
         transactionTimestamp: date.getTime(),
+        kind,
       });
     } catch (err) {
       console.error('[TransactionForm] save failed:', err);
@@ -155,6 +165,21 @@ export function TransactionForm({
       if (mountedRef.current) setSaving(false);
     }
   };
+
+  const changeKind = (next: TransactionKind) => {
+    if (next === kind) return;
+    setKind(next);
+    // Categories differ between expenses and income.
+    const current = categories.find((c) => c.id === categoryId);
+    if (current && current.kind !== next) {
+      setCategoryId(null);
+      categoryTouched.current = false;
+      setSuggestionApplied(false);
+    }
+  };
+
+  const visibleCategories = categories.filter((c) => c.kind === kind);
+  const accent = income ? colors.positive : colors.brand;
 
   const query = merchant.trim().toLowerCase();
   const merchantSuggestions = recentMerchants
@@ -170,11 +195,25 @@ export function TransactionForm({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {allowKindChange ? (
+            <SegmentedControl
+              options={[
+                { value: 'EXPENSE' as TransactionKind, label: 'Expense' },
+                { value: 'INCOME' as TransactionKind, label: 'Income' },
+              ]}
+              value={kind}
+              onChange={changeKind}
+              style={{ marginTop: space.xs }}
+            />
+          ) : null}
+
           {/* Amount */}
           <Pressable style={styles.amountBlock} onPress={() => amountRef.current?.focus()}>
-            <Text variant="overline">Amount</Text>
+            <Text variant="overline" color={income ? colors.positive : undefined}>
+              {income ? 'Amount received' : 'Amount'}
+            </Text>
             <View style={styles.amountRow}>
-              <Text style={[styles.amountInput, styles.rupee, !amount && { color: colors.textDisabled }]}>₹</Text>
+              <Text style={[styles.amountInput, styles.rupee, !amount ? { color: colors.textDisabled } : income ? { color: colors.positive } : null]}>₹</Text>
               <TextInput
                 ref={amountRef}
                 value={amount}
@@ -186,9 +225,9 @@ export function TransactionForm({
                 placeholderTextColor={colors.textDisabled}
                 keyboardType="decimal-pad"
                 autoFocus={autoFocusAmount}
-                selectionColor={colors.brand}
-                cursorColor={colors.brand}
-                style={styles.amountInput}
+                selectionColor={accent}
+                cursorColor={accent}
+                style={[styles.amountInput, income && amount ? { color: colors.positive } : null]}
                 accessibilityLabel="Amount in rupees"
               />
             </View>
@@ -201,7 +240,7 @@ export function TransactionForm({
 
           {/* Merchant */}
           <TextField
-            label="Paid to"
+            label={income ? 'Received from' : 'Paid to'}
             icon="store"
             value={merchant}
             onChangeText={(t) => {
@@ -213,7 +252,7 @@ export function TransactionForm({
               setMerchantFocused(false);
               suggestForMerchant(merchant);
             }}
-            placeholder="Swiggy, Uber, Landlord…"
+            placeholder={income ? 'Employer, client, friend…' : 'Swiggy, Uber, Landlord…'}
             autoCapitalize="words"
             returnKeyType="done"
             error={errors.merchant}
@@ -246,7 +285,7 @@ export function TransactionForm({
             ) : null}
           </View>
           <CategoryGrid
-            categories={categories}
+            categories={visibleCategories}
             value={categoryId}
             onChange={pickCategory}
             suggestedId={suggestedId}
@@ -254,7 +293,7 @@ export function TransactionForm({
           />
 
           {/* Member */}
-          {members.length > 0 ? (
+          {members.length > 0 && !income ? (
             <>
               <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
                 Spent on
@@ -310,7 +349,7 @@ export function TransactionForm({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -381,4 +420,4 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-});
+}));

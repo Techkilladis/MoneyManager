@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { IconButton } from './Button';
 import { Text } from './Text';
 
@@ -30,6 +31,8 @@ interface SheetProps {
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 export function Sheet({ visible, onClose, title, subtitle, children, footer, scroll = true }: SheetProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(visible);
   const [progress] = useState(() => new Animated.Value(0));
@@ -95,7 +98,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, scr
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   root: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -137,4 +140,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingTop: space.sm,
   },
-});
+}));

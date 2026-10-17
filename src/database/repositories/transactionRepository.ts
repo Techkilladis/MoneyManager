@@ -1,6 +1,6 @@
 // Transaction Repository
-import { openDatabase, mapTransactionRow, formatCurrency, parseCurrency, generateId, now, runInTransaction } from '../db';
-import { Transaction, TransactionStatus, SourceType } from '../schema';
+import { openDatabase, mapTransactionRow, generateId, now, runInTransaction } from '../db';
+import { Transaction, TransactionStatus, SourceType, TransactionKind } from '../schema';
 
 export interface CreateTransactionInput {
   amountPaise: number;
@@ -20,6 +20,7 @@ export interface CreateTransactionInput {
   is_pending_capture?: number;     // NEW: 1 = captured UPI event awaiting review
   is_dismissed?: number;           // NEW: 1 = dismissed (rejected/ignored)
   dismissed_at?: number | null;    // NEW: Timestamp when dismissed
+  kind?: TransactionKind;          // v6: EXPENSE (default) or INCOME
 }
 
 export interface UpdateTransactionInput {
@@ -32,6 +33,7 @@ export interface UpdateTransactionInput {
   is_pending_capture?: number;      // NEW: cleared on confirmation
   is_dismissed?: number;           // NEW
   dismissed_at?: number | null;    // NEW
+  kind?: TransactionKind;
 }
 
 export interface TransactionFilters {
@@ -60,8 +62,8 @@ export const transactionRepository = {
         notificationId, rawNotification, parserMetadata,
         sourceEventId, sourceType,
         is_pending_capture, is_dismissed, dismissed_at,  -- NEW
-        createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        createdAt, updatedAt, kind
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.amountPaise,
@@ -83,6 +85,7 @@ export const transactionRepository = {
         input.dismissed_at || null,       // NEW
         timestamp,
         timestamp,
+        input.kind ?? 'EXPENSE',
       ]
     );
     
@@ -169,6 +172,10 @@ export const transactionRepository = {
     if (input.dismissed_at !== undefined) {
       updates.push('dismissed_at = ?');
       values.push(input.dismissed_at);
+    }
+    if (input.kind !== undefined) {
+      updates.push('kind = ?');
+      values.push(input.kind);
     }
     
     if (updates.length === 0) {
@@ -286,7 +293,7 @@ export const transactionRepository = {
   async getTotalSpending(startDate?: number, endDate?: number): Promise<number> {
     const database = await openDatabase();
     
-    const conditions: string[] = ["status = 'CONFIRMED'"];
+    const conditions: string[] = ["status = 'CONFIRMED'", "kind = 'EXPENSE'"];
     const values: any[] = [];
     
     if (startDate) {
@@ -300,7 +307,7 @@ export const transactionRepository = {
     
     const whereClause = conditions.join(' AND ');
     const row = await database.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(amountPaise), 0) as total FROM transactions WHERE ${whereClause}`,
+      `SELECT COALESCE(SUM(amountPaise - shared_paise), 0) as total FROM transactions WHERE ${whereClause}`,
       values
     );
     
@@ -308,10 +315,10 @@ export const transactionRepository = {
   },
   
   // Get spending by category
-  async getSpendingByCategory(startDate?: number, endDate?: number): Promise<Array<{ categoryId: string; total: number; count: number }>> {
+  async getSpendingByCategory(startDate?: number, endDate?: number): Promise<{ categoryId: string; total: number; count: number }[]> {
     const database = await openDatabase();
     
-    const conditions: string[] = ["status = 'CONFIRMED'", 'categoryId IS NOT NULL'];
+    const conditions: string[] = ["status = 'CONFIRMED'", "kind = 'EXPENSE'", 'categoryId IS NOT NULL'];
     const values: any[] = [];
     
     if (startDate) {
@@ -325,7 +332,7 @@ export const transactionRepository = {
     
     const whereClause = conditions.join(' AND ');
     const rows = await database.getAllAsync<{ categoryId: string; total: number; count: number }>(
-      `SELECT categoryId, SUM(amountPaise) as total, COUNT(*) as count 
+      `SELECT categoryId, SUM(amountPaise - shared_paise) as total, COUNT(*) as count 
        FROM transactions 
        WHERE ${whereClause} 
        GROUP BY categoryId 

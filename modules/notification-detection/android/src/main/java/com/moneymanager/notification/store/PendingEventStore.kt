@@ -68,8 +68,8 @@ class PendingEventStore private constructor(context: Context) {
                     """INSERT INTO pending_upi_events 
                        (id, amountPaise, merchant, sourceApp, transactionTimestamp, 
                         transactionReference, parserName, parserVersion, confidence,
-                        notificationId, status, dedupeKey, createdAt, updatedAt)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        notificationId, status, dedupeKey, createdAt, updatedAt, direction)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     arrayOf(
                         id,
                         parsed.amountPaise,
@@ -84,7 +84,8 @@ class PendingEventStore private constructor(context: Context) {
                         status,
                         dedupeKey,
                         now,
-                        now
+                        now,
+                        parsed.direction
                     )
                 )
             } finally {
@@ -105,7 +106,8 @@ class PendingEventStore private constructor(context: Context) {
             notificationId = notificationId,
             status = PendingUpiEvent.Status.PENDING,
             createdAt = now,
-            dedupeKey = dedupeKey
+            dedupeKey = dedupeKey,
+            direction = parsed.direction
         )
     }
 
@@ -130,6 +132,20 @@ class PendingEventStore private constructor(context: Context) {
                 )
                 
                 return cursorToEvents(cursor)
+            } finally {
+                db.close()
+            }
+        }
+    }
+
+    /** Number of events still awaiting review. */
+    fun countPending(): Int {
+        synchronized(lock) {
+            val db = dbHelper.readableDatabase
+            try {
+                db.rawQuery("SELECT COUNT(*) FROM pending_upi_events WHERE status = 'PENDING'", null).use { c ->
+                    return if (c.moveToFirst()) c.getInt(0) else 0
+                }
             } finally {
                 db.close()
             }
@@ -198,7 +214,7 @@ class PendingEventStore private constructor(context: Context) {
     /**
      * Deletes old consumed/dismissed/failed events (cleanup).
      */
-    fun cleanupOldEvents(olderThanMs: Long = 30 * 24 * 60 * 60 * 1000) { // 30 days
+    fun cleanupOldEvents(olderThanMs: Long = 30L * 24 * 60 * 60 * 1000) { // 30 days
         synchronized(lock) {
             val db = dbHelper.writableDatabase
             try {
@@ -294,7 +310,8 @@ class PendingEventStore private constructor(context: Context) {
             notificationId = cursor.getString(cursor.getColumnIndexOrThrow("notificationId")),
             status = PendingUpiEvent.Status.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("status"))),
             createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("createdAt")),
-            dedupeKey = cursor.getString(cursor.getColumnIndexOrThrow("dedupeKey"))
+            dedupeKey = cursor.getString(cursor.getColumnIndexOrThrow("dedupeKey")),
+            direction = cursor.getColumnIndex("direction").let { if (it >= 0) cursor.getString(it) ?: "DEBIT" else "DEBIT" }
         )
     }
 
@@ -302,7 +319,7 @@ class PendingEventStore private constructor(context: Context) {
         context,
         "moneymanager_notifications.db",
         null,
-        1
+        2
     ) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("""
@@ -320,7 +337,8 @@ class PendingEventStore private constructor(context: Context) {
                     status TEXT NOT NULL,
                     dedupeKey TEXT NOT NULL,
                     createdAt INTEGER NOT NULL,
-                    updatedAt INTEGER NOT NULL
+                    updatedAt INTEGER NOT NULL,
+                    direction TEXT NOT NULL DEFAULT 'DEBIT'
                 )
             """)
             
@@ -330,8 +348,11 @@ class PendingEventStore private constructor(context: Context) {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Handle migrations if needed
             Log.w("PendingEventStore", "Upgrading database from $oldVersion to $newVersion")
+            if (oldVersion < 2) {
+                // v2: money-in events (CREDIT) are captured alongside payments.
+                db.execSQL("ALTER TABLE pending_upi_events ADD COLUMN direction TEXT NOT NULL DEFAULT 'DEBIT'")
+            }
         }
     }
 }
@@ -349,7 +370,8 @@ data class PendingUpiEvent(
     val notificationId: String,
     val status: Status,
     val createdAt: Long,
-    val dedupeKey: String
+    val dedupeKey: String,
+    val direction: String = "DEBIT"
 ) {
     enum class Status {
         PENDING,
@@ -373,6 +395,7 @@ data class PendingUpiEvent(
         bundle.putString("status", status.name)
         bundle.putLong("createdAt", createdAt)
         bundle.putString("dedupeKey", dedupeKey)
+        bundle.putString("direction", direction)
         return bundle
     }
 }

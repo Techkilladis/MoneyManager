@@ -1,9 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { colors, radius, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { analyticsService, budgetService, ledgerService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
+import type { CategoryShare } from '@/services/ledger';
 import { weekBounds } from '@/services/ledger';
 import { BarChart, BarDatum, Donut } from '@/components/Charts';
 import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, startOfDay } from '@/utils/format';
@@ -117,6 +119,8 @@ async function loadSeries(mode: Mode, start: number, end: number): Promise<BarDa
 }
 
 export default function InsightsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [mode, setMode] = useState<Mode>('month');
   const [offset, setOffset] = useState(0);
 
@@ -132,18 +136,33 @@ export default function InsightsScreen() {
         ? { start: prevFull.start, end: Math.min(prevFull.end, prevFull.start + elapsed) }
         : prevFull;
     const period = { start: range.start, end: range.end, label: range.label };
-    const [totals, prevTotals, series, categories, merchants, members, largest, budgets] = await Promise.all([
-      ledgerService.getHistoryTotals({ start: range.start, end: range.end }),
-      ledgerService.getHistoryTotals({ start: prev.start, end: prev.end }),
+    const [totals, prevTotals, series, categories, merchants, members, largest, budgets, income, incomeSources] = await Promise.all([
+      ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: range.start, end: range.end }),
+      ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: prev.start, end: prev.end }),
       loadSeries(mode, range.start, range.end),
       ledgerService.getCategoryShares(range.start, range.end),
       analyticsService.getMerchantSpending(period, 5),
       analyticsService.getMemberSpending(period),
       ledgerService.getLargestExpense(range.start, range.end),
       mode === 'month' ? budgetService.getMonthlyBudgets(new Date(range.start)) : Promise.resolve([]),
+      ledgerService.incomeBetween(range.start, range.end),
+      ledgerService.getCategoryShares(range.start, range.end, 'INCOME'),
     ]);
     const elapsedDays = Math.max(1, Math.ceil((Math.min(Date.now(), range.end) - range.start) / DAY_MS));
-    return { totals, prevTotals, series, categories, merchants, members, largest, budgets, elapsedDays, partial: prev !== prevFull };
+    return {
+      totals,
+      prevTotals,
+      series,
+      categories,
+      merchants,
+      members,
+      largest,
+      budgets,
+      income: income.total,
+      incomeSources,
+      elapsedDays,
+      partial: prev !== prevFull,
+    };
   }, [mode, offset, range]);
 
   const { data, error, refreshing, refresh, reload } = useScreenData(fetcher);
@@ -259,6 +278,8 @@ export default function InsightsScreen() {
             <Stat label="Average" value={totals.count ? formatCompactINR(Math.round(totals.total / totals.count)) : '₹0'} />
           </View>
         </Card>
+
+        {data.income > 0 ? <CashflowCard income={data.income} spent={totals.total} sources={data.incomeSources} /> : null}
 
         {isEmpty ? (
           <Card style={styles.block}>
@@ -420,7 +441,57 @@ export default function InsightsScreen() {
   );
 }
 
+function CashflowCard({ income, spent, sources }: { income: number; spent: number; sources: CategoryShare[] }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const net = income - spent;
+  const rate = income > 0 ? net / income : 0;
+  const max = Math.max(income, spent, 1);
+  return (
+    <View style={styles.block}>
+      <SectionTitle title="Money in and out" />
+      <Card>
+        <View style={styles.flowRow}>
+          <Text variant="label" style={styles.flowLabel}>
+            In
+          </Text>
+          <View style={styles.flowTrack}>
+            <View style={[styles.flowBar, { width: `${(income / max) * 100}%`, backgroundColor: colors.positive }]} />
+          </View>
+          <Text variant="labelStrong" numeric style={styles.flowValue}>
+            {formatCompactINR(income)}
+          </Text>
+        </View>
+        <View style={styles.flowRow}>
+          <Text variant="label" style={styles.flowLabel}>
+            Out
+          </Text>
+          <View style={styles.flowTrack}>
+            <View style={[styles.flowBar, { width: `${(spent / max) * 100}%`, backgroundColor: colors.brand }]} />
+          </View>
+          <Text variant="labelStrong" numeric style={styles.flowValue}>
+            {formatCompactINR(spent)}
+          </Text>
+        </View>
+        <View style={styles.flowNet}>
+          <Text variant="label">{net >= 0 ? 'Saved' : 'Spent more than earned'}</Text>
+          <Text variant="heading" numeric color={net >= 0 ? colors.positive : colors.negative}>
+            {formatINR(Math.abs(net), { decimals: 'never' })}
+            {net >= 0 ? `  ·  ${Math.round(rate * 100)}%` : ''}
+          </Text>
+        </View>
+        {sources.length > 0 ? (
+          <Text variant="caption" style={{ marginTop: space.xs }}>
+            From {sources.slice(0, 3).map((s) => s.name).join(', ')}
+          </Text>
+        ) : null}
+      </Card>
+    </View>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat}>
       <Text variant="caption">{label}</Text>
@@ -431,7 +502,40 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
+  flowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginBottom: space.sm,
+  },
+  flowLabel: {
+    width: 32,
+  },
+  flowTrack: {
+    flex: 1,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.surfaceMuted,
+    overflow: 'hidden',
+  },
+  flowBar: {
+    height: 12,
+    borderRadius: 6,
+  },
+  flowValue: {
+    width: 64,
+    textAlign: 'right',
+  },
+  flowNet: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: space.xs,
+    paddingTop: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -519,4 +623,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
   },
-});
+}));

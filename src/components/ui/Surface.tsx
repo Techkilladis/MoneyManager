@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleProp, StyleSheet, View, ViewProps, ViewStyle } from 'react-native';
-import { colors, radius, shadow, space, tint } from '@/design/tokens';
+import { radius, shadow, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
@@ -12,6 +13,8 @@ interface CardProps extends ViewProps {
 }
 
 export function Card({ padded = true, flat = false, onPress, style, children, ...rest }: CardProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const base = [styles.card, padded && styles.cardPadded, !flat && shadow.card, style];
   if (onPress) {
     return (
@@ -32,19 +35,22 @@ export function Card({ padded = true, flat = false, onPress, style, children, ..
 }
 
 export function Divider({ inset = 0, style }: { inset?: number; style?: StyleProp<ViewStyle> }) {
+  const styles = useStyles();
   return <View style={[styles.divider, { marginLeft: inset }, style]} />;
 }
 
 /** Rounded square holding an icon, tinted from a base colour. */
 export function IconTile({
   icon,
-  color = colors.brand,
+  color: colorProp,
   size = 40,
 }: {
   icon: IconName;
   color?: string;
   size?: number;
 }) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.brand;
   return (
     <View
       style={{
@@ -74,6 +80,8 @@ interface ListRowProps {
 }
 
 export function ListRow({ title, subtitle, left, right, value, chevron, destructive, onPress, disabled }: ListRowProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const content = (
     <>
       {left ? <View style={styles.rowLeft}>{left}</View> : null}
@@ -122,6 +130,8 @@ export function SectionTitle({
   onAction?: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={[styles.sectionTitle, style]}>
       <Text variant="heading">{title}</Text>
@@ -138,7 +148,7 @@ export function SectionTitle({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
@@ -180,4 +190,4 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: space.sm,
   },
-});
+}));

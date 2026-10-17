@@ -43,8 +43,8 @@ async function getCategorySpendingInPeriod(
   // default page size and under-count busy categories.
   const database = await openDatabase();
   const row = await database.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(amountPaise), 0) AS total FROM transactions
-     WHERE status = 'CONFIRMED' AND is_pending_capture = 0 AND is_dismissed = 0
+    `SELECT COALESCE(SUM(amountPaise - shared_paise), 0) AS total FROM transactions
+     WHERE status = 'CONFIRMED' AND kind = 'EXPENSE' AND is_pending_capture = 0 AND is_dismissed = 0
      AND categoryId = ? AND transactionTimestamp >= ? AND transactionTimestamp < ?`,
     [categoryId, periodStart, periodEnd]
   );
@@ -120,9 +120,10 @@ export async function upsertMonthlyBudget(
 /**
  * Get spending for all active budgets in a period
  */
-export async function getBudgetSpending(periodStart: number, periodEnd: number): Promise<
-  Array<{ budget: Budget; spentPaise: number }>
-> {
+export async function getBudgetSpending(
+  periodStart: number,
+  periodEnd: number
+): Promise<{ budget: Budget; spentPaise: number }[]> {
   const budgets = await budgetRepository.getByPeriod(periodStart, periodEnd);
   
   const results = await Promise.all(

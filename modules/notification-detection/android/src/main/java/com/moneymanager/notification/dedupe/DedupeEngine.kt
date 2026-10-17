@@ -49,7 +49,8 @@ class DedupeEngine private constructor(context: Context) {
             return listOf(
                 "ref:$ref",
                 "app:${parsed.sourceApp}",
-                "amt:${parsed.amountPaise}"
+                "amt:${parsed.amountPaise}",
+                "dir:${parsed.direction}"
             ).joinToString("|")
         }
 
@@ -58,8 +59,9 @@ class DedupeEngine private constructor(context: Context) {
         // 1. Source app
         parts.add("app:${parsed.sourceApp}")
 
-        // 2. Amount in paise
+        // 2. Amount in paise and direction
         parts.add("amt:${parsed.amountPaise}")
+        parts.add("dir:${parsed.direction}")
 
         // 3. Merchant (normalized)
         parsed.merchant?.let { parts.add("merch:${normalizeMerchant(it)}") }

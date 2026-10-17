@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
-import { colors, radius, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { formatCompactINR, formatINR } from '@/utils/format';
 import { Text } from './ui';
 
@@ -20,7 +21,7 @@ export interface BarDatum {
 export function BarChart({
   data,
   height = 160,
-  color = colors.brand,
+  color: colorProp,
   labelEvery = 1,
   emptyLabel = 'No spending in this period',
 }: {
@@ -31,6 +32,9 @@ export function BarChart({
   labelEvery?: number;
   emptyLabel?: string;
 }) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.brand;
+  const styles = useStyles();
   const [selected, setSelected] = useState<number | null>(null);
   const max = Math.max(0, ...data.map((d) => d.value));
   const average = data.length ? data.reduce((s, d) => s + d.value, 0) / data.length : 0;
@@ -111,6 +115,7 @@ export function Donut({
   thickness?: number;
   children?: React.ReactNode;
 }) {
+  const { colors } = useTheme();
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
   const total = slices.reduce((s, x) => s + x.value, 0);
@@ -154,6 +159,7 @@ export function Donut({
 
 /** Single horizontal bar split by share — compact category overview. */
 export function StackedBar({ slices, height = 10 }: { slices: DonutSlice[]; height?: number }) {
+  const styles = useStyles();
   const total = slices.reduce((s, x) => s + x.value, 0);
   return (
     <View style={[styles.stacked, { height, borderRadius: height / 2 }]}>
@@ -164,7 +170,7 @@ export function StackedBar({ slices, height = 10 }: { slices: DonutSlice[]; heig
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   chartCaption: {
     minHeight: 22,
     marginBottom: space.sm,
@@ -206,4 +212,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.pill,
   },
-});
+}));

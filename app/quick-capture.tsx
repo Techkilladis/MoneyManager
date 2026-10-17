@@ -5,7 +5,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, font, radius, space, tint } from '@/design/tokens';
+import { font, radius, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member } from '@/database/schema';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { categoryService, classificationService, memberService, transactionService } from '@/services';
@@ -23,9 +24,11 @@ import {
   sanitizeAmountInput,
 } from '@/utils/format';
 import { CategoryGrid, MemberChips } from '@/components/Pickers';
+import { haptic } from '@/utils/haptics';
 import { Button, EmptyState, Icon, LoadingView, ScreenHeader, Text, TextField, useToast } from '@/components/ui';
 
 export default function QuickCaptureScreen() {
+  const styles = useStyles();
   const params = useLocalSearchParams<{ id?: string; sourceEventId?: string }>();
   const toast = useToast();
   const [reviewed, setReviewed] = useState<string[]>([]);
@@ -99,6 +102,8 @@ function ReviewCard({
   total: number;
   onReviewed: (id: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const [tx, setTx] = useState<FormattedTransaction | null>(null);
@@ -161,6 +166,7 @@ function ReviewCard({
   }, [id]);
 
   const finish = (message: string) => {
+    haptic.success();
     setSuccess(message);
     Animated.sequence([
       Animated.spring(celebrate, { toValue: 1, useNativeDriver: true, damping: 12, stiffness: 180 }),
@@ -179,15 +185,17 @@ function ReviewCard({
       return;
     }
     if (!merchant.trim()) {
-      setError('Add who you paid');
+      setError(tx.kind === 'INCOME' ? 'Add who paid you' : 'Add who you paid');
       return;
     }
     setBusy('confirm');
     setError(null);
+    // Merchant memory may suggest an expense category for money received.
+    const picked = categories.find((c) => c.id === categoryId);
     const result = await transactionService.confirmTransaction(
       tx.id,
-      categoryId ?? undefined,
-      memberId ?? undefined,
+      picked && picked.kind === tx.kind ? picked.id : undefined,
+      tx.kind === 'INCOME' ? undefined : memberId ?? undefined,
       amountPaise,
       merchant.trim(),
       note.trim() || undefined
@@ -231,13 +239,15 @@ function ReviewCard({
   if (!tx) return <LoadingView />;
 
   const source = formatSourceApp(tx.sourceApp) ?? 'UPI';
+  const income = tx.kind === 'INCOME';
+  const kindCategories = categories.filter((c) => c.kind === (income ? 'INCOME' : 'EXPENSE'));
   const suggestedCategory = suggestion?.categoryId ? categories.find((c) => c.id === suggestion.categoryId) : null;
   const amountPaise = parseAmount(amount) ?? 0;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader
-        title="Review payment"
+        title={income ? 'Money received' : 'Review payment'}
         back
         right={
           counter ? (
@@ -252,10 +262,10 @@ function ReviewCard({
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.receipt}>
-            <View style={styles.sourcePill}>
-              <Icon name="zap" size={13} color={colors.brand} />
-              <Text variant="caption" color={colors.brand} style={{ fontWeight: '600' }}>
-                Detected from {source}
+            <View style={[styles.sourcePill, income && { backgroundColor: colors.positiveSoft }]}>
+              <Icon name={income ? 'arrowDownLeft' : 'zap'} size={13} color={income ? colors.positive : colors.brand} />
+              <Text variant="caption" color={income ? colors.positive : colors.brand} style={{ fontWeight: '600' }}>
+                {income ? `Received via ${source}` : `Detected from ${source}`}
               </Text>
             </View>
             {editingAmount ? (
@@ -273,7 +283,8 @@ function ReviewCard({
               </View>
             ) : (
               <Pressable onPress={() => setEditingAmount(true)} style={styles.amountRow} accessibilityLabel="Edit amount" accessibilityRole="button">
-                <Text style={styles.amountText} numeric>
+                <Text style={[styles.amountText, income && { color: colors.positive }]} numeric>
+                  {income ? '+' : ''}
                   {formatINR(amountPaise)}
                 </Text>
                 <View style={styles.editBadge}>
@@ -287,11 +298,11 @@ function ReviewCard({
           </View>
 
           <TextField
-            label="Paid to"
+            label={income ? 'Received from' : 'Paid to'}
             icon="store"
             value={merchant}
             onChangeText={setMerchant}
-            placeholder="Who did you pay?"
+            placeholder={income ? 'Who paid you?' : 'Who did you pay?'}
             autoCapitalize="words"
           />
 
@@ -311,14 +322,14 @@ function ReviewCard({
             What was it for?
           </Text>
           <CategoryGrid
-            categories={categories}
+            categories={kindCategories}
             value={categoryId}
             onChange={setCategoryId}
             suggestedId={suggestion?.categoryId}
             onManage={() => router.push('/categories')}
           />
 
-          {members.length > 0 ? (
+          {members.length > 0 && !income ? (
             <>
               <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
                 Spent on
@@ -384,7 +395,7 @@ function ReviewCard({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, scheme) => ({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -464,7 +475,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   successScrim: {
-    backgroundColor: 'rgba(245,246,250,0.96)',
+    backgroundColor: scheme === 'dark' ? 'rgba(11,13,23,0.96)' : 'rgba(245,246,250,0.96)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -476,4 +487,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

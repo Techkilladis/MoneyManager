@@ -1,9 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { colors, space } from '@/design/tokens';
-import { budgetService, categoryService } from '@/services';
+import { ScrollView, View } from 'react-native';
+import { space } from '@/design/tokens';
+import type { Palette } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
+import { alertsService, budgetService, categoryService, ledgerService } from '@/services';
 import { dataEvents } from '@/services/events';
 import { MonthlyBudgetView } from '@/services/budget';
+import { getSetting, setSetting } from '@/services/settings';
+import { haptic } from '@/utils/haptics';
 import { useScreenData } from '@/hooks/useScreenData';
 import { amountToInput, formatCompactINR, formatINR, parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { CategoryGrid } from '@/components/Pickers';
@@ -12,6 +16,7 @@ import {
   Card,
   CategoryAvatar,
   EmptyState,
+  Icon,
   IconButton,
   LoadingView,
   ProgressBar,
@@ -23,22 +28,31 @@ import {
 } from '@/components/ui';
 
 async function fetchBudgets() {
-  const [budgets, categories] = await Promise.all([budgetService.getMonthlyBudgets(), categoryService.getAll()]);
-  return { budgets, categories };
+  const month = ledgerService.monthBounds();
+  const [budgets, categories, overall, spent] = await Promise.all([
+    budgetService.getMonthlyBudgets(),
+    categoryService.getAll(),
+    getSetting('overallBudgetPaise'),
+    ledgerService.sumBetween(month.start, month.end),
+  ]);
+  return { budgets, categories: categories.filter((c) => c.kind === 'EXPENSE'), overall, monthSpent: spent.total };
 }
 
-function statusColor(b: MonthlyBudgetView): string {
+function statusColor(b: MonthlyBudgetView, colors: Palette): string {
   if (b.status === 'EXCEEDED') return colors.negative;
   if (b.status === 'WARNING') return colors.warning;
   return colors.positive;
 }
 
 export default function BudgetsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const toast = useToast();
   const { data, reload } = useScreenData(fetchBudgets);
   const [editor, setEditor] = useState<{ budgetId: string | null; categoryId: string | null; amount: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [overallDraft, setOverallDraft] = useState<string | null>(null);
 
   const openNew = useCallback(() => {
     setError(null);
@@ -50,8 +64,9 @@ export default function BudgetsScreen() {
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysLeft = daysInMonth - now.getDate() + 1;
-  const totalLimit = data.budgets.reduce((s, b) => s + b.budget.amountPaise, 0);
-  const totalSpent = data.budgets.reduce((s, b) => s + b.spentPaise, 0);
+  const hasOverall = data.overall > 0;
+  const totalLimit = hasOverall ? data.overall : data.budgets.reduce((s, b) => s + b.budget.amountPaise, 0);
+  const totalSpent = hasOverall ? data.monthSpent : data.budgets.reduce((s, b) => s + b.spentPaise, 0);
   const budgetedIds = new Set(data.budgets.map((b) => b.budget.categoryId));
   const monthName = now.toLocaleDateString('en-IN', { month: 'long' });
 
@@ -70,39 +85,84 @@ export default function BudgetsScreen() {
     setSaving(false);
     if (!result.success) return setError(result.error ?? 'Could not save budget');
     setEditor(null);
+    haptic.success();
     dataEvents.emit();
     reload();
+    void alertsService.checkBudgetAlerts();
     toast.show(editing ? 'Budget updated' : 'Budget created');
   };
 
-  const remove = () => {
+  const remove = async () => {
     if (!editing) return;
-    Alert.alert('Remove budget?', `Stop tracking a monthly limit for ${editing.category?.name ?? 'this category'}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          await budgetService.deleteBudget(editing.budget.id);
-          setEditor(null);
+    const { categoryId, amountPaise } = editing.budget;
+    await budgetService.deleteBudget(editing.budget.id);
+    setEditor(null);
+    haptic.warning();
+    dataEvents.emit();
+    reload();
+    toast.show('Budget removed', 'info', {
+      label: 'Undo',
+      onPress: () =>
+        void budgetService.upsertMonthlyBudget(categoryId, amountPaise).then(() => {
           dataEvents.emit();
           reload();
-          toast.show('Budget removed', 'info');
-        },
-      },
-    ]);
+        }),
+    });
+  };
+
+  const saveOverall = async (remove = false) => {
+    const paise = remove ? 0 : parseAmount(overallDraft ?? '') ?? 0;
+    if (!remove && paise <= 0) return setError('Enter a monthly amount');
+    const previous = data.overall;
+    await setSetting('overallBudgetPaise', paise);
+    setOverallDraft(null);
+    haptic[remove ? 'warning' : 'success']();
+    dataEvents.emit();
+    reload();
+    if (!remove) void alertsService.checkBudgetAlerts();
+    toast.show(
+      remove ? 'Monthly budget removed' : 'Monthly budget saved',
+      remove ? 'info' : 'success',
+      remove
+        ? {
+            label: 'Undo',
+            onPress: () => void setSetting('overallBudgetPaise', previous).then(() => reload()),
+          }
+        : undefined
+    );
   };
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Budgets" back right={<IconButton icon="plus" accessibilityLabel="Add budget" onPress={openNew} />} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {data.budgets.length === 0 ? (
+        {!hasOverall ? (
+          <Card
+            style={{ marginBottom: space.lg }}
+            onPress={() => {
+              setError(null);
+              setOverallDraft('');
+            }}
+          >
+            <View style={styles.budgetTop}>
+              <View style={styles.overallIcon}>
+                <Icon name="wallet" size={20} color={colors.brand} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong">Set a monthly spending budget</Text>
+                <Text variant="caption">One limit for everything you spend in a month.</Text>
+              </View>
+              <Icon name="plus" size={18} color={colors.brand} />
+            </View>
+          </Card>
+        ) : null}
+
+        {data.budgets.length === 0 && !hasOverall ? (
           <Card>
             <EmptyState
               compact
               icon="target"
-              title="Set your first budget"
+              title="Budget by category"
               message="Pick a category and a monthly limit. Budgets reset automatically every month."
               actionLabel="Create budget"
               onAction={openNew}
@@ -110,8 +170,20 @@ export default function BudgetsScreen() {
           </Card>
         ) : (
           <>
-            <Card style={styles.summary}>
-              <Text variant="overline">{monthName} · {daysLeft} days left</Text>
+            <Card
+              style={styles.summary}
+              onPress={
+                hasOverall
+                  ? () => {
+                      setError(null);
+                      setOverallDraft(amountToInput(data.overall));
+                    }
+                  : undefined
+              }
+            >
+              <Text variant="overline">
+                {hasOverall ? 'Monthly budget' : 'Category budgets'} · {monthName} · {daysLeft} days left
+              </Text>
               <View style={styles.summaryRow}>
                 <Text variant="title" numeric>
                   {formatINR(totalSpent, { decimals: 'never' })}
@@ -127,10 +199,14 @@ export default function BudgetsScreen() {
               />
               <Text variant="caption" style={{ marginTop: space.xs }}>
                 {totalSpent > totalLimit
-                  ? `${formatINR(totalSpent - totalLimit)} over your combined budget`
+                  ? `${formatINR(totalSpent - totalLimit)} over your ${hasOverall ? 'monthly' : 'combined'} budget`
                   : `${formatINR(totalLimit - totalSpent)} left · about ${formatCompactINR(Math.round((totalLimit - totalSpent) / daysLeft))} a day`}
               </Text>
             </Card>
+
+            {hasOverall && data.budgets.length === 0 ? (
+              <Button title="Add a category budget" icon="plus" variant="secondary" fullWidth onPress={openNew} style={{ marginTop: space.lg }} />
+            ) : null}
 
             <View style={{ gap: space.sm, marginTop: space.lg }}>
               {data.budgets.map((b) => {
@@ -151,11 +227,11 @@ export default function BudgetsScreen() {
                           {formatINR(b.spentPaise, { decimals: 'never' })} of {formatINR(b.budget.amountPaise, { decimals: 'never' })}
                         </Text>
                       </View>
-                      <Text variant="labelStrong" color={statusColor(b)} numeric>
+                      <Text variant="labelStrong" color={statusColor(b, colors)} numeric>
                         {b.percentageUsed}%
                       </Text>
                     </View>
-                    <ProgressBar value={b.spentPaise / b.budget.amountPaise} color={statusColor(b)} />
+                    <ProgressBar value={b.spentPaise / b.budget.amountPaise} color={statusColor(b, colors)} />
                     <Text variant="caption" color={over ? colors.negative : colors.textTertiary} style={{ marginTop: space.xs }}>
                       {over ? `${formatINR(-b.remainingPaise)} over` : `${formatINR(b.remainingPaise)} left`}
                     </Text>
@@ -175,7 +251,7 @@ export default function BudgetsScreen() {
         footer={
           <View style={{ gap: space.xs }}>
             <Button title={editing ? 'Save budget' : 'Create budget'} size="lg" fullWidth loading={saving} onPress={save} />
-            {editing ? <Button title="Remove budget" variant="ghost" fullWidth onPress={remove} /> : null}
+            {editing ? <Button title="Remove budget" variant="ghost" fullWidth onPress={() => void remove()} /> : null}
           </View>
         }
       >
@@ -209,11 +285,45 @@ export default function BudgetsScreen() {
           </>
         ) : null}
       </Sheet>
+
+      <Sheet
+        visible={overallDraft !== null}
+        onClose={() => setOverallDraft(null)}
+        title="Monthly budget"
+        subtitle="Covers all spending and resets every month"
+        footer={
+          <View style={{ gap: space.xs }}>
+            <Button title="Save" size="lg" fullWidth onPress={() => void saveOverall()} />
+            {hasOverall ? <Button title="Remove monthly budget" variant="ghost" fullWidth onPress={() => void saveOverall(true)} /> : null}
+          </View>
+        }
+      >
+        {overallDraft !== null ? (
+          <>
+            <TextField
+              label="Monthly limit"
+              value={overallDraft}
+              onChangeText={(t) => {
+                setError(null);
+                setOverallDraft(sanitizeAmountInput(t));
+              }}
+              keyboardType="decimal-pad"
+              placeholder="30000"
+              right={<Text variant="label">₹ / month</Text>}
+              error={error}
+              autoFocus
+            />
+            <Text variant="caption" style={{ marginTop: space.sm }}>
+              You'll get an alert at 80% and when it's used up.
+            </Text>
+          </>
+        ) : null}
+      </Sheet>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -239,8 +349,16 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginBottom: space.sm,
   },
+  overallIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sheetLabel: {
     marginTop: space.lg,
     marginBottom: space.xs,
   },
-});
+}));

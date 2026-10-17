@@ -21,9 +21,13 @@ export interface Transaction {
   is_pending_capture: number; // 1 = captured UPI event awaiting review, 0 = regular transaction
   is_dismissed: number; // 1 = dismissed (rejected/ignored), 0 = active
   dismissed_at: number | null; // Timestamp when dismissed
+  kind: TransactionKind; // v6: money out (EXPENSE) or money in (INCOME)
+  sharedPaise: number; // v6: part of the amount owed back by others (splits)
   createdAt: number;
   updatedAt: number;
 }
+
+export type TransactionKind = 'EXPENSE' | 'INCOME';
 
 export type TransactionStatus = 'PENDING' | 'CONFIRMED' | 'EDITED' | 'CANCELLED';
 
@@ -35,6 +39,7 @@ export interface Category {
   icon: string | null; // SF Symbol name or custom identifier
   color: string | null; // Hex color
   sortOrder: number;
+  kind: TransactionKind; // v6: expense or income category
   createdAt: number;
   updatedAt: number;
 }
@@ -99,8 +104,36 @@ export interface BudgetWithSpending {
 
 export type BudgetStatus = 'HEALTHY' | 'WARNING' | 'EXCEEDED';
 
-// Database Schema Version - INCREMENTED FOR PHASE 7
-export const SCHEMA_VERSION = 5;
+// v6: recurring payments (subscriptions, rent, recharges)
+export type RecurringCadence = 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+
+export interface RecurringPayment {
+  id: string;
+  name: string;
+  merchantKey: string; // normalized merchant key used to match transactions
+  amountPaise: number;
+  cadence: RecurringCadence;
+  categoryId: string | null;
+  /** A known due date; later due dates are derived from the last matching payment. */
+  anchorDate: number;
+  remind: boolean;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// v6: split expenses - the share of a transaction someone else owes you
+export interface Split {
+  id: string;
+  transactionId: string;
+  memberId: string;
+  sharePaise: number;
+  settledAt: number | null;
+  createdAt: number;
+}
+
+// Database Schema Version
+export const SCHEMA_VERSION = 6;
 
 // SQL Statements
 export const schema = {
@@ -269,6 +302,60 @@ export const schema = {
     'CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category_id);',
     'CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_start, period_end);',
     'CREATE INDEX IF NOT EXISTS idx_budgets_active ON budgets(is_active);',
+  ],
+
+  // v6: key/value app settings (theme, app lock, onboarding, alerts...)
+  createSettingsTable: `
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `,
+
+  createRecurringTable: `
+    CREATE TABLE IF NOT EXISTS recurring_payments (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      merchant_key TEXT NOT NULL,
+      amount_paise INTEGER NOT NULL CHECK (amount_paise > 0),
+      cadence TEXT NOT NULL CHECK (cadence IN ('WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY')),
+      category_id TEXT,
+      anchor_date INTEGER NOT NULL,
+      remind INTEGER NOT NULL DEFAULT 1,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+    );
+  `,
+
+  createSplitsTable: `
+    CREATE TABLE IF NOT EXISTS splits (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL,
+      member_id TEXT NOT NULL,
+      share_paise INTEGER NOT NULL CHECK (share_paise > 0),
+      settled_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+      FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+    );
+  `,
+
+  createV6Indexes: [
+    'CREATE INDEX IF NOT EXISTS idx_transactions_kind ON transactions(kind);',
+    'CREATE INDEX IF NOT EXISTS idx_recurring_merchant ON recurring_payments(merchant_key);',
+    'CREATE INDEX IF NOT EXISTS idx_splits_transaction ON splits(transaction_id);',
+    'CREATE INDEX IF NOT EXISTS idx_splits_member ON splits(member_id);',
+  ],
+
+  seedIncomeCategories: [
+    { id: 'cat-income-salary', name: 'Salary', icon: '💼', color: '#10B981', sortOrder: 101 },
+    { id: 'cat-income-freelance', name: 'Freelance', icon: '💻', color: '#0EA5E9', sortOrder: 102 },
+    { id: 'cat-income-refund', name: 'Refunds', icon: '↩️', color: '#8B5CF6', sortOrder: 103 },
+    { id: 'cat-income-gift', name: 'Gifts', icon: '🎁', color: '#EC4899', sortOrder: 104 },
+    { id: 'cat-income-interest', name: 'Interest', icon: '🏦', color: '#F59E0B', sortOrder: 105 },
+    { id: 'cat-income-other', name: 'Other income', icon: '💰', color: '#14B8A6', sortOrder: 106 },
   ],
 
   // Migration from v4 to v5 - add budgets table

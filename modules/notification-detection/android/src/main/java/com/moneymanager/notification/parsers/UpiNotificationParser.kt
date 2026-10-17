@@ -15,7 +15,9 @@ data class ParsedUpiTransaction(
     val transactionReference: String?,
     val parserName: String,
     val parserVersion: String = "1.0",
-    val confidence: Double = 1.0
+    val confidence: Double = 1.0,
+    /** "DEBIT" (money out) or "CREDIT" (money in). */
+    val direction: String = "DEBIT"
 ) : Parcelable {
     constructor(parcel: android.os.Parcel) : this(
         amountPaise = parcel.readLong(),
@@ -25,7 +27,8 @@ data class ParsedUpiTransaction(
         transactionReference = parcel.readString(),
         parserName = parcel.readString()!!,
         parserVersion = parcel.readString()!!,
-        confidence = parcel.readDouble()
+        confidence = parcel.readDouble(),
+        direction = parcel.readString() ?: "DEBIT"
     )
 
     override fun writeToParcel(dest: android.os.Parcel, flags: Int) {
@@ -37,6 +40,7 @@ data class ParsedUpiTransaction(
         dest.writeString(parserName)
         dest.writeString(parserVersion)
         dest.writeDouble(confidence)
+        dest.writeString(direction)
     }
 
     override fun describeContents(): Int = 0
@@ -64,6 +68,7 @@ data class ParsedUpiTransaction(
         bundle.putString("parserName", parserName)
         bundle.putString("parserVersion", parserVersion)
         bundle.putDouble("confidence", confidence)
+        bundle.putString("direction", direction)
         return bundle
     }
 }

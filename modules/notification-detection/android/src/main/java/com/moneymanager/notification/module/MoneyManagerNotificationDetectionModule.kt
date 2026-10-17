@@ -2,6 +2,8 @@ package com.moneymanager.notification.module
 
 import android.content.Context
 import com.moneymanager.notification.access.NotificationAccessManager
+import com.moneymanager.notification.health.CaptureHealth
+import com.moneymanager.notification.widget.SpendWidgetProvider
 import com.moneymanager.notification.normalizer.NormalizedNotification
 import com.moneymanager.notification.parsers.ParsedUpiTransaction
 import com.moneymanager.notification.parsers.ParserRegistry
@@ -86,6 +88,7 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 PendingEventStore.getInstance(ctx).consumeEvent(id)
+                SpendWidgetProvider.refreshAll(ctx)
                 promise.resolve(null)
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
@@ -96,6 +99,67 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 PendingEventStore.getInstance(ctx).dismissEvent(id)
+                SpendWidgetProvider.refreshAll(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        // Capture reliability
+        AsyncFunction("getCaptureHealth") { promise: Promise ->
+            val ctx = context
+            if (ctx != null) {
+                val health = CaptureHealth.snapshot(ctx).toMutableMap()
+                health["accessEnabled"] = NotificationAccessManager.isNotificationAccessEnabled(ctx)
+                health["widgetCount"] = SpendWidgetProvider.installedCount(ctx)
+                promise.resolve(health)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        AsyncFunction("requestIgnoreBatteryOptimizations") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
+            if (ctx != null) {
+                CaptureHealth.requestIgnoreBatteryOptimizations(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        AsyncFunction("openAppDetailsSettings") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
+            if (ctx != null) {
+                CaptureHealth.openAppDetails(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        AsyncFunction("requestListenerRebind") { promise: Promise ->
+            val ctx = context
+            if (ctx != null) {
+                promise.resolve(CaptureHealth.requestRebind(ctx))
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        // Home-screen widget
+        AsyncFunction("updateWidget") { data: Map<String, Any?>, promise: Promise ->
+            val ctx = context
+            if (ctx != null) {
+                SpendWidgetProvider.save(
+                    ctx,
+                    today = data["today"] as? String ?: "",
+                    month = data["month"] as? String ?: "",
+                    dayKey = data["dayKey"] as? String ?: "",
+                    monthKey = data["monthKey"] as? String ?: ""
+                )
+                SpendWidgetProvider.refreshAll(ctx)
                 promise.resolve(null)
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
@@ -140,7 +204,8 @@ class MoneyManagerNotificationDetectionModule : Module() {
             "notificationId" to event.notificationId,
             "status" to event.status.name,
             "createdAt" to event.createdAt,
-            "dedupeKey" to event.dedupeKey
+            "dedupeKey" to event.dedupeKey,
+            "direction" to event.direction
         )
     }
 
@@ -153,7 +218,8 @@ class MoneyManagerNotificationDetectionModule : Module() {
             "transactionReference" to parsed.transactionReference,
             "parserName" to parsed.parserName,
             "parserVersion" to parsed.parserVersion,
-            "confidence" to parsed.confidence
+            "confidence" to parsed.confidence,
+            "direction" to parsed.direction
         )
     }
 

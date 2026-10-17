@@ -1,12 +1,13 @@
 // Category Repository
 import { openDatabase, mapCategoryRow } from '../db';
-import { Category } from '../schema';
+import { Category, TransactionKind } from '../schema';
 
 export interface CreateCategoryInput {
   name: string;
   icon?: string | null;
   color?: string | null;
   sortOrder?: number;
+  kind?: TransactionKind;
 }
 
 export interface UpdateCategoryInput {
@@ -24,9 +25,9 @@ export const categoryRepository = {
     const timestamp = Date.now();
     
     await database.runAsync(
-      `INSERT INTO categories (id, name, icon, color, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, input.name, input.icon || null, input.color || null, input.sortOrder || 0, timestamp, timestamp]
+      `INSERT INTO categories (id, name, icon, color, sortOrder, kind, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, input.name, input.icon || null, input.color || null, input.sortOrder || 0, input.kind ?? 'EXPENSE', timestamp, timestamp]
     );
     
     const row = await database.getFirstAsync(

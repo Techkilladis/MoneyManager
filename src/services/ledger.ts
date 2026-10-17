@@ -2,8 +2,9 @@
  * Ledger queries that back the redesigned screens: home summary, paged
  * history, spending series, recent merchants, CSV export and data reset.
  *
- * "Spending" always means confirmed, non-pending, non-dismissed rows — the
- * same definition the analytics service uses.
+ * "Spending" means confirmed, non-pending, non-dismissed EXPENSE rows, and
+ * counts only your share of split bills (amount minus what others owe you).
+ * "Income" is the same filter on INCOME rows.
  */
 import { openDatabase } from '../database/db';
 import { Category, Member, Transaction } from '../database/schema';
@@ -14,8 +15,14 @@ import { FormattedTransaction, formatDate } from '../domain/transaction';
 import { formatCurrency } from '../database/db';
 import { notificationDetectionService } from './notificationDetection';
 import { getMonthlyBudgets } from './budget';
+import { getSetting } from './settings';
 
-export const SPEND_WHERE = "status = 'CONFIRMED' AND is_pending_capture = 0 AND is_dismissed = 0";
+/** Settled rows of either kind (what History lists). */
+export const SETTLED_WHERE = "status = 'CONFIRMED' AND is_pending_capture = 0 AND is_dismissed = 0";
+export const SPEND_WHERE = `${SETTLED_WHERE} AND kind = 'EXPENSE'`;
+export const INCOME_WHERE = `${SETTLED_WHERE} AND kind = 'INCOME'`;
+/** Your share of an expense: the full amount minus what others owe you back. */
+export const SPEND_AMOUNT = '(amountPaise - shared_paise)';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -54,6 +61,8 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
     is_pending_capture: tx.is_pending_capture ?? 0,
     is_dismissed: tx.is_dismissed ?? 0,
     dismissed_at: tx.dismissed_at ?? null,
+    kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
+    sharedPaise: tx.sharedPaise ?? 0,
   };
 }
 
@@ -80,14 +89,30 @@ export function weekBounds(date = new Date()): { start: number; end: number } {
   return { start, end: new Date(start).setDate(new Date(start).getDate() + 7) };
 }
 
-async function sumBetween(start: number, end: number): Promise<{ total: number; count: number }> {
+export async function sumBetween(start: number, end: number): Promise<{ total: number; count: number }> {
   const db = await openDatabase();
   const row = await db.getFirstAsync<{ total: number; count: number }>(
-    `SELECT COALESCE(SUM(amountPaise), 0) AS total, COUNT(*) AS count
+    `SELECT COALESCE(SUM(${SPEND_AMOUNT}), 0) AS total, COUNT(*) AS count
      FROM transactions WHERE ${SPEND_WHERE} AND transactionTimestamp >= ? AND transactionTimestamp < ?`,
     [start, end]
   );
   return { total: row?.total ?? 0, count: row?.count ?? 0 };
+}
+
+export async function incomeBetween(start: number, end: number): Promise<{ total: number; count: number }> {
+  const db = await openDatabase();
+  const row = await db.getFirstAsync<{ total: number; count: number }>(
+    `SELECT COALESCE(SUM(amountPaise), 0) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${INCOME_WHERE} AND transactionTimestamp >= ? AND transactionTimestamp < ?`,
+    [start, end]
+  );
+  return { total: row?.total ?? 0, count: row?.count ?? 0 };
+}
+
+/** Share of income kept (0..1), or null when there was no income. */
+export function savingsRate(income: number, spent: number): number | null {
+  if (income <= 0) return null;
+  return (income - spent) / income;
 }
 
 // ------------------------------------------------------------ home
@@ -115,16 +140,27 @@ export interface HomeSummary {
   recent: FormattedTransaction[];
   pending: FormattedTransaction[];
   pendingTotal: number;
-  budget: { limit: number; spent: number; count: number } | null;
+  /** Overall monthly budget if set, otherwise the sum of category budgets. */
+  budget: { limit: number; spent: number; count: number; overall: boolean } | null;
   hasAnyTransactions: boolean;
+  monthIncome: number;
+  /** Income minus spending this month. */
+  monthLeft: number;
+  savingsRate: number | null;
 }
 
-export async function getCategoryShares(start: number, end: number): Promise<CategoryShare[]> {
+export async function getCategoryShares(
+  start: number,
+  end: number,
+  kind: 'EXPENSE' | 'INCOME' = 'EXPENSE'
+): Promise<CategoryShare[]> {
   const db = await openDatabase();
+  const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
+  const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
   const rows = await db.getAllAsync<{ categoryId: string | null; total: number; count: number }>(
-    `SELECT categoryId, SUM(amountPaise) AS total, COUNT(*) AS count
-     FROM transactions WHERE ${SPEND_WHERE} AND transactionTimestamp >= ? AND transactionTimestamp < ?
-     GROUP BY categoryId ORDER BY total DESC`,
+    `SELECT categoryId, SUM(${amount}) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+     GROUP BY categoryId HAVING total > 0 ORDER BY total DESC`,
     [start, end]
   );
   const total = rows.reduce((s, r) => s + r.total, 0);
@@ -152,7 +188,7 @@ export async function getHomeSummary(): Promise<HomeSummary> {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const week = weekBounds(now);
 
-  const [monthAgg, prevToDate, prevFull, today, weekAgg, categories, recentRows, pendingRows, anyRow, budgets] =
+  const [monthAgg, prevToDate, prevFull, today, weekAgg, categories, recentRows, pendingRows, anyRow, budgets, income, overall] =
     await Promise.all([
       sumBetween(month.start, month.end),
       sumBetween(prevMonthStart, Math.min(prevMonthStart + elapsed, month.start)),
@@ -160,15 +196,17 @@ export async function getHomeSummary(): Promise<HomeSummary> {
       sumBetween(todayStart, todayStart + DAY_MS),
       sumBetween(week.start, week.end),
       getCategoryShares(month.start, month.end),
-      db.getAllAsync(`SELECT * FROM transactions WHERE ${SPEND_WHERE} ORDER BY transactionTimestamp DESC LIMIT 6`),
+      db.getAllAsync(`SELECT * FROM transactions WHERE ${SETTLED_WHERE} ORDER BY transactionTimestamp DESC LIMIT 6`),
       db.getAllAsync(
         `SELECT * FROM transactions WHERE status = 'PENDING' AND is_pending_capture = 1 AND is_dismissed = 0
          ORDER BY transactionTimestamp DESC`
       ),
       db.getFirstAsync<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM transactions WHERE is_dismissed = 0 AND (is_pending_capture = 1 OR ${SPEND_WHERE})`
+        `SELECT COUNT(*) AS n FROM transactions WHERE is_dismissed = 0 AND (is_pending_capture = 1 OR ${SETTLED_WHERE})`
       ),
       getMonthlyBudgets(now),
+      incomeBetween(month.start, month.end),
+      getSetting('overallBudgetPaise').catch(() => 0),
     ]);
 
   const [recent, pending] = await Promise.all([formatRows(recentRows), formatRows(pendingRows)]);
@@ -187,20 +225,28 @@ export async function getHomeSummary(): Promise<HomeSummary> {
     pending,
     pendingTotal: pending.reduce((s, t) => s + t.amountPaise, 0),
     budget:
-      budgets.length > 0
-        ? {
-            limit: budgets.reduce((s, b) => s + b.budget.amountPaise, 0),
-            spent: budgets.reduce((s, b) => s + b.spentPaise, 0),
-            count: budgets.length,
-          }
-        : null,
+      overall > 0
+        ? { limit: overall, spent: monthAgg.total, count: budgets.length, overall: true }
+        : budgets.length > 0
+          ? {
+              limit: budgets.reduce((s, b) => s + b.budget.amountPaise, 0),
+              spent: budgets.reduce((s, b) => s + b.spentPaise, 0),
+              count: budgets.length,
+              overall: false,
+            }
+          : null,
     hasAnyTransactions: (anyRow?.n ?? 0) > 0,
+    monthIncome: income.total,
+    monthLeft: income.total - monthAgg.total,
+    savingsRate: savingsRate(income.total, monthAgg.total),
   };
 }
 
 // ------------------------------------------------------------ history
 
 export interface HistoryFilters {
+  /** undefined = both expenses and income */
+  kind?: 'EXPENSE' | 'INCOME';
   search?: string;
   categoryId?: string | null; // 'none' = uncategorized
   memberId?: string | null;
@@ -209,8 +255,12 @@ export interface HistoryFilters {
 }
 
 function historyWhere(f: HistoryFilters): { sql: string; params: (string | number)[] } {
-  const parts = [SPEND_WHERE];
+  const parts = [SETTLED_WHERE];
   const params: (string | number)[] = [];
+  if (f.kind) {
+    parts.push('kind = ?');
+    params.push(f.kind);
+  }
   if (f.search && f.search.trim()) {
     parts.push('(merchant LIKE ? OR note LIKE ?)');
     const q = `%${f.search.trim()}%`;
@@ -250,30 +300,41 @@ export async function getHistoryPage(
   return formatRows(rows);
 }
 
-export async function getHistoryTotals(filters: HistoryFilters): Promise<{ total: number; count: number }> {
+const SPENT_SUM = `COALESCE(SUM(CASE WHEN kind = 'EXPENSE' THEN ${SPEND_AMOUNT} ELSE 0 END), 0)`;
+const INCOME_SUM = "COALESCE(SUM(CASE WHEN kind = 'INCOME' THEN amountPaise ELSE 0 END), 0)";
+
+/** `total` is spending (your share); `income` is money in. */
+export async function getHistoryTotals(
+  filters: HistoryFilters
+): Promise<{ total: number; income: number; count: number }> {
   const db = await openDatabase();
   const { sql, params } = historyWhere(filters);
-  const row = await db.getFirstAsync<{ total: number; count: number }>(
-    `SELECT COALESCE(SUM(amountPaise), 0) AS total, COUNT(*) AS count FROM transactions WHERE ${sql}`,
+  const row = await db.getFirstAsync<{ total: number; income: number; count: number }>(
+    `SELECT ${SPENT_SUM} AS total, ${INCOME_SUM} AS income, COUNT(*) AS count FROM transactions WHERE ${sql}`,
     params
   );
-  return { total: row?.total ?? 0, count: row?.count ?? 0 };
+  return { total: row?.total ?? 0, income: row?.income ?? 0, count: row?.count ?? 0 };
+}
+
+export interface DayTotal {
+  spent: number;
+  income: number;
 }
 
 /** Per-day totals for the given filters, keyed by local start-of-day. */
-export async function getDailyTotals(filters: HistoryFilters): Promise<Map<number, number>> {
+export async function getDailyTotals(filters: HistoryFilters): Promise<Map<number, DayTotal>> {
   const db = await openDatabase();
   const { sql, params } = historyWhere(filters);
-  const rows = await db.getAllAsync<{ day: string; total: number }>(
+  const rows = await db.getAllAsync<{ day: string; spent: number; income: number }>(
     `SELECT strftime('%Y-%m-%d', transactionTimestamp / 1000, 'unixepoch', 'localtime') AS day,
-            SUM(amountPaise) AS total
+            ${SPENT_SUM} AS spent, ${INCOME_SUM} AS income
      FROM transactions WHERE ${sql} GROUP BY day`,
     params
   );
-  const map = new Map<number, number>();
+  const map = new Map<number, DayTotal>();
   for (const r of rows) {
     const [y, m, d] = r.day.split('-').map(Number);
-    map.set(new Date(y, m - 1, d).getTime(), r.total);
+    map.set(new Date(y, m - 1, d).getTime(), { spent: r.spent, income: r.income });
   }
   return map;
 }
@@ -291,7 +352,7 @@ export async function getSpendingSeries(start: number, end: number, bucket: 'day
   const db = await openDatabase();
   const fmt = bucket === 'day' ? '%Y-%m-%d' : '%Y-%m';
   const rows = await db.getAllAsync<{ k: string; total: number }>(
-    `SELECT strftime('${fmt}', transactionTimestamp / 1000, 'unixepoch', 'localtime') AS k, SUM(amountPaise) AS total
+    `SELECT strftime('${fmt}', transactionTimestamp / 1000, 'unixepoch', 'localtime') AS k, SUM(${SPEND_AMOUNT}) AS total
      FROM transactions WHERE ${SPEND_WHERE} AND transactionTimestamp >= ? AND transactionTimestamp < ?
      GROUP BY k`,
     [start, end]
@@ -328,7 +389,7 @@ export async function getLargestExpense(start: number, end: number): Promise<For
   const db = await openDatabase();
   const row = await db.getFirstAsync(
     `SELECT * FROM transactions WHERE ${SPEND_WHERE} AND transactionTimestamp >= ? AND transactionTimestamp < ?
-     ORDER BY amountPaise DESC LIMIT 1`,
+     ORDER BY ${SPEND_AMOUNT} DESC LIMIT 1`,
     [start, end]
   );
   if (!row) return null;
@@ -358,11 +419,13 @@ function csvCell(value: string | number | null | undefined): string {
 
 export async function exportTransactionsCsv(): Promise<{ csv: string; count: number }> {
   const db = await openDatabase();
-  const rows = await db.getAllAsync(`SELECT * FROM transactions WHERE ${SPEND_WHERE} ORDER BY transactionTimestamp DESC`);
+  const rows = await db.getAllAsync(`SELECT * FROM transactions WHERE ${SETTLED_WHERE} ORDER BY transactionTimestamp DESC`);
   const lookup = await loadLookup();
   const pad = (n: number) => String(n).padStart(2, '0');
 
-  const lines = [['Date', 'Time', 'Merchant', 'Amount (INR)', 'Category', 'Member', 'Note', 'Source'].join(',')];
+  const lines = [
+    ['Date', 'Time', 'Type', 'Merchant', 'Amount (INR)', 'Your share (INR)', 'Category', 'Member', 'Note', 'Source'].join(','),
+  ];
   for (const raw of rows) {
     const tx = mapTransactionRow(raw);
     const d = new Date(tx.transactionTimestamp);
@@ -370,8 +433,10 @@ export async function exportTransactionsCsv(): Promise<{ csv: string; count: num
       [
         `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
         `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        tx.kind === 'INCOME' ? 'Income' : 'Expense',
         tx.merchant,
         (tx.amountPaise / 100).toFixed(2),
+        ((tx.amountPaise - (tx.kind === 'INCOME' ? 0 : tx.sharedPaise)) / 100).toFixed(2),
         tx.categoryId ? lookup.categories.get(tx.categoryId)?.name ?? '' : '',
         tx.memberId ? lookup.members.get(tx.memberId)?.name ?? '' : '',
         tx.note ?? '',
@@ -401,6 +466,8 @@ export async function clearAllData(): Promise<void> {
 
   const db = await openDatabase();
   await db.withTransactionAsync(async () => {
+    await db.execAsync('DELETE FROM splits;');
+    await db.execAsync('DELETE FROM recurring_payments;');
     await db.execAsync('DELETE FROM transactions;');
     await db.execAsync('DELETE FROM merchant_memory;');
     await db.execAsync('DELETE FROM merchants;');

@@ -2,7 +2,7 @@
 // react-native-svg, so no icon font or extra native module is needed.
 import React from 'react';
 import Svg, { Circle, Line, Path, Polyline, Rect } from 'react-native-svg';
-import { colors } from '@/design/tokens';
+import { useTheme } from '@/design/theme';
 
 const glyphs = {
   home: (
@@ -220,6 +220,82 @@ const glyphs = {
       <Path d="M7 16h10" />
     </>
   ),
+  battery: (
+    <>
+      <Path d="M15 7h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2" />
+      <Path d="M6 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1" />
+      <Path d="m11 7-3 5h4l-3 5" />
+      <Line x1="22" x2="22" y1="11" y2="13" />
+    </>
+  ),
+  repeat: (
+    <>
+      <Path d="m17 2 4 4-4 4" />
+      <Path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <Path d="m7 22-4-4 4-4" />
+      <Path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </>
+  ),
+  split: (
+    <>
+      <Path d="M16 3h5v5" />
+      <Path d="M8 3H3v5" />
+      <Path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3" />
+      <Path d="m15 9 6-6" />
+    </>
+  ),
+  upload: (
+    <>
+      <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <Polyline points="17 8 12 3 7 8" />
+      <Line x1="12" x2="12" y1="3" y2="15" />
+    </>
+  ),
+  download: (
+    <>
+      <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <Polyline points="7 10 12 15 17 10" />
+      <Line x1="12" x2="12" y1="15" y2="3" />
+    </>
+  ),
+  moon: <Path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+  sun: (
+    <>
+      <Circle cx="12" cy="12" r="4" />
+      <Path d="M12 2v2" />
+      <Path d="M12 20v2" />
+      <Path d="m4.93 4.93 1.41 1.41" />
+      <Path d="m17.66 17.66 1.41 1.41" />
+      <Path d="M2 12h2" />
+      <Path d="M20 12h2" />
+      <Path d="m6.34 17.66-1.41 1.41" />
+      <Path d="m19.07 4.93-1.41 1.41" />
+    </>
+  ),
+  arrowDownLeft: (
+    <>
+      <Path d="M17 7 7 17" />
+      <Path d="M17 17H7V7" />
+    </>
+  ),
+  arrowUpRight: (
+    <>
+      <Path d="M7 7h10v10" />
+      <Path d="M7 17 17 7" />
+    </>
+  ),
+  send: (
+    <>
+      <Path d="m22 2-7 20-4-9-9-4Z" />
+      <Path d="M22 2 11 13" />
+    </>
+  ),
+  undo: (
+    <>
+      <Path d="M3 7v6h6" />
+      <Path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof glyphs;
@@ -231,7 +307,9 @@ interface IconProps {
   strokeWidth?: number;
 }
 
-export function Icon({ name, size = 22, color = colors.text, strokeWidth = 2 }: IconProps) {
+export function Icon({ name, size = 22, color: colorProp, strokeWidth = 2 }: IconProps) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.text;
   return (
     <Svg
       width={size}

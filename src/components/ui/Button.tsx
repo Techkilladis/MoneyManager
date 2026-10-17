@@ -1,6 +1,8 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, PressableProps, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
-import { colors, radius, shadow, space } from '@/design/tokens';
+import { ActivityIndicator, Pressable, PressableProps, StyleProp, View, ViewStyle } from 'react-native';
+import { radius, shadow, space } from '@/design/tokens';
+import type { Palette } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
@@ -17,14 +19,14 @@ interface ButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   style?: StyleProp<ViewStyle>;
 }
 
-const palette: Record<Variant, { bg: string; bgPressed: string; fg: string; border?: string }> = {
+const variantColors = (colors: Palette, dark: boolean): Record<Variant, { bg: string; bgPressed: string; fg: string; border?: string }> => ({
   primary: { bg: colors.brand, bgPressed: colors.brandPressed, fg: colors.textOnBrand },
   secondary: { bg: colors.brandSoft, bgPressed: colors.brandSoftBorder, fg: colors.brand },
   ghost: { bg: 'transparent', bgPressed: colors.surfacePressed, fg: colors.brand },
-  danger: { bg: colors.negative, bgPressed: '#C9363B', fg: colors.textOnBrand },
-  dangerSoft: { bg: colors.negativeSoft, bgPressed: '#F9D6D7', fg: colors.negative },
+  danger: { bg: colors.negative, bgPressed: dark ? '#DC5A5A' : '#C9363B', fg: colors.textOnBrand },
+  dangerSoft: { bg: colors.negativeSoft, bgPressed: dark ? '#4A2228' : '#F9D6D7', fg: colors.negative },
   outline: { bg: colors.surface, bgPressed: colors.surfaceMuted, fg: colors.text, border: colors.border },
-};
+});
 
 const sizes: Record<Size, { height: number; paddingH: number; icon: number; text: 'bodyStrong' | 'labelStrong' }> = {
   lg: { height: 54, paddingH: space.xl, icon: 20, text: 'bodyStrong' },
@@ -43,7 +45,9 @@ export function Button({
   style,
   ...rest
 }: ButtonProps) {
-  const p = palette[variant];
+  const styles = useStyles();
+  const { colors, scheme } = useTheme();
+  const p = variantColors(colors, scheme === 'dark')[variant];
   const s = sizes[size];
   const inactive = disabled || loading;
 
@@ -95,11 +99,15 @@ interface IconButtonProps extends Omit<PressableProps, 'style' | 'children'> {
 export function IconButton({
   icon,
   size = 40,
-  color = colors.text,
-  background = colors.surface,
+  color: colorProp,
+  background: backgroundProp,
   style,
   ...rest
 }: IconButtonProps) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.text;
+  const background = backgroundProp ?? colors.surface;
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -121,7 +129,7 @@ export function IconButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   base: {
     borderRadius: radius.lg,
     alignItems: 'center',
@@ -137,4 +145,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

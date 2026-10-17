@@ -22,6 +22,7 @@ export interface ParsedUpiTransaction {
   parserName: string;
   parserVersion?: string;
   confidence: number;
+  direction?: 'DEBIT' | 'CREDIT';
 }
 
 export interface PendingUpiEvent {
@@ -38,6 +39,7 @@ export interface PendingUpiEvent {
   status: 'PENDING' | 'CONSUMED' | 'DISMISSED' | 'FAILED';
   createdAt: number;
   dedupeKey: string;
+  direction?: 'DEBIT' | 'CREDIT';
 }
 
 export type TransactionStatus = 'PENDING' | 'CONSUMED' | 'DISMISSED' | 'FAILED';
@@ -62,7 +64,7 @@ export interface NotificationAccessChangedEvent {
 // Module Interface
 // ============================================
 
-export interface MoneyManagerNotificationDetectionModule {
+export interface MoneyManagerNotificationDetectionModuleType {
   // Initialization
   initialize(): Promise<{ success: boolean }>;
 
@@ -84,6 +86,15 @@ export interface MoneyManagerNotificationDetectionModule {
     byStatus: Record<string, number>;
   }>;
 
+  // Capture reliability
+  getCaptureHealth(): Promise<Record<string, unknown>>;
+  requestIgnoreBatteryOptimizations(): Promise<void>;
+  openAppDetailsSettings(): Promise<void>;
+  requestListenerRebind(): Promise<boolean>;
+
+  // Home-screen widget
+  updateWidget(data: { today: string; month: string; dayKey: string; monthKey: string }): Promise<void>;
+
   // Development only - simulate notification for testing
   simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null>;
 }
@@ -92,6 +103,6 @@ export interface MoneyManagerNotificationDetectionModule {
 // Module Instance
 // ============================================
 
-declare const MoneyManagerNotificationDetectionModule: MoneyManagerNotificationDetectionModule;
+declare const MoneyManagerNotificationDetectionModule: MoneyManagerNotificationDetectionModuleType;
 
 export default MoneyManagerNotificationDetectionModule;

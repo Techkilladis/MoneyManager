@@ -1,8 +1,9 @@
 import React from 'react';
-import { ActivityIndicator, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, StyleProp, View, ViewStyle } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, space, tint } from '@/design/tokens';
+import { radius, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Button, IconButton } from './Button';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
@@ -29,6 +30,8 @@ export function ScreenHeader({
   right?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const goBack = onBack ?? (() => (router.canGoBack() ? router.back() : router.replace('/')));
 
@@ -64,6 +67,8 @@ export function ScreenHeader({
 }
 
 export function LoadingView({ label }: { label?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.centered}>
       <ActivityIndicator color={colors.brand} size="large" />
@@ -95,6 +100,8 @@ export function EmptyState({
   onSecondary?: () => void;
   compact?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={[styles.empty, compact && styles.emptyCompact]}>
       <View style={styles.emptyIcon}>
@@ -119,6 +126,7 @@ export function EmptyState({
 }
 
 export function ErrorView({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const styles = useStyles();
   return (
     <View style={styles.centered}>
       <EmptyState icon="alert" title="Something went wrong" message={message} actionLabel={onRetry ? 'Try again' : undefined} onAction={onRetry} />
@@ -126,7 +134,7 @@ export function ErrorView({ message, onRetry }: { message: string; onRetry?: () 
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   large: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -186,4 +194,4 @@ const styles = StyleSheet.create({
     marginTop: space.xs,
     maxWidth: 300,
   },
-});
+}));

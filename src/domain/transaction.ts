@@ -33,6 +33,8 @@ export interface FormattedTransaction {
   is_pending_capture: number;    // NEW: 1 = captured UPI event awaiting review
   is_dismissed: number;          // NEW: 1 = dismissed (rejected/ignored)
   dismissed_at: number | null;   // NEW: Timestamp when dismissed
+  kind: 'EXPENSE' | 'INCOME';     // v6
+  sharedPaise: number;           // v6: owed back by others (splits)
 }
 
 // Home screen data - separated confirmed vs pending

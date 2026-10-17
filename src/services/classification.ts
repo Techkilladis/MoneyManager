@@ -7,8 +7,6 @@
 
 import { merchantRepository } from '../database/repositories/merchantRepository';
 import { merchantMemoryRepository } from '../database/repositories/merchantMemoryRepository';
-import { categoryRepository } from '../database/repositories/categoryRepository';
-import { memberRepository } from '../database/repositories/memberRepository';
 import { normalizeMerchantFull } from './merchantNormalization';
 import { MerchantMemorySource, MerchantMemoryConfidence } from '../database/schema';
 

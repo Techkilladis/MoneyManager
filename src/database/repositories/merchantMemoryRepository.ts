@@ -1,5 +1,5 @@
 // Merchant Memory Repository
-import { openDatabase, mapMerchantMemoryRow, generateId, now, runInTransaction } from '../db';
+import { openDatabase, mapMerchantMemoryRow, generateId, now } from '../db';
 import { MerchantMemory, MerchantMemorySource, MerchantMemoryConfidence } from '../schema';
 
 export interface CreateMerchantMemoryInput {

@@ -1,21 +1,18 @@
 package com.moneymanager.notification.parsers
 
 import com.moneymanager.notification.normalizer.NormalizedNotification
+import com.moneymanager.notification.registry.UpiAppRegistry
 import android.content.Context
 
 /**
- * Registry for managing and selecting UPI notification parsers.
- * Tries parsers in order of specificity (specific app parsers first, generic last).
+ * Picks the parser for a notification's package (app-specific first, then
+ * the generic fallback). The generic parser reports the source app from
+ * [UpiAppRegistry] when the package is a known UPI app.
  */
 class ParserRegistry private constructor(context: Context) {
 
-    private val parsers: List<UpiNotificationParser> = listOf(
-        GooglePayParser(),
-        PhonePeParser(),
-        PaytmParser(),
-        BhimParser(),
-        GenericUpiParser()
-    )
+    private val parsers: List<AppUpiParser> = AppUpiParser.defaults()
+    private val appRegistry = UpiAppRegistry.getInstance(context)
 
     companion object {
         @Volatile
@@ -28,18 +25,17 @@ class ParserRegistry private constructor(context: Context) {
         }
     }
 
-    /**
-     * Tries all registered parsers in order until one succeeds.
-     * Returns the first successful parse result, or null if none succeed.
-     */
     fun tryParse(notification: NormalizedNotification): ParsedUpiTransaction? {
         for (parser in parsers) {
+            if (!parser.accepts(notification.packageName)) continue
             try {
-                val result = parser.tryParse(notification)
-                if (result != null) {
-                    android.util.Log.d("ParserRegistry", "Parsed by ${parser.name} with confidence ${result.confidence}")
-                    return result
+                val result = parser.tryParse(notification) ?: continue
+                android.util.Log.d("ParserRegistry", "Parsed by ${parser.name} (${result.direction}) confidence ${result.confidence}")
+                if (result.sourceApp == "OTHER_UPI") {
+                    val known = appRegistry.getSourceApp(notification.packageName)
+                    if (known != null) return result.copy(sourceApp = known)
                 }
+                return result
             } catch (e: Exception) {
                 android.util.Log.e("ParserRegistry", "Parser ${parser.name} failed", e)
             }
@@ -47,10 +43,5 @@ class ParserRegistry private constructor(context: Context) {
         return null
     }
 
-    /**
-     * Gets all registered parser names.
-     */
-    fun getParserNames(): List<String> {
-        return parsers.map { it.name }
-    }
+    fun getParserNames(): List<String> = parsers.map { it.name }
 }

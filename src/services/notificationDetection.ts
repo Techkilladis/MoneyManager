@@ -34,6 +34,7 @@ export interface ParsedUpiTransaction {
   parserName: string;
   parserVersion?: string;
   confidence: number;
+  direction?: 'DEBIT' | 'CREDIT';
 }
 
 export interface PendingUpiEvent {
@@ -50,6 +51,28 @@ export interface PendingUpiEvent {
   status: 'PENDING' | 'CONSUMED' | 'DISMISSED' | 'FAILED';
   createdAt: number;
   dedupeKey: string;
+  /** DEBIT = money out (expense), CREDIT = money in (income). */
+  direction?: 'DEBIT' | 'CREDIT';
+}
+
+export interface CaptureHealth {
+  accessEnabled: boolean;
+  listenerConnected: boolean;
+  lastConnectedAt: number | null;
+  lastDisconnectedAt: number | null;
+  lastUpiNotificationAt: number | null;
+  lastCaptureAt: number | null;
+  ignoringBatteryOptimizations: boolean;
+  manufacturer: string;
+  sdkInt: number;
+  widgetCount: number;
+}
+
+export interface WidgetSnapshot {
+  today: string;
+  month: string;
+  dayKey: string;
+  monthKey: string;
 }
 
 export interface NotificationAccessStatus {
@@ -77,6 +100,11 @@ interface NativeModuleInterface {
   dismissPendingUpiEvent(id: string): Promise<void>;
   getParsingStats(): Promise<ParsingStats>;
   simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null>;
+  getCaptureHealth(): Promise<CaptureHealth>;
+  requestIgnoreBatteryOptimizations(): Promise<void>;
+  openAppDetailsSettings(): Promise<void>;
+  requestListenerRebind(): Promise<boolean>;
+  updateWidget(data: WidgetSnapshot): Promise<void>;
 }
 
 // ============================================
@@ -183,6 +211,38 @@ class NotificationDetectionService {
       console.error('NotificationDetectionService: Failed to get stats', error);
       return { total: 0, bySource: {}, byParser: {}, byStatus: {} };
     }
+  }
+
+  isAvailable(): boolean {
+    return this.nativeModule !== null;
+  }
+
+  /** Listener/battery state used to warn when auto-capture has silently stopped. */
+  async getCaptureHealth(): Promise<CaptureHealth | null> {
+    if (!this.nativeModule?.getCaptureHealth) return null;
+    try {
+      return await this.nativeModule.getCaptureHealth();
+    } catch (error) {
+      console.warn('NotificationDetectionService: Failed to read capture health', error);
+      return null;
+    }
+  }
+
+  async requestIgnoreBatteryOptimizations(): Promise<void> {
+    await this.nativeModule?.requestIgnoreBatteryOptimizations?.().catch(() => undefined);
+  }
+
+  async openAppDetailsSettings(): Promise<void> {
+    await this.nativeModule?.openAppDetailsSettings?.().catch(() => undefined);
+  }
+
+  async requestListenerRebind(): Promise<boolean> {
+    if (!this.nativeModule?.requestListenerRebind) return false;
+    return this.nativeModule.requestListenerRebind().catch(() => false);
+  }
+
+  async updateWidget(data: WidgetSnapshot): Promise<void> {
+    await this.nativeModule?.updateWidget?.(data).catch(() => undefined);
   }
 
   async simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null> {

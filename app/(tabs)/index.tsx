@@ -1,13 +1,18 @@
 import React, { useCallback } from 'react';
-import { Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors, radius, space, tint } from '@/design/tokens';
-import { ledgerService, services } from '@/services';
+import { radius, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
+import { ledgerService, recapService, recurringService, splitService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
 import { HomeSummary } from '@/services/ledger';
+import { CaptureStatus, getCaptureStatus } from '@/services/captureHealth';
+import { dismissRecapCard, MonthlyRecap, recapHeadline } from '@/services/recap';
+import { RecurringView } from '@/services/recurring';
 import { FormattedTransaction } from '@/domain/transaction';
 import { formatINR, greeting, pluralize, splitINR } from '@/utils/format';
+import { CaptureStatusCard } from '@/components/CaptureStatusCard';
 import { StackedBar } from '@/components/Charts';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
@@ -27,19 +32,27 @@ import {
   UncategorizedAvatar,
 } from '@/components/ui';
 
-type HomeData = HomeSummary & { captureEnabled: boolean | null };
+type HomeData = HomeSummary & {
+  capture: CaptureStatus | null;
+  recap: MonthlyRecap | null;
+  upcoming: RecurringView[];
+  owed: number;
+};
 
 async function fetchHome(): Promise<HomeData> {
-  const [summary, captureEnabled] = await Promise.all([
+  const [summary, capture, recap, upcoming, owed] = await Promise.all([
     ledgerService.getHomeSummary(),
-    Platform.OS === 'android'
-      ? services.notification.isNotificationAccessEnabled().catch(() => null)
-      : Promise.resolve(null),
+    getCaptureStatus().catch(() => null),
+    recapService.getRecapCard().catch(() => null),
+    recurringService.getUpcoming(7).catch(() => []),
+    splitService.getTotalOwed().catch(() => 0),
   ]);
-  return { ...summary, captureEnabled };
+  return { ...summary, capture, recap, upcoming: upcoming.filter((r) => !r.paidThisPeriod), owed };
 }
 
 export default function HomeScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { data, error, refreshing, refresh, reload } = useScreenData(fetchHome);
   const openTx = useCallback((tx: FormattedTransaction) => router.push(`/transaction/${tx.id}`), []);
 
@@ -47,7 +60,6 @@ export default function HomeScreen() {
   if (!data) return <LoadingView />;
 
   const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
-  const showCaptureNudge = data.captureEnabled === false;
 
   return (
     <View style={styles.screen}>
@@ -61,20 +73,15 @@ export default function HomeScreen() {
 
         {data.pending.length > 0 ? <PendingCard data={data} /> : null}
 
-        {showCaptureNudge ? (
-          <Card style={styles.block} onPress={() => router.push('/settings')}>
-            <View style={styles.nudge}>
-              <IconTile icon="zap" color={colors.warning} />
-              <View style={{ flex: 1 }}>
-                <Text variant="bodyStrong">Turn on auto-capture</Text>
-                <Text variant="caption" style={{ marginTop: 2 }}>
-                  Log UPI payments from Google Pay, PhonePe, Paytm and more automatically.
-                </Text>
-              </View>
-              <Icon name="chevronRight" size={18} color={colors.textDisabled} />
-            </View>
-          </Card>
+        {data.capture ? (
+          <View style={data.capture.state === 'ok' || data.capture.state === 'battery' || data.capture.state === 'unsupported' ? null : styles.block}>
+            <CaptureStatusCard status={data.capture} compact onChanged={reload} />
+          </View>
         ) : null}
+
+        {data.recap ? <RecapCard recap={data.recap} onDismiss={reload} /> : null}
+
+        {data.upcoming.length > 0 ? <UpcomingCard items={data.upcoming} /> : null}
 
         {!data.hasAnyTransactions ? (
           <Card style={styles.block}>
@@ -90,6 +97,21 @@ export default function HomeScreen() {
         ) : (
           <>
             {data.topCategories.length > 0 ? <CategoryCard data={data} monthName={monthName} /> : null}
+
+            {data.owed > 0 ? (
+              <Card style={styles.block} onPress={() => router.push('/members')}>
+                <View style={styles.nudge}>
+                  <IconTile icon="users" color={colors.positive} />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="bodyStrong">{formatINR(data.owed)} owed to you</Text>
+                    <Text variant="caption" style={{ marginTop: 2 }}>
+                      From split expenses. Send a reminder with your UPI link.
+                    </Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colors.textDisabled} />
+                </View>
+              </Card>
+            ) : null}
 
             <View style={styles.block}>
               <SectionTitle title="Recent" action="See all" onAction={() => router.push('/transactions')} />
@@ -114,6 +136,8 @@ export default function HomeScreen() {
 }
 
 function HeroCard({ data, monthName }: { data: HomeData; monthName: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [whole, fraction] = splitINR(data.monthTotal);
   const base = data.lastMonthToDate;
   const change = base > 0 ? (data.monthTotal - base) / base : null;
@@ -148,11 +172,28 @@ function HeroCard({ data, monthName }: { data: HomeData; monthName: string }) {
         )}
       </View>
 
+      {data.monthIncome > 0 ? (
+        <View style={styles.heroIncome}>
+          <View style={styles.heroIncomeItem}>
+            <Icon name="arrowDownLeft" size={14} color="#A7F3D0" />
+            <Text variant="caption" color={colors.textOnDarkMuted}>
+              In {formatINR(data.monthIncome, { decimals: 'never' })}
+            </Text>
+          </View>
+          <Text variant="caption" color={data.monthLeft >= 0 ? colors.textOnDark : '#FFB4B4'}>
+            {data.monthLeft >= 0
+              ? `${formatINR(data.monthLeft, { decimals: 'never' })} left${data.savingsRate !== null ? ` · saving ${Math.round(data.savingsRate * 100)}%` : ''}`
+              : `${formatINR(-data.monthLeft, { decimals: 'never' })} more than you earned`}
+          </Text>
+        </View>
+      ) : null}
+
       {data.budget ? (
         <View style={styles.heroBudget}>
           <View style={styles.heroBudgetText}>
             <Text variant="caption" color={colors.textOnDarkMuted}>
-              Budget {formatINR(data.budget.spent, { decimals: 'never' })} of {formatINR(data.budget.limit, { decimals: 'never' })}
+              {data.budget.overall ? 'Monthly budget' : 'Budgets'} {formatINR(data.budget.spent, { decimals: 'never' })} of{' '}
+              {formatINR(data.budget.limit, { decimals: 'never' })}
             </Text>
             <Text variant="caption" color={data.budget.spent > data.budget.limit ? '#FFB4B4' : colors.textOnDark}>
               {data.budget.spent > data.budget.limit
@@ -181,6 +222,7 @@ function HeroCard({ data, monthName }: { data: HomeData; monthName: string }) {
 }
 
 function HeroStat({ label, value }: { label: string; value: string }) {
+  const { colors } = useTheme();
   return (
     <View style={{ flex: 1 }}>
       <Text variant="caption" color={colors.textOnDarkSubtle}>
@@ -193,7 +235,95 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function RecapCard({ recap, onDismiss }: { recap: MonthlyRecap; onDismiss: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      onPress={() => router.push(`/recap?month=${recap.monthKey}`)}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.block, pressed && { opacity: 0.92 }]}
+    >
+      <LinearGradient colors={['#7C3AED', '#4F46E5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.recap}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.recapLabel}>
+            <Icon name="sparkles" size={14} color="#FDE68A" />
+            <Text variant="overline" color={colors.textOnDarkMuted}>
+              Your {recap.monthName} recap
+            </Text>
+          </View>
+          <Text variant="heading" color="#FFFFFF" numeric style={{ marginTop: space.xxs }}>
+            {formatINR(recap.spent, { decimals: 'never' })} spent
+          </Text>
+          <Text variant="caption" color={colors.textOnDarkMuted} style={{ marginTop: 2 }}>
+            {recapHeadline(recap)} Tap to see the details.
+          </Text>
+        </View>
+        <Pressable
+          hitSlop={10}
+          accessibilityLabel="Dismiss recap"
+          onPress={() => void dismissRecapCard(recap.monthKey).then(onDismiss)}
+          style={styles.recapClose}
+        >
+          <Icon name="x" size={16} color={colors.textOnDarkMuted} />
+        </Pressable>
+      </LinearGradient>
+    </Pressable>
+  );
+}
+
+function UpcomingCard({ items }: { items: RecurringView[] }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const total = items.reduce((s, r) => s + r.amountPaise, 0);
+  return (
+    <View style={styles.block}>
+      <SectionTitle title="Due this week" action="All bills" onAction={() => router.push('/recurring')} />
+      <Card padded={false} style={styles.listCard}>
+        {items.slice(0, 4).map((r, i) => (
+          <View key={r.id}>
+            {i > 0 ? <Divider inset={72} /> : null}
+            <Pressable
+              onPress={() => router.push('/recurring')}
+              style={({ pressed }) => [styles.billRow, pressed && { backgroundColor: colors.surfaceMuted }]}
+            >
+              {r.category ? <CategoryAvatar icon={r.category.icon} color={r.category.color} /> : <UncategorizedAvatar />}
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {r.name}
+                </Text>
+                <Text variant="caption" color={r.daysUntilDue <= 1 ? colors.warning : undefined}>
+                  {r.daysUntilDue < 0
+                    ? 'Overdue'
+                    : r.daysUntilDue === 0
+                      ? 'Due today'
+                      : r.daysUntilDue === 1
+                        ? 'Due tomorrow'
+                        : `Due in ${r.daysUntilDue} days`}
+                </Text>
+              </View>
+              <Text variant="bodyStrong" numeric>
+                {formatINR(r.amountPaise, { decimals: 'never' })}
+              </Text>
+            </Pressable>
+          </View>
+        ))}
+        {items.length > 1 ? (
+          <View style={styles.billTotal}>
+            <Text variant="caption">{pluralize(items.length, 'payment')} coming up</Text>
+            <Text variant="labelStrong" numeric>
+              {formatINR(total, { decimals: 'never' })}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+    </View>
+  );
+}
+
 function PendingCard({ data }: { data: HomeData }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const count = data.pending.length;
   const preview = data.pending.slice(0, 3).map((t) => t.merchant).join(', ');
   return (
@@ -217,6 +347,8 @@ function PendingCard({ data }: { data: HomeData }) {
 }
 
 function CategoryCard({ data, monthName }: { data: HomeData; monthName: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const top = data.topCategories.slice(0, 4);
   return (
     <View style={styles.block}>
@@ -247,7 +379,7 @@ function CategoryCard({ data, monthName }: { data: HomeData; monthName: string }
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
@@ -330,10 +462,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
   },
+  heroIncome: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: space.md,
+  },
+  heroIncomeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  recap: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    padding: space.lg,
+    borderRadius: radius.xl,
+  },
+  recapLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recapClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  billRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  billTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
   catRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
     paddingVertical: space.xs,
   },
-});
+}));

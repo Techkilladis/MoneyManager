@@ -23,7 +23,7 @@ export async function seedDevelopmentData(): Promise<void> {
   const entertainmentId = categoryMap.get('Entertainment');
   const subscriptionsId = categoryMap.get('Subscriptions');
   const healthId = categoryMap.get('Health');
-  const personalId = categoryMap.get('Personal');
+  const salaryId = categoryMap.get('Salary');
   
   const selfId = memberMap.get('Self');
   const dadId = memberMap.get('Dad');
@@ -201,6 +201,43 @@ export async function seedDevelopmentData(): Promise<void> {
       notificationId: 'sample-notif-10',
       sourceEventId: null,
       sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
+    },
+    // Earlier Netflix payments, so recurring detection has a pattern to find.
+    ...[31, 61].map((daysAgo, i) => ({
+      amountPaise: 64900,
+      merchant: 'Netflix',
+      transactionTimestamp: now - (1 + daysAgo) * day,
+      categoryId: subscriptionsId,
+      memberId: selfId,
+      note: 'Monthly subscription',
+      status: 'CONFIRMED' as const,
+      sourceApp: 'Paytm',
+      notificationId: `sample-notif-netflix-${i}`,
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      is_pending_capture: 0,
+      is_dismissed: 0,
+      dismissed_at: null,
+      parserMetadata: null,
+    })),
+    // Income: this month's salary.
+    {
+      amountPaise: 8500000, // ₹85,000.00
+      merchant: 'Acme Technologies',
+      transactionTimestamp: new Date(new Date().getFullYear(), new Date().getMonth(), 1, 10, 0).getTime(),
+      categoryId: salaryId,
+      memberId: null,
+      note: 'Salary',
+      status: 'CONFIRMED' as const,
+      sourceApp: 'Manual',
+      notificationId: 'sample-notif-salary-1',
+      sourceEventId: null,
+      sourceType: 'SEED_DATA' as SourceType,
+      kind: 'INCOME' as const,
       is_pending_capture: 0,
       is_dismissed: 0,
       dismissed_at: null,

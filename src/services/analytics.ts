@@ -6,7 +6,6 @@
  * Excludes pending captures and dismissed transactions.
  */
 
-import { transactionRepository } from '../database/repositories/transactionRepository';
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
@@ -118,10 +117,10 @@ export async function getTotalSpending(period: PeriodRange): Promise<SpendingTot
   
   const row = await database.getFirstAsync<{ total: number; count: number }>(
     `SELECT 
-      COALESCE(SUM(amountPaise), 0) as total,
+      COALESCE(SUM(amountPaise - shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions 
-     WHERE status = 'CONFIRMED'
+     WHERE status = 'CONFIRMED' AND kind = 'EXPENSE'
      AND is_pending_capture = 0
      AND is_dismissed = 0
      AND transactionTimestamp >= ?
@@ -148,10 +147,10 @@ export async function getCategorySpending(period: PeriodRange): Promise<Category
   }>(
     `SELECT 
       t.categoryId,
-      COALESCE(SUM(t.amountPaise), 0) as total,
+      COALESCE(SUM(t.amountPaise - t.shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions t
-     WHERE t.status = 'CONFIRMED'
+     WHERE t.status = 'CONFIRMED' AND t.kind = 'EXPENSE'
      AND t.is_pending_capture = 0
      AND t.is_dismissed = 0
      AND t.categoryId IS NOT NULL
@@ -195,10 +194,10 @@ export async function getMerchantSpending(period: PeriodRange, limit: number = 1
   }>(
     `SELECT 
       t.merchant,
-      COALESCE(SUM(t.amountPaise), 0) as total,
+      COALESCE(SUM(t.amountPaise - t.shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions t
-     WHERE t.status = 'CONFIRMED'
+     WHERE t.status = 'CONFIRMED' AND t.kind = 'EXPENSE'
      AND t.is_pending_capture = 0
      AND t.is_dismissed = 0
      AND t.transactionTimestamp >= ?
@@ -246,10 +245,10 @@ export async function getMemberSpending(period: PeriodRange): Promise<MemberSpen
   }>(
     `SELECT 
       t.memberId,
-      COALESCE(SUM(t.amountPaise), 0) as total,
+      COALESCE(SUM(t.amountPaise - t.shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions t
-     WHERE t.status = 'CONFIRMED'
+     WHERE t.status = 'CONFIRMED' AND t.kind = 'EXPENSE'
      AND t.is_pending_capture = 0
      AND t.is_dismissed = 0
      AND t.memberId IS NOT NULL
@@ -293,10 +292,10 @@ export async function getDailySpendingTrend(period: PeriodRange): Promise<DailyS
   }>(
     `SELECT
       strftime('%Y-%m-%d', transactionTimestamp / 1000, 'unixepoch', 'localtime') as day,
-      COALESCE(SUM(amountPaise), 0) as total,
+      COALESCE(SUM(amountPaise - shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions
-     WHERE status = 'CONFIRMED'
+     WHERE status = 'CONFIRMED' AND kind = 'EXPENSE'
      AND is_pending_capture = 0
      AND is_dismissed = 0
      AND transactionTimestamp >= ?
@@ -326,10 +325,10 @@ export async function getUncategorizedSpending(period: PeriodRange): Promise<Spe
   
   const row = await database.getFirstAsync<{ total: number; count: number }>(
     `SELECT 
-      COALESCE(SUM(amountPaise), 0) as total,
+      COALESCE(SUM(amountPaise - shared_paise), 0) as total,
       COUNT(*) as count
      FROM transactions
-     WHERE status = 'CONFIRMED'
+     WHERE status = 'CONFIRMED' AND kind = 'EXPENSE'
      AND is_pending_capture = 0
      AND is_dismissed = 0
      AND categoryId IS NULL
@@ -381,8 +380,7 @@ export async function generateInsights(period: PeriodRange): Promise<AnalyticsIn
   const insights: AnalyticsInsight[] = [];
   
   // Get data needed for insights
-  const [totalSpending, categorySpending, merchantSpending, monthlyComparison] = await Promise.all([
-    getTotalSpending(period),
+  const [categorySpending, merchantSpending, monthlyComparison] = await Promise.all([
     getCategorySpending(period),
     getMerchantSpending(period, 5),
     getMonthlyComparison(),

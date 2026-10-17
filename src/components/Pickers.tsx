@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { colors, radius, space, tint } from '@/design/tokens';
+import { Pressable, ScrollView, View } from 'react-native';
+import { radius, space, tint } from '@/design/tokens';
+import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member } from '@/database/schema';
 import { categoryGlyph } from '@/domain/glyphs';
 import { Icon, MemberAvatar, Text } from './ui';
@@ -19,6 +20,8 @@ export function CategoryGrid({
   suggestedId?: string | null;
   onManage?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.grid}>
       {categories.map((c) => {
@@ -84,6 +87,8 @@ export function MemberChips({
   value: string | null;
   onChange: (id: string | null) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow} keyboardShouldPersistTaps="handled">
       {members.map((m) => {
@@ -111,7 +116,7 @@ export function MemberChips({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -173,4 +178,4 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1.5,
   },
-});
+}));
