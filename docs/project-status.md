@@ -1,6 +1,21 @@
 # Money Manager - Project Status
 
-## Current Phase: PHASE 9 — UI REDESIGN & FEATURE COMPLETION (COMPLETED, October 2026)
+## PHASE 10 — PRODUCT UPGRADE (COMPLETED, October 2026)
+
+Branch `feature/product-upgrade`. Database schema v6.
+
+- **Money in:** `transactions.kind` (EXPENSE/INCOME); UPI "received" notifications are captured as income; Home shows money left and savings rate; Insights shows money in vs out.
+- **Splits:** `splits` table and `transactions.shared_paise`. Spending counts only your share. Balances, settle/undo and UPI pay-me-back links (People screen).
+- **Recurring:** `recurring_payments` table, detection from history, due dates and reminders (`app/recurring.tsx`).
+- **Recap and alerts:** monthly recap (`app/recap.tsx`), budget alerts at 80%/100%, bill reminders, overall monthly budget. Local notifications via expo-notifications.
+- **Backup:** JSON backup/restore and CSV file export (`src/services/backup.ts`). Device-only settings (app lock, onboarding) are not restored.
+- **Auto-capture reliability:** native `CaptureHealth`, listener rebind, battery-optimisation prompt, status card on Home/Settings.
+- **Native parser rewrite:** shared `UpiMessageParser` (exact paise, direction, reference, rejects failed/pending/promo); 14 JVM tests.
+- **Also:** onboarding, app lock (expo-local-authentication), dark mode (`useTheme`/`makeStyles`), haptics, undo for deletes, Android home-screen widget.
+- **Quality:** Jest suite (`npm test`, sql.js-backed in-memory SQLite), `npm run test:native`, `eas.json` profiles, lint warnings cleared.
+- **Not done:** OTA updates need `eas init` / `eas update:configure` with the owner's Expo account; the app id is still `com.anonymous.MoneyManagerExpo52`; receipts attachments; iOS.
+
+## Previous Phase: PHASE 9 — UI REDESIGN & FEATURE COMPLETION (COMPLETED, October 2026)
 
 Every screen was rebuilt on a new design system. The SQLite / native-capture data layer was kept.
 

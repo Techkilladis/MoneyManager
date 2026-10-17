@@ -65,6 +65,19 @@ MoneyManagerExpo52/
 - **CSV export** via the system share sheet, and a full data reset
 - **Local-first**: everything stays in SQLite on the device
 
+## Also included
+
+Income tracking, split expenses with UPI pay-me-back links, recurring payment detection and reminders, monthly recap, budget alerts, JSON backup/restore, app lock, dark mode and an Android home-screen widget.
+
+## Testing
+
+```bash
+npm test               # Jest (services run against in-memory SQLite)
+npm run test:native    # Kotlin UPI parser tests
+npm run typecheck
+npx expo lint
+```
+
 ## Development Phases
 See `docs/project-status.md` for current phase and progress.
 
