@@ -22,7 +22,7 @@ Expo React Native Application
 │   ├── Migrations
 │   └── Repository Pattern
 └── Native Bridge (Kotlin)
-    ├── NotificationListenerService
+    ├── SmsReceiver + SmsInbox
     ├── Notification Normalization
     ├── UPI App Detection
     ├── Parser Framework (GooglePay, PhonePe, Paytm, BHIM, Generic)
@@ -44,7 +44,7 @@ Expo React Native Application
 - Explicit transaction states: PENDING, CONFIRMED, EDITED, CANCELLED
 
 ### 3. Native UPI Detection
-- Android NotificationListenerService (primary)
+- Android SMS BroadcastReceiver + inbox scan (primary)
 - Extensible parser architecture per UPI app
 - Deterministic deduplication
 - Event bridge to React Native via Expo Modules
@@ -59,7 +59,7 @@ Expo React Native Application
 - No cloud backend
 - No network requests for financial data
 - Least-privilege Android permissions
-- Notification access explained & user-controlled
+- SMS access explained & user-controlled; only bank SMS mentioning UPI are parsed
 - Debug logging avoids sensitive data
 
 ### 6. Analytics-First Design (No AI)
@@ -72,15 +72,24 @@ Expo React Native Application
 ## Data Flow
 
 ```
-UPI Payment → Android Notification
+UPI Payment → Bank SMS
     ↓
-NotificationListenerService (Kotlin)
+SmsReceiver (live) / SmsInbox (backfill on app start)
     ↓
-Normalize → Detect UPI App → Parse → Deduplicate
+SmsUpiParser → Deduplicate → PendingEventStore (native SQLite)
     ↓
-SQLite Database (pending transaction)
+CapturePopup (live SMS only): heads-up notification, and opens
+moneymanager://quick-capture?sourceEventId=… directly when
+"Display over other apps" is allowed
+(works after the app is swiped from Recents as long as the phone
+still delivers SMS to it: OEM Autostart, Xiaomi background pop-ups
+and battery restrictions are walked through in the Settings card;
+an inbox scan that finds a payment the receiver never saw is
+recorded as "missed" and flagged on Home — see BackgroundAccess.kt)
     ↓
-React Native UI (Quick Capture notification)
+App sync → SQLite Database (pending transaction)
+    ↓
+Quick Capture review (closing it without confirming keeps it pending)
     ↓
 User Classification → CONFIRMED transaction
     ↓

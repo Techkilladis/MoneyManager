@@ -1,12 +1,12 @@
 /**
  * First-run setup in three short steps: what the app does, turning on
- * auto-capture (notification access + background activity), and staying on
+ * auto-capture (SMS access), and staying on
  * track (alerts + an optional monthly budget).
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Animated, AppState, Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
@@ -17,7 +17,7 @@ import { session } from '@/services/session';
 import { suppressLock } from '@/services/appLock';
 import { parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { haptic } from '@/utils/haptics';
-import { Button, Icon, IconName, Text, TextField } from '@/components/ui';
+import { Button, CategoryAvatar, Icon, IconName, Text, TextField } from '@/components/ui';
 
 type Step = 0 | 1 | 2;
 
@@ -31,7 +31,6 @@ export default function OnboardingScreen() {
   const [fade] = useState(() => new Animated.Value(1));
 
   const [access, setAccess] = useState(false);
-  const [battery, setBattery] = useState(false);
   const [alerts, setAlerts] = useState(false);
   const [budget, setBudget] = useState('');
 
@@ -41,7 +40,6 @@ export default function OnboardingScreen() {
         .getCaptureHealth()
         .then((h) => {
           setAccess(!!h?.accessEnabled);
-          setBattery(!!h?.ignoringBatteryOptimizations);
         })
         .catch(() => undefined);
     }
@@ -81,13 +79,17 @@ export default function OnboardingScreen() {
     else void finish();
   };
 
-  const openAccess = () => {
-    suppressLock();
-    void services.notification.openNotificationAccessSettings();
-  };
-  const openBattery = () => {
-    suppressLock();
-    void services.notification.requestIgnoreBatteryOptimizations();
+  const allowSms = () => {
+    suppressLock(30_000);
+    void services.notification.requestSmsAccess().then((ok) => {
+      setAccess(ok);
+      if (ok) {
+        haptic.success();
+        void services.notification.scanSmsInbox();
+      } else {
+        void services.notification.openAppDetailsSettings();
+      }
+    });
   };
   const askAlerts = () => {
     suppressLock(30_000);
@@ -122,28 +124,20 @@ export default function OnboardingScreen() {
           {step === 1 ? (
             <>
               <Hero icon="zap" />
-              <Text variant="title" align="center" style={styles.title}>
+              <Text variant="title" style={styles.title}>
                 Log UPI payments automatically
               </Text>
-              <Text variant="body" color={colors.textSecondary} align="center" style={styles.lead}>
-                Money Manager reads payment notifications from Google Pay, PhonePe, Paytm and BHIM, and asks you to
-                confirm each one. Nothing leaves your phone.
+              <Text variant="body" color={colors.textSecondary} style={styles.lead}>
+                Money Manager spots UPI payments in your bank SMS and asks you to confirm each one. Only messages
+                that mention UPI are used, and nothing leaves your phone.
               </Text>
               <SetupRow
-                icon="bell"
-                title="Allow notification access"
-                description="So payments are noticed the moment they happen."
+                icon="inbox"
+                title="Allow SMS access"
+                description="Reads bank SMS that mention UPI, on this phone only."
                 done={access}
                 action="Allow"
-                onPress={openAccess}
-              />
-              <SetupRow
-                icon="battery"
-                title="Keep running in the background"
-                description="Stops battery saver from pausing auto-capture."
-                done={battery}
-                action="Allow"
-                onPress={openBattery}
+                onPress={allowSms}
               />
             </>
           ) : null}
@@ -151,10 +145,10 @@ export default function OnboardingScreen() {
           {step === 2 ? (
             <>
               <Hero icon="target" />
-              <Text variant="title" align="center" style={styles.title}>
+              <Text variant="title" style={styles.title}>
                 Stay on track
               </Text>
-              <Text variant="body" color={colors.textSecondary} align="center" style={styles.lead}>
+              <Text variant="body" color={colors.textSecondary} style={styles.lead}>
                 Get a nudge when a budget is nearly used, a reminder before bills are due, and a recap each month.
               </Text>
               <SetupRow
@@ -200,36 +194,58 @@ function Welcome() {
   const points: { icon: IconName; title: string; text: string }[] = [
     { icon: 'zap', title: 'Captures UPI payments', text: 'No typing for most of your spending.' },
     { icon: 'target', title: 'Budgets that warn you', text: 'Know before you overspend, not after.' },
-    { icon: 'shield', title: 'Private by design', text: 'Your data stays on this phone.' },
+    { icon: 'shieldCheck', title: 'Private by design', text: 'Your data stays on this phone.' },
   ];
   return (
     <>
-      <LinearGradient colors={[colors.heroStart, colors.heroEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.welcomeArt}>
-        <View style={styles.logo}>
-          <Icon name="wallet" size={36} color="#FFFFFF" />
-        </View>
-        <View style={[styles.floatChip, { top: 22, left: 18 }]}>
-          <Text variant="caption" color="#FFFFFF">
-            ☕ Chai Point · ₹40
+      {/* The product doing its job: a bank SMS becomes a tidy, reviewable payment. */}
+      <View style={styles.vignette}>
+        <View style={[styles.vCard, styles.vSms]}>
+          <View style={styles.inline}>
+            <Icon name="message" size={16} color={colors.textTertiary} />
+            <Text variant="caption">HDFC Bank · now</Text>
+          </View>
+          <Text variant="label" style={{ marginTop: space.xs }}>
+            Rs 450.00 debited via UPI to SWIGGY. Ref 4291…
           </Text>
         </View>
-        <View style={[styles.floatChip, { bottom: 26, right: 16 }]}>
-          <Text variant="caption" color="#FFFFFF">
-            🛒 Groceries · ₹1,240
-          </Text>
+        <View style={[styles.vCard, styles.vTx]}>
+          <View style={styles.inline}>
+            <CategoryAvatar icon="utensils" color="#F97316" size={44} />
+            <View style={{ flex: 1 }}>
+              <Text variant="bodyStrong">Swiggy</Text>
+              <Text variant="caption">Food · just now</Text>
+            </View>
+            <Text variant="bodyStrong" numeric>
+              −₹450
+            </Text>
+          </View>
+          <View style={[styles.inline, { marginTop: space.sm }]}>
+            <View style={[styles.vPill, { borderWidth: 1, borderColor: colors.border }]}>
+              <Text variant="label">
+                Ignore
+              </Text>
+            </View>
+            <View style={[styles.vPill, { backgroundColor: colors.brand }]}>
+              <Icon name="check" size={14} color={colors.textOnBrand} strokeWidth={2.5} />
+              <Text variant="labelStrong" color={colors.textOnBrand}>
+                Confirm
+              </Text>
+            </View>
+          </View>
         </View>
-      </LinearGradient>
-      <Text variant="title" align="center" style={styles.title}>
+      </View>
+      <Text variant="title" style={styles.title}>
         Every rupee, accounted for
       </Text>
-      <Text variant="body" color={colors.textSecondary} align="center" style={styles.lead}>
+      <Text variant="body" color={colors.textSecondary} style={styles.lead}>
         See where your money goes without the busywork.
       </Text>
-      <View style={{ gap: space.md, marginTop: space.lg }}>
-        {points.map((p) => (
+      <View style={{ gap: space.lg, marginTop: space.xxl }}>
+        {points.map((p, i) => (
           <View key={p.title} style={styles.point}>
-            <View style={styles.pointIcon}>
-              <Icon name={p.icon} size={20} color={colors.brand} />
+            <View style={[styles.pointIcon, { backgroundColor: i === 0 ? colors.brandSoft : colors.surfaceMuted }]}>
+              <Icon name={p.icon} size={20} color={i === 0 ? colors.brand : colors.text} />
             </View>
             <View style={{ flex: 1 }}>
               <Text variant="bodyStrong">{p.title}</Text>
@@ -246,10 +262,8 @@ function Hero({ icon }: { icon: IconName }) {
   const { colors } = useTheme();
   const styles = useStyles();
   return (
-    <View style={styles.heroWrap}>
-      <LinearGradient colors={[colors.heroStart, colors.heroEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroIcon}>
-        <Icon name={icon} size={36} color="#FFFFFF" />
-      </LinearGradient>
+    <View style={styles.heroIcon}>
+      <Icon name={icon} size={32} color={colors.brand} />
     </View>
   );
 }
@@ -273,8 +287,8 @@ function SetupRow({
   const styles = useStyles();
   return (
     <View style={[styles.setupRow, done && styles.setupRowDone]}>
-      <View style={[styles.setupIcon, { backgroundColor: done ? colors.positiveSoft : colors.brandSoft }]}>
-        <Icon name={done ? 'check' : icon} size={20} color={done ? colors.positive : colors.brand} strokeWidth={done ? 3 : 2} />
+      <View style={[styles.setupIcon, { backgroundColor: done ? colors.brand : colors.surfaceMuted }]}>
+        <Icon name={done ? 'check' : icon} size={20} color={done ? colors.textOnBrand : colors.text} strokeWidth={done ? 3 : 2} />
       </View>
       <View style={{ flex: 1 }}>
         <Text variant="bodyStrong">{title}</Text>
@@ -297,52 +311,67 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 44,
   },
   dots: {
     flexDirection: 'row',
     gap: 6,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: colors.borderStrong,
   },
   dotActive: {
     width: 24,
-    backgroundColor: colors.brand,
+    backgroundColor: colors.text,
   },
   body: {
     paddingTop: space.lg,
     paddingBottom: space.xl,
   },
-  welcomeArt: {
-    height: 200,
-    borderRadius: radius.xxl,
+  inline: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: space.sm,
   },
-  logo: {
-    width: 76,
-    height: 76,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  vignette: {
+    height: 232,
   },
-  floatChip: {
+  vCard: {
     position: 'absolute',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    padding: space.md,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    backgroundColor: colors.surface,
+  },
+  vSms: {
+    top: 8,
+    left: 8,
+    right: 40,
+    borderColor: colors.border,
+  },
+  vTx: {
+    bottom: 8,
+    left: 32,
+    right: 0,
+    borderColor: colors.brandSoftBorder,
+  },
+  vPill: {
+    flex: 1,
+    height: 36,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
   },
   title: {
     marginTop: space.xl,
   },
   lead: {
     marginTop: space.xs,
-    paddingHorizontal: space.xs,
   },
   point: {
     flexDirection: 'row',
@@ -350,21 +379,18 @@ const useStyles = makeStyles((colors) => ({
     gap: space.sm,
   },
   pointIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: colors.brandSoft,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroWrap: {
-    alignItems: 'center',
-    marginTop: space.lg,
-  },
   heroIcon: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    marginTop: space.lg,
+    backgroundColor: colors.brandSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -372,20 +398,21 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    marginTop: space.md,
+    marginTop: space.xl,
     padding: space.md,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
   setupRowDone: {
-    borderColor: colors.positiveSoft,
+    borderColor: colors.brandSoftBorder,
+    backgroundColor: colors.brandSoft,
   },
   setupIcon: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },

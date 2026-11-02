@@ -373,3 +373,7 @@ npx expo prebuild --clean  # PASSED
 - Backup/restore to local file
 - Performance optimization for large datasets
 - Accessibility audit
+## SMS-based capture (replaces the notification listener)
+- Auto-capture now reads bank **SMS** instead of listening to notifications. `SmsReceiver` captures messages live (works with the app closed); `SmsInbox` scans the inbox on launch/foreground (first run looks back 7 days) to catch anything missed.
+- `SmsUpiParser` only accepts alphanumeric senders and messages that mention UPI / a VPA / a 12-digit UPI ref, and rejects OTPs, failed/pending payments, requests, mandates and promos. Each SMS has a stable key, so re-scans never create duplicates.
+- Permissions: `READ_SMS` + `RECEIVE_SMS` (runtime prompt from onboarding and the status card). The `NotificationListenerService`, notification-access screen, battery-optimisation prompt and listener-rebind logic were removed. Note: Google Play restricts SMS permissions; sideloaded/internal builds are unaffected.

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { radius, space } from '@/design/tokens';
+import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { memberService, recurringService, splitService, transactionService } from '@/services';
 import { dataEvents } from '@/services/events';
@@ -20,9 +20,13 @@ import {
   EmptyState,
   Icon,
   IconButton,
+  IconTile,
+  ListRow,
   LoadingView,
   MemberAvatar,
   ScreenHeader,
+  SectionTitle,
+  StatusChip,
   Text,
   UncategorizedAvatar,
   useToast,
@@ -159,60 +163,53 @@ export default function TransactionDetailScreen() {
       />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          {tx.category ? <CategoryAvatar icon={tx.category.icon} color={tx.category.color} size={72} /> : <UncategorizedAvatar size={72} />}
-          <Text variant="heading" align="center" style={{ marginTop: space.md }}>
+          {tx.category ? <CategoryAvatar icon={tx.category.icon} color={tx.category.color} size={64} /> : <UncategorizedAvatar size={64} />}
+          <Text variant="title" align="center" style={{ marginTop: space.md }}>
             {tx.merchant}
           </Text>
           <View style={styles.amountRow}>
             <Text variant="hero" numeric color={income ? colors.positive : undefined}>
-              {income ? '+' : ''}
+              {income ? '+' : '−'}
               {whole}
             </Text>
-            <Text variant="heading" color={income ? colors.positive : colors.textTertiary} numeric style={{ marginBottom: 4 }}>
+            <Text variant="title" color={income ? colors.positive : colors.textTertiary} numeric>
               {fraction}
             </Text>
           </View>
           <Text variant="label" align="center">
             {formatFullDate(tx.timestamp)} · {formatTime(tx.timestamp)}
           </Text>
-          {isPending ? (
-            <View style={[styles.pill, { backgroundColor: colors.warningSoft }]}>
-              <Text variant="caption" color={colors.warning} style={{ fontWeight: '600' }}>
-                Waiting for your review
-              </Text>
-            </View>
-          ) : income ? (
-            <View style={[styles.pill, { backgroundColor: colors.positiveSoft }]}>
-              <Text variant="caption" color={colors.positive} style={{ fontWeight: '600' }}>
-                Money received
-              </Text>
-            </View>
-          ) : tx.sharedPaise > 0 ? (
-            <View style={[styles.pill, { backgroundColor: colors.brandSoft }]}>
-              <Text variant="caption" color={colors.brand} style={{ fontWeight: '600' }}>
-                Your share {formatINR(tx.amountPaise - tx.sharedPaise)}
-              </Text>
-            </View>
-          ) : null}
+          <View style={styles.pill}>
+            {isPending ? (
+              <StatusChip tone="warn" icon="clock" label="Waiting for your review" />
+            ) : income ? (
+              <StatusChip tone="good" icon="arrowDownLeft" label="Money received" />
+            ) : tx.sharedPaise > 0 ? (
+              <StatusChip tone="good" icon="split" label={`Your share ${formatINR(tx.amountPaise - tx.sharedPaise)}`} />
+            ) : null}
+          </View>
         </View>
 
         <Card padded={false}>
           <DetailRow label="Category">
-            <Text variant="bodyStrong" color={tx.category ? colors.text : colors.textTertiary}>
-              {tx.category?.name ?? 'Uncategorized'}
-            </Text>
+            <View style={styles.inline}>
+              {tx.category ? <CategoryAvatar icon={tx.category.icon} color={tx.category.color} size={28} /> : null}
+              <Text variant="body" color={tx.category ? colors.text : colors.textTertiary}>
+                {tx.category?.name ?? 'Uncategorized'}
+              </Text>
+            </View>
           </DetailRow>
           {!income ? (
             <>
-              <Divider inset={space.md} />
-              <DetailRow label="Spent on">
+              <Divider />
+              <DetailRow label="For">
                 {tx.member ? (
                   <View style={styles.inline}>
-                    <MemberAvatar name={tx.member.name} color={tx.member.color} size={24} />
-                    <Text variant="bodyStrong">{tx.member.name}</Text>
+                    <MemberAvatar name={tx.member.name} color={tx.member.color} size={28} />
+                    <Text variant="body">{tx.member.name}</Text>
                   </View>
                 ) : (
-                  <Text variant="bodyStrong" color={colors.textTertiary}>
+                  <Text variant="body" color={colors.textTertiary}>
                     Not set
                   </Text>
                 )}
@@ -221,7 +218,7 @@ export default function TransactionDetailScreen() {
           ) : null}
           {tx.note ? (
             <>
-              <Divider inset={space.md} />
+              <Divider />
               <DetailRow label="Note">
                 <Text variant="body" style={styles.note}>
                   {tx.note}
@@ -229,7 +226,7 @@ export default function TransactionDetailScreen() {
               </DetailRow>
             </>
           ) : null}
-          <Divider inset={space.md} />
+          <Divider />
           <DetailRow label="Source">
             <Text variant="body" color={colors.textSecondary} style={styles.note}>
               {source}
@@ -238,14 +235,19 @@ export default function TransactionDetailScreen() {
         </Card>
 
         {canSplit && data.splits.length > 0 ? (
-          <Card padded={false} style={{ marginTop: space.lg }}>
-            <View style={styles.cardHead}>
-              <Text variant="bodyStrong">Split</Text>
-              <Text variant="caption">{owedOpen > 0 ? `${formatINR(owedOpen)} still owed` : 'All paid back'}</Text>
-            </View>
-            {data.splits.map((s) => (
+          <View style={styles.section}>
+            <SectionTitle
+              title="Split"
+              right={
+                <Text variant="labelStrong" numeric color={owedOpen > 0 ? colors.positive : colors.textTertiary}>
+                  {owedOpen > 0 ? `${formatINR(owedOpen)} still owed` : 'All paid back'}
+                </Text>
+              }
+            />
+          <Card padded={false}>
+            {data.splits.map((s, i) => (
               <View key={s.id}>
-                <Divider inset={space.md} />
+                {i > 0 ? <Divider /> : null}
                 <View style={styles.splitRow}>
                   <Pressable
                     onPress={() => toggleSettled(s.id, !s.settledAt)}
@@ -255,7 +257,7 @@ export default function TransactionDetailScreen() {
                     hitSlop={8}
                     style={[styles.check, s.settledAt ? { backgroundColor: colors.positive, borderColor: colors.positive } : null]}
                   >
-                    {s.settledAt ? <Icon name="check" size={14} color="#FFFFFF" strokeWidth={3} /> : null}
+                    {s.settledAt ? <Icon name="check" size={14} color={colors.textOnBrand} strokeWidth={3} /> : null}
                   </Pressable>
                   <View style={{ flex: 1 }}>
                     <Text variant="bodyStrong" color={s.settledAt ? colors.textTertiary : colors.text}>
@@ -269,7 +271,7 @@ export default function TransactionDetailScreen() {
                   {!s.settledAt && s.member ? (
                     <IconButton
                       icon="send"
-                      size={36}
+                      size={40}
                       background={colors.brandSoft}
                       color={colors.brand}
                       accessibilityLabel={`Ask ${s.member.name} to pay back`}
@@ -280,18 +282,18 @@ export default function TransactionDetailScreen() {
               </View>
             ))}
           </Card>
+          </View>
         ) : null}
 
         {data.recurring && recurringNext ? (
-          <Card style={{ marginTop: space.lg }} onPress={() => router.push('/recurring')}>
-            <View style={styles.inline}>
-              <Icon name="repeat" size={18} color={colors.brand} />
-              <View style={{ flex: 1 }}>
-                <Text variant="bodyStrong">{CADENCE_LABEL[data.recurring.cadence]} payment</Text>
-                <Text variant="caption">Next one around {formatFullDate(recurringNext)}</Text>
-              </View>
-              <Icon name="chevronRight" size={18} color={colors.textDisabled} />
-            </View>
+          <Card padded={false} style={styles.section}>
+            <ListRow
+              title={`${CADENCE_LABEL[data.recurring.cadence]} payment`}
+              subtitle={`Next one around ${formatFullDate(recurringNext)}`}
+              left={<IconTile icon="repeat" />}
+              chevron
+              onPress={() => router.push('/recurring')}
+            />
           </Card>
         ) : null}
 
@@ -323,15 +325,16 @@ export default function TransactionDetailScreen() {
                   ) : null}
                 </View>
               ) : null}
-              <Button
-                title={income ? 'Edit income' : 'Edit expense'}
-                icon="pencil"
-                variant="outline"
-                size="lg"
-                fullWidth
-                onPress={() => router.push(`/transactions/edit/${tx.id}`)}
-              />
-              <Button title="Delete" icon="trash" variant="dangerSoft" size="lg" fullWidth loading={busy} onPress={remove} />
+              {!canSplit ? (
+                <Button
+                  title={income ? 'Edit income' : 'Edit expense'}
+                  icon="pencil"
+                  variant="secondary"
+                  fullWidth
+                  onPress={() => router.push(`/transactions/edit/${tx.id}`)}
+                />
+              ) : null}
+              <Button title={income ? 'Delete income' : 'Delete expense'} icon="trash" variant="dangerSoft" fullWidth loading={busy} onPress={remove} />
             </>
           )}
         </View>
@@ -378,19 +381,19 @@ const useStyles = makeStyles((colors) => ({
   hero: {
     alignItems: 'center',
     paddingTop: space.xs,
-    paddingBottom: space.xl,
+    paddingBottom: space.xxl,
   },
   amountRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: space.xxs,
+    alignItems: 'baseline',
+    marginTop: space.xs,
     marginBottom: space.xxs,
   },
   pill: {
     marginTop: space.sm,
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
+  },
+  section: {
+    marginTop: space.xxl,
   },
   detailRow: {
     flexDirection: 'row',
@@ -402,7 +405,8 @@ const useStyles = makeStyles((colors) => ({
     gap: space.md,
   },
   detailValue: {
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
     alignItems: 'flex-end',
   },
   inline: {
@@ -430,7 +434,7 @@ const useStyles = makeStyles((colors) => ({
   check: {
     width: 24,
     height: 24,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.borderStrong,
     alignItems: 'center',
@@ -438,7 +442,7 @@ const useStyles = makeStyles((colors) => ({
   },
   actions: {
     gap: space.sm,
-    marginTop: space.xl,
+    marginTop: space.xxl,
   },
   actionRow: {
     flexDirection: 'row',

@@ -1,11 +1,13 @@
 // Review queue for auto-captured UPI payments. Works through pending
 // captures oldest-first: confirm (with category/member/note) or ignore,
-// then moves straight to the next one.
+// then moves straight to the next one. Opened from the capture pop-up
+// (?sourceEventId=), it shows just that payment and closes afterwards,
+// returning to the app the user was in when the SMS arrived (&leave=1);
+// leaving without confirming keeps it pending.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { font, radius, space, tint } from '@/design/tokens';
+import { font, fontFamily, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member } from '@/database/schema';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
@@ -13,39 +15,71 @@ import { categoryService, classificationService, memberService, transactionServi
 import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { FormattedTransaction } from '@/domain/transaction';
-import { categoryGlyph } from '@/domain/glyphs';
 import {
   amountToInput,
   formatDayLabel,
-  formatINR,
   formatSourceApp,
   formatTime,
   parseAmount,
   sanitizeAmountInput,
+  splitINR,
 } from '@/utils/format';
-import { CategoryGrid, MemberChips } from '@/components/Pickers';
+import { CategoryChips, CategoryGrid, MemberChips } from '@/components/Pickers';
 import { haptic } from '@/utils/haptics';
-import { Button, EmptyState, Icon, LoadingView, ScreenHeader, Text, TextField, useToast } from '@/components/ui';
+import {
+  BottomBar,
+  Button,
+  Card,
+  Divider,
+  EmptyState,
+  Icon,
+  IconName,
+  LoadingView,
+  ScreenHeader,
+  Sheet,
+  Text,
+  TextField,
+  useToast,
+} from '@/components/ui';
 
 export default function QuickCaptureScreen() {
   const styles = useStyles();
-  const params = useLocalSearchParams<{ id?: string; sourceEventId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; sourceEventId?: string; leave?: string }>();
   const toast = useToast();
   const [reviewed, setReviewed] = useState<string[]>([]);
 
   const fetcher = useCallback(async () => {
-    const pending = await transactionRepository.getPending(); // newest first
     let startId = params.id ?? null;
     if (!startId && params.sourceEventId) {
-      const tx = await transactionRepository.getBySourceEventId(params.sourceEventId);
+      // The pop-up usually beats the app's own sync of the new SMS payment.
+      const tx = await transactionService.ensureCaptureForEvent(params.sourceEventId);
       startId = tx?.id ?? null;
     }
+    // Read the queue only now, so it includes a payment created just above.
+    const pending = await transactionRepository.getPending(); // newest first
     return { queue: pending.map((t) => t.id).reverse(), startId };
   }, [params.id, params.sourceEventId]);
 
   const { data } = useScreenData(fetcher);
 
-  const onReviewed = useCallback((id: string) => setReviewed((r) => [...r, id]), []);
+  const fromPopup = !!params.sourceEventId;
+  const leaveApp = params.leave === '1';
+  const startId = data?.startId;
+  const onReviewed = useCallback(
+    (id: string) => {
+      if (fromPopup && id === startId) {
+        if (leaveApp) {
+          // Back to the app the payment interrupted; Home is ready for next time.
+          router.replace('/');
+          BackHandler.exitApp();
+        } else if (router.canGoBack()) router.back();
+        else router.replace('/');
+        return;
+      }
+      setReviewed((r) => [...r, id]);
+    },
+    [fromPopup, leaveApp, startId]
+  );
 
   if (!data) return <LoadingView />;
 
@@ -59,7 +93,7 @@ export default function QuickCaptureScreen() {
     const requestedMissing = !!data.startId && reviewed.length === 0;
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Review" back />
+        <ScreenHeader title="Review" close />
         <EmptyState
           icon={done ? 'check' : requestedMissing ? 'info' : 'inbox'}
           title={done ? 'All caught up!' : requestedMissing ? 'Already reviewed' : 'Nothing to review'}
@@ -104,7 +138,6 @@ function ReviewCard({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const insets = useSafeAreaInsets();
   const toast = useToast();
   const [tx, setTx] = useState<FormattedTransaction | null>(null);
   const [missing, setMissing] = useState(false);
@@ -121,6 +154,7 @@ function ReviewCard({
   const [busy, setBusy] = useState<'confirm' | 'dismiss' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<'category' | 'member' | 'note' | null>(null);
 
   const [celebrate] = useState(() => new Animated.Value(0));
   const mountedRef = useRef(true);
@@ -244,15 +278,24 @@ function ReviewCard({
   const suggestedCategory = suggestion?.categoryId ? categories.find((c) => c.id === suggestion.categoryId) : null;
   const amountPaise = parseAmount(amount) ?? 0;
 
+  const [whole, fraction] = splitINR(amountPaise);
+  const member = members.find((m) => m.id === memberId);
+
   return (
     <View style={styles.screen}>
       <ScreenHeader
         title={income ? 'Money received' : 'Review payment'}
-        back
-        right={
+        subtitle={`${income ? 'Received via' : 'From'} ${source} · ${formatDayLabel(tx.timestamp)}, ${formatTime(tx.timestamp)}`}
+        close
+        center={
           counter ? (
-            <View style={styles.counter}>
-              <Text variant="caption" color={colors.brand} style={{ fontWeight: '600' }}>
+            <View style={styles.progress}>
+              <View style={styles.dots}>
+                {Array.from({ length: Math.min(total, 5) }, (_, i) => (
+                  <View key={i} style={[styles.dot, i < Math.min(position, 5) && styles.dotDone]} />
+                ))}
+              </View>
+              <Text variant="label" numeric>
                 {counter}
               </Text>
             </View>
@@ -261,16 +304,14 @@ function ReviewCard({
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <View style={styles.receipt}>
-            <View style={[styles.sourcePill, income && { backgroundColor: colors.positiveSoft }]}>
-              <Icon name={income ? 'arrowDownLeft' : 'zap'} size={13} color={income ? colors.positive : colors.brand} />
-              <Text variant="caption" color={income ? colors.positive : colors.brand} style={{ fontWeight: '600' }}>
-                {income ? `Received via ${source}` : `Detected from ${source}`}
-              </Text>
-            </View>
+          {/* Amount */}
+          <View style={styles.amountBlock}>
+            <Text variant="label">{income ? 'You received' : 'You paid'}</Text>
             {editingAmount ? (
               <View style={styles.amountRow}>
-                <Text style={styles.amountText}>₹</Text>
+                <Text variant="title" color={colors.textTertiary} style={{ marginRight: space.xxs }}>
+                  ₹
+                </Text>
                 <TextInput
                   value={amount}
                   onChangeText={(t) => setAmount(sanitizeAmountInput(t))}
@@ -278,74 +319,68 @@ function ReviewCard({
                   autoFocus
                   onBlur={() => setEditingAmount(false)}
                   selectionColor={colors.brand}
-                  style={[styles.amountText, styles.amountInput]}
+                  cursorColor={colors.brand}
+                  style={styles.amountInput}
+                  accessibilityLabel="Amount in rupees"
                 />
               </View>
             ) : (
-              <Pressable onPress={() => setEditingAmount(true)} style={styles.amountRow} accessibilityLabel="Edit amount" accessibilityRole="button">
-                <Text style={[styles.amountText, income && { color: colors.positive }]} numeric>
-                  {income ? '+' : ''}
-                  {formatINR(amountPaise)}
-                </Text>
-                <View style={styles.editBadge}>
-                  <Icon name="pencil" size={12} color={colors.textTertiary} />
+              <>
+                <View style={styles.amountRow}>
+                  <Text variant="hero" numeric color={income ? colors.positive : undefined}>
+                    {income ? '+' : ''}
+                    {whole}
+                  </Text>
+                  <Text variant="title" numeric color={colors.textTertiary}>
+                    {fraction}
+                  </Text>
                 </View>
-              </Pressable>
+                <Pressable onPress={() => setEditingAmount(true)} hitSlop={10} accessibilityRole="button" style={styles.editLink}>
+                  <Icon name="pencil" size={14} color={colors.brand} />
+                  <Text variant="labelStrong" color={colors.brand}>
+                    Edit amount
+                  </Text>
+                </Pressable>
+              </>
             )}
-            <Text variant="label" align="center">
-              {formatDayLabel(tx.timestamp)} at {formatTime(tx.timestamp)}
-            </Text>
           </View>
 
           <TextField
             label={income ? 'Received from' : 'Paid to'}
-            icon="store"
             value={merchant}
             onChangeText={setMerchant}
             placeholder={income ? 'Who paid you?' : 'Who did you pay?'}
             autoCapitalize="words"
           />
 
-          {suggestedCategory ? (
-            <View style={[styles.suggestion, { backgroundColor: tint(suggestedCategory.color, 0.12) }]}>
-              <Icon name="sparkles" size={16} color={colors.brand} />
-              <Text variant="caption" color={colors.textSecondary} style={{ flex: 1 }}>
-                {suggestion?.confidence === 'HIGH' ? 'You usually file' : 'Last time you filed'} {tx.merchant} under{' '}
-                <Text variant="caption" color={colors.text} style={{ fontWeight: '600' }}>
-                  {categoryGlyph(suggestedCategory.icon)} {suggestedCategory.name}
+          <View style={styles.sectionHead}>
+            <Text variant="label">{income ? 'What was it?' : 'What was it for?'}</Text>
+            {suggestedCategory ? (
+              <View style={styles.hint}>
+                <Icon name="sparkles" size={14} color={colors.brand} />
+                <Text variant="caption" color={colors.brand}>
+                  {suggestion?.confidence === 'HIGH' ? 'You usually pick this' : 'Suggested'}
                 </Text>
-              </Text>
-            </View>
-          ) : null}
-
-          <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
-            What was it for?
-          </Text>
-          <CategoryGrid
+              </View>
+            ) : null}
+          </View>
+          <CategoryChips
             categories={kindCategories}
             value={categoryId}
             onChange={setCategoryId}
             suggestedId={suggestion?.categoryId}
-            onManage={() => router.push('/categories')}
+            onMore={() => setSheet('category')}
           />
 
-          {members.length > 0 && !income ? (
-            <>
-              <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
-                Spent on
-              </Text>
-              <MemberChips members={members} value={memberId} onChange={setMemberId} />
-            </>
-          ) : null}
-
-          <TextField
-            label="Note"
-            value={note}
-            onChangeText={setNote}
-            placeholder="Optional"
-            maxLength={200}
-            containerStyle={{ marginTop: space.lg }}
-          />
+          <Card padded={false} style={styles.details}>
+            {members.length > 0 && !income ? (
+              <>
+                <DetailRow icon="user" label="For" value={member?.name ?? 'Not set'} muted={!member} onPress={() => setSheet('member')} />
+                <Divider />
+              </>
+            ) : null}
+            <DetailRow icon="note" label="Note" value={note.trim() || 'Add'} muted={!note.trim()} onPress={() => setSheet('note')} />
+          </Card>
 
           {error ? (
             <Text variant="label" color={colors.negative} align="center" style={{ marginTop: space.md }}>
@@ -354,15 +389,15 @@ function ReviewCard({
           ) : null}
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
+        <BottomBar style={styles.footer}>
           <Button
             title="Ignore"
-            variant="outline"
+            variant="secondary"
             size="lg"
             loading={busy === 'dismiss'}
             disabled={busy !== null || !!success}
             onPress={dismiss}
-            style={{ flex: 1 }}
+            style={styles.ignore}
           />
           <Button
             title="Confirm"
@@ -371,10 +406,46 @@ function ReviewCard({
             loading={busy === 'confirm'}
             disabled={busy !== null || !!success}
             onPress={confirm}
-            style={{ flex: 2 }}
+            style={{ flex: 1 }}
           />
-        </View>
+        </BottomBar>
       </KeyboardAvoidingView>
+
+      <Sheet visible={sheet === 'category'} onClose={() => setSheet(null)} title="Category">
+        <CategoryGrid
+          categories={kindCategories}
+          value={categoryId}
+          onChange={(cid) => {
+            setCategoryId(cid);
+            setSheet(null);
+          }}
+          suggestedId={suggestion?.categoryId}
+          onManage={() => {
+            setSheet(null);
+            router.push('/categories');
+          }}
+        />
+      </Sheet>
+
+      <Sheet visible={sheet === 'member'} onClose={() => setSheet(null)} title="Who was it for?">
+        <MemberChips
+          members={members}
+          value={memberId}
+          onChange={(mid) => {
+            setMemberId(mid);
+            setSheet(null);
+          }}
+        />
+      </Sheet>
+
+      <Sheet
+        visible={sheet === 'note'}
+        onClose={() => setSheet(null)}
+        title="Note"
+        footer={<Button title="Done" size="lg" fullWidth onPress={() => setSheet(null)} />}
+      >
+        <TextField value={note} onChangeText={setNote} placeholder="What was it for?" maxLength={200} multiline autoFocus />
+      </Sheet>
 
       {success ? (
         <Animated.View style={[StyleSheet.absoluteFill, styles.successScrim, { opacity: celebrate }]} pointerEvents="none">
@@ -386,12 +457,46 @@ function ReviewCard({
           >
             <Icon name="check" size={44} color={colors.textOnBrand} strokeWidth={3} />
           </Animated.View>
-          <Text variant="heading" style={{ marginTop: space.lg }}>
+          <Text variant="title" style={{ marginTop: space.lg }}>
             {success}
           </Text>
         </Animated.View>
       ) : null}
     </View>
+  );
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  muted = false,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  muted?: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      style={({ pressed }) => [styles.detailRow, pressed && { backgroundColor: colors.surfaceMuted }]}
+    >
+      <Icon name={icon} size={20} color={colors.textTertiary} />
+      <Text variant="body" style={{ flex: 1 }}>
+        {label}
+      </Text>
+      <Text variant="label" color={muted ? colors.textTertiary : colors.textSecondary} numberOfLines={1} style={{ maxWidth: '50%' }}>
+        {value}
+      </Text>
+      <Icon name="chevronRight" size={18} color={colors.textTertiary} />
+    </Pressable>
   );
 }
 
@@ -404,78 +509,82 @@ const useStyles = makeStyles((colors, scheme) => ({
     paddingHorizontal: space.lg,
     paddingBottom: space.xxl,
   },
-  counter: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-  },
-  receipt: {
-    alignItems: 'center',
-    paddingVertical: space.lg,
-    marginBottom: space.md,
-    borderRadius: radius.xxl,
-    backgroundColor: colors.surface,
-  },
-  sourcePill: {
+  progress: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: space.sm,
+  },
+  dots: {
+    flexDirection: 'row',
     gap: 4,
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
+  },
+  dot: {
+    width: 20,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surfaceMuted,
+  },
+  dotDone: {
+    backgroundColor: colors.brand,
+  },
+  amountBlock: {
+    alignItems: 'center',
+    paddingTop: space.xl,
+    paddingBottom: space.xxl,
   },
   amountRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     justifyContent: 'center',
-    marginVertical: space.xs,
-    minHeight: 60,
-  },
-  amountText: {
-    fontSize: 44,
-    lineHeight: 54,
-    fontWeight: font.weight.bold,
-    letterSpacing: -1,
-    color: colors.text,
+    marginTop: space.xs,
+    minHeight: 52,
   },
   amountInput: {
+    fontSize: font.size.hero,
+    fontFamily: fontFamily.semibold,
+    letterSpacing: -1,
+    color: colors.text,
     minWidth: 60,
     padding: 0,
+    fontVariant: ['tabular-nums'],
   },
-  editBadge: {
-    marginLeft: space.xs,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestion: {
+  editLink: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.xs,
-    marginTop: space.md,
-    padding: space.sm,
-    borderRadius: radius.lg,
+    gap: 4,
+    marginTop: space.xs,
   },
-  label: {
-    marginTop: space.lg,
-    marginBottom: space.xs,
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: space.xxl,
+    marginBottom: space.sm,
+  },
+  hint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  details: {
+    marginTop: space.xxl,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 56,
+    paddingHorizontal: space.md,
   },
   footer: {
     flexDirection: 'row',
     gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingTop: space.sm,
-    backgroundColor: colors.background,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+  },
+  ignore: {
+    width: 112,
   },
   successScrim: {
-    backgroundColor: scheme === 'dark' ? 'rgba(11,13,23,0.96)' : 'rgba(245,246,250,0.96)',
+    backgroundColor: scheme === 'dark' ? 'rgba(18,18,15,0.96)' : 'rgba(246,245,241,0.96)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -483,7 +592,7 @@ const useStyles = makeStyles((colors, scheme) => ({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: colors.positive,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },

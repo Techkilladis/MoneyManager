@@ -135,6 +135,7 @@ export function formatSourceApp(source: string | null | undefined): string | nul
     BHIM: 'BHIM',
     AMAZON_PAY: 'Amazon Pay',
     CRED: 'CRED',
+    BANK_SMS: 'Bank SMS',
     MANUAL: 'Manual',
   };
   const key = source.toUpperCase().replace(/\s+/g, '_');

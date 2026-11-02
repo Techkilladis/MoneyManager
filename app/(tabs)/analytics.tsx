@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { radius, space } from '@/design/tokens';
+import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { analyticsService, budgetService, ledgerService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
@@ -12,18 +12,20 @@ import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, start
 import {
   Card,
   CategoryAvatar,
+  Divider,
   EmptyState,
   ErrorView,
-  Icon,
   IconButton,
   IconName,
   IconTile,
+  KeyFigure,
   LoadingView,
   MemberAvatar,
   ProgressBar,
   ScreenHeader,
   SectionTitle,
   SegmentedControl,
+  StatusChip,
   Text,
   UncategorizedAvatar,
 } from '@/components/ui';
@@ -231,11 +233,10 @@ export default function InsightsScreen() {
         <SegmentedControl options={MODES} value={mode} onChange={changeMode} />
 
         <View style={styles.periodNav}>
-          <IconButton icon="chevronLeft" size={36} accessibilityLabel="Previous period" onPress={() => setOffset((o) => o - 1)} />
+          <IconButton icon="chevronLeft" accessibilityLabel="Previous period" onPress={() => setOffset((o) => o - 1)} />
           <Text variant="bodyStrong">{range.label}</Text>
           <IconButton
             icon="chevronRight"
-            size={36}
             accessibilityLabel="Next period"
             disabled={offset >= 0}
             color={offset >= 0 ? colors.textDisabled : colors.text}
@@ -243,38 +244,32 @@ export default function InsightsScreen() {
           />
         </View>
 
-        {/* Summary */}
-        <Card>
-          <Text variant="overline">Total spent</Text>
-          <View style={styles.amountRow}>
-            <Text variant="hero" numeric>
-              {whole}
-            </Text>
-            <Text variant="heading" color={colors.textTertiary} numeric style={{ marginBottom: 4 }}>
-              {fraction}
-            </Text>
-          </View>
+        {/* Key figure */}
+        <KeyFigure label="Total spent" value={whole} fraction={fraction}>
           {change !== null ? (
             <View style={styles.changeRow}>
-              <Icon
-                name={change > 0 ? 'trendingUp' : 'trendingDown'}
-                size={16}
-                color={change > 0 ? colors.negative : colors.positive}
+              <StatusChip
+                tone={change > 0 ? 'up' : 'down'}
+                icon={change > 0 ? 'trendingUp' : 'trendingDown'}
+                label={Math.abs(change) >= 10 ? 'Far' : `${Math.round(Math.abs(change) * 100)}%`}
               />
-              <Text variant="label" color={change > 0 ? colors.negative : colors.positive}>
-                {Math.abs(change) >= 10 ? 'Far' : `${Math.round(Math.abs(change) * 100)}%`} {change > 0 ? 'more' : 'less'} than{' '}
-                {previousLabel}
+              <Text variant="caption">
+                {change > 0 ? 'more' : 'less'} than {previousLabel}
                 {data.partial ? ' so far' : ''}
               </Text>
             </View>
           ) : (
-            <Text variant="label" style={{ marginTop: space.xxs }}>
+            <Text variant="caption" style={{ marginTop: space.xs }}>
               Nothing to compare with {previousLabel}
             </Text>
           )}
+        </KeyFigure>
+        <Card style={styles.statCard}>
           <View style={styles.statRow}>
             <Stat label="Expenses" value={String(totals.count)} />
+            <View style={styles.statDivider} />
             <Stat label="Per day" value={formatCompactINR(perDay)} />
+            <View style={styles.statDivider} />
             <Stat label="Average" value={totals.count ? formatCompactINR(Math.round(totals.total / totals.count)) : '₹0'} />
           </View>
         </Card>
@@ -373,17 +368,17 @@ export default function InsightsScreen() {
                   {data.merchants.map((mch, i) => (
                     <View key={mch.merchantId} style={styles.merchantRow}>
                       <View style={styles.rank}>
-                        <Text variant="labelStrong" color={colors.brand}>
+                        <Text variant="label" numeric>
                           {i + 1}
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text variant="labelStrong" numberOfLines={1}>
+                        <Text variant="body" numberOfLines={1}>
                           {mch.canonicalName}
                         </Text>
                         <Text variant="caption">{pluralize(mch.transactionCount, 'payment')}</Text>
                       </View>
-                      <Text variant="labelStrong" numeric>
+                      <Text variant="bodyStrong" numeric>
                         {formatINR(mch.totalPaise, { decimals: 'never' })}
                       </Text>
                     </View>
@@ -419,19 +414,22 @@ export default function InsightsScreen() {
             {insights.length > 0 ? (
               <View style={styles.block}>
                 <SectionTitle title="Highlights" />
-                <View style={{ gap: space.sm }}>
-                  {insights.map((ins) => (
-                    <Card key={ins.title} style={styles.insight}>
-                      <IconTile icon={ins.icon} color={ins.color} />
-                      <View style={{ flex: 1 }}>
-                        <Text variant="labelStrong">{ins.title}</Text>
-                        <Text variant="caption" style={{ marginTop: 2 }}>
-                          {ins.body}
-                        </Text>
+                <Card padded={false}>
+                  {insights.map((ins, i) => (
+                    <View key={ins.title}>
+                      {i > 0 ? <Divider /> : null}
+                      <View style={styles.insight}>
+                        <IconTile icon={ins.icon} />
+                        <View style={{ flex: 1 }}>
+                          <Text variant="bodyStrong">{ins.title}</Text>
+                          <Text variant="label" style={{ marginTop: 2 }}>
+                            {ins.body}
+                          </Text>
+                        </View>
                       </View>
-                    </Card>
+                    </View>
                   ))}
-                </View>
+                </Card>
               </View>
             ) : null}
           </>
@@ -495,7 +493,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.stat}>
       <Text variant="caption">{label}</Text>
-      <Text variant="bodyStrong" numeric style={{ marginTop: 2 }}>
+      <Text variant="bodyStrong" numeric numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ marginTop: 2 }}>
         {value}
       </Text>
     </View>
@@ -514,14 +512,14 @@ const useStyles = makeStyles((colors) => ({
   },
   flowTrack: {
     flex: 1,
-    height: 12,
-    borderRadius: 6,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
   },
   flowBar: {
-    height: 12,
-    borderRadius: 6,
+    height: 8,
+    borderRadius: 4,
   },
   flowValue: {
     width: 64,
@@ -548,31 +546,32 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginVertical: space.md,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: space.xxs,
+    marginTop: space.md,
+    marginBottom: space.xl,
   },
   changeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: space.xxs,
+    gap: space.xs,
+    marginTop: space.xs,
+  },
+  statCard: {
+    marginTop: space.xl,
   },
   statRow: {
     flexDirection: 'row',
-    marginTop: space.md,
-    paddingTop: space.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    alignItems: 'stretch',
+    gap: space.md,
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: colors.border,
   },
   stat: {
     flex: 1,
   },
   block: {
-    marginTop: space.xl,
+    marginTop: space.xxl,
   },
   donutWrap: {
     alignItems: 'center',
@@ -599,7 +598,7 @@ const useStyles = makeStyles((colors) => ({
     paddingVertical: space.xs,
   },
   budgetDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: space.sm,
     marginTop: space.xs,
@@ -613,14 +612,16 @@ const useStyles = makeStyles((colors) => ({
   rank: {
     width: 32,
     height: 32,
-    borderRadius: radius.md,
-    backgroundColor: colors.brandSoft,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   insight: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: space.sm,
+    padding: space.md,
+    paddingBottom: space.sm,
   },
 }));

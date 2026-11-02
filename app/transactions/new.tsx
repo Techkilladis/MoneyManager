@@ -16,6 +16,7 @@ export default function NewTransactionScreen() {
       title="Add transaction"
       submitLabel="Save"
       autoFocusAmount
+      modal
       smartDefaults
       initial={{ kind: kind === 'income' ? 'INCOME' : 'EXPENSE' }}
       onSubmit={async (values) => {

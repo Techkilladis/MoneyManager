@@ -5,14 +5,60 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import * as Notifications from 'expo-notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, space } from '@/design/tokens';
+import { space } from '@/design/tokens';
 import { useTheme } from '@/design/theme';
 import { authenticate, clearLockSuppression, isLockSuppressed, suppressLock } from '@/services/appLock';
 import { getSettings, subscribeSettings } from '@/services/settings';
 import { haptic } from '@/utils/haptics';
 import { Button, Icon, Text } from './ui';
+
+/** Re-check for a notification response or pending native events that
+ *  arrived while the app was locked.  This covers the common case where
+ *  a bank UPI notification opened the review pop-up — the response may
+ *  have been consumed on the initial mount (before the lock appeared),
+ *  so we need to re-read it (or fall back to pending events) after
+ *  the user unlocks. */
+async function replayPendingNotification(): Promise<void> {
+  try {
+    const response = await Notifications.getLastNotificationResponseAsync();
+    const url = response?.notification?.request?.content?.data?.url;
+    if (typeof url === 'string' && url.startsWith('/')) {
+      setTimeout(() => {
+        try {
+          const { router } = require('expo-router');
+          (router as any).push(url);
+        } catch (e) {
+          console.warn('[AppLockGate] navigation failed:', e);
+        }
+      }, 300);
+      try {
+        await Notifications.clearLastNotificationResponseAsync();
+      } catch {
+        // best-effort
+      }
+      return;
+    }
+    // Fallback: check for pending native UPI events that arrived while
+    // the app was locked but were never surfaced (e.g. when the deep-
+    // link response was consumed before the lock gate could replay it).
+    const { transactionService } = require('@/services');
+    const pending = await transactionService.getOldestPendingCapture?.();
+    if (pending) {
+      setTimeout(() => {
+        try {
+          const { router } = require('expo-router');
+          (router as any).push('/quick-capture');
+        } catch (e) {
+          console.warn('[AppLockGate] navigation to quick-capture failed:', e);
+        }
+      }, 400);
+    }
+  } catch {
+    // best-effort
+  }
+}
 
 export function AppLockGate({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
@@ -34,6 +80,9 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       setFailed(false);
       setLocked(false);
       haptic.success();
+      // Re-check for notification responses that arrived while the app was
+      // locked (e.g. a bank SMS that opened the review pop-up).
+      void replayPendingNotification();
     } else {
       setFailed(true);
     }
@@ -84,25 +133,20 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     <View style={{ flex: 1 }}>
       {children}
       {locked ? (
-        <LinearGradient
-          colors={[colors.heroStart, colors.heroEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[StyleSheet.absoluteFill, styles.lock, { paddingBottom: insets.bottom + space.xxl }]}
-        >
+        <View style={[StyleSheet.absoluteFill, styles.lock, { backgroundColor: colors.background, paddingBottom: insets.bottom + space.xl }]}>
           <View style={styles.center}>
-            <View style={styles.logo}>
-              <Icon name="lock" size={34} color="#FFFFFF" />
+            <View style={[styles.logo, { backgroundColor: colors.surfaceMuted }]}>
+              <Icon name="lock" size={32} color={colors.text} />
             </View>
-            <Text variant="title" color="#FFFFFF" align="center" style={{ marginTop: space.lg }}>
+            <Text variant="title" align="center" style={{ marginTop: space.xl }}>
               Money Manager is locked
             </Text>
-            <Text variant="body" color={colors.textOnDarkMuted} align="center" style={{ marginTop: space.xs }}>
+            <Text variant="body" color={colors.textSecondary} align="center" style={{ marginTop: space.xs }}>
               {failed ? "That didn't work. Try again." : 'Unlock with your fingerprint, face or screen lock.'}
             </Text>
           </View>
-          <Button title="Unlock" icon="lock" size="lg" variant="secondary" fullWidth onPress={unlock} />
-        </LinearGradient>
+          <Button title="Unlock" icon="lock" size="lg" fullWidth onPress={unlock} />
+        </View>
       ) : null}
     </View>
   );
@@ -110,7 +154,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   lock: {
-    paddingHorizontal: space.xl,
+    paddingHorizontal: space.lg,
     justifyContent: 'flex-end',
   },
   center: {
@@ -119,10 +163,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 84,
-    height: 84,
-    borderRadius: radius.xxl,
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },

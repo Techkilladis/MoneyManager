@@ -1,7 +1,7 @@
 // Stroke icon set (24×24 grid, Lucide-style geometry) drawn with
 // react-native-svg, so no icon font or extra native module is needed.
 import React from 'react';
-import Svg, { Circle, Line, Path, Polyline, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Polyline, Polygon, Rect } from 'react-native-svg';
 import { useTheme } from '@/design/theme';
 
 const glyphs = {
@@ -294,6 +294,356 @@ const glyphs = {
     <>
       <Path d="M3 7v6h6" />
       <Path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </>
+  ),
+
+  // ---- UI additions (Paper & Ink)
+  user: (
+    <>
+      <Path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <Circle cx="12" cy="7" r="4" />
+    </>
+  ),
+  sliders: (
+    <>
+      <Path d="M21 4h-7" />
+      <Path d="M10 4H3" />
+      <Path d="M21 12h-9" />
+      <Path d="M8 12H3" />
+      <Path d="M21 20h-5" />
+      <Path d="M12 20H3" />
+      <Path d="M14 2v4" />
+      <Path d="M8 10v4" />
+      <Path d="M16 18v4" />
+    </>
+  ),
+  history: (
+    <>
+      <Path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <Path d="M3 3v5h5" />
+      <Path d="M12 7v5l4 2" />
+    </>
+  ),
+  layoutGrid: (
+    <>
+      <Rect width="7" height="7" x="3" y="3" rx="1" />
+      <Rect width="7" height="7" x="14" y="3" rx="1" />
+      <Rect width="7" height="7" x="14" y="14" rx="1" />
+      <Rect width="7" height="7" x="3" y="14" rx="1" />
+    </>
+  ),
+  message: (
+    <>
+      <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <Path d="M13 8H7" />
+      <Path d="M17 12H7" />
+    </>
+  ),
+  qrCode: (
+    <>
+      <Rect width="5" height="5" x="3" y="3" rx="1" />
+      <Rect width="5" height="5" x="16" y="3" rx="1" />
+      <Rect width="5" height="5" x="3" y="16" rx="1" />
+      <Path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+      <Path d="M21 21v.01" />
+      <Path d="M12 7v3a2 2 0 0 1-2 2H7" />
+      <Path d="M3 12h.01" />
+      <Path d="M12 3h.01" />
+      <Path d="M12 16v.01" />
+      <Path d="M16 12h1" />
+      <Path d="M21 12v.01" />
+      <Path d="M12 21v-1" />
+    </>
+  ),
+  shapes: (
+    <>
+      <Path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z" />
+      <Rect x="3" y="14" width="7" height="7" rx="1" />
+      <Circle cx="17.5" cy="17.5" r="3.5" />
+    </>
+  ),
+  fileSpreadsheet: (
+    <>
+      <Path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <Path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <Path d="M8 13h2" />
+      <Path d="M14 13h2" />
+      <Path d="M8 17h2" />
+      <Path d="M14 17h2" />
+    </>
+  ),
+  cloudUpload: (
+    <>
+      <Path d="M12 13v8" />
+      <Path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+      <Path d="m8 17 4-4 4 4" />
+    </>
+  ),
+  shieldCheck: (
+    <>
+      <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <Path d="m9 12 2 2 4-4" />
+    </>
+  ),
+  share2: (
+    <>
+      <Circle cx="18" cy="5" r="3" />
+      <Circle cx="6" cy="12" r="3" />
+      <Circle cx="18" cy="19" r="3" />
+      <Line x1="8.59" x2="15.42" y1="13.51" y2="17.49" />
+      <Line x1="15.41" x2="8.59" y1="6.51" y2="10.49" />
+    </>
+  ),
+  coins: (
+    <>
+      <Circle cx="8" cy="8" r="6" />
+      <Path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+      <Path d="M7 6h1v4" />
+      <Path d="m16.71 13.88.7.71-2.82 2.82" />
+    </>
+  ),
+
+  // ---- Voice / audio icons
+  mic: (
+    <>
+      <Path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+      <Path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+      <Line x1="12" x2="12" y1="19" y2="22" />
+    </>
+  ),
+  micOff: (
+    <>
+      <Path d="M1 1l23 23" />
+      <Path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+      <Path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+      <Line x1="12" x2="12" y1="19" y2="22" />
+    </>
+  ),
+  volume: (
+    <>
+      <Polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <Path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <Path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </>
+  ),
+  pause: (
+    <>
+      <Rect x="6" y="4" width="4" height="16" rx="1" />
+      <Rect x="14" y="4" width="4" height="16" rx="1" />
+    </>
+  ),
+  arrowUp: (
+    <>
+      <Path d="M12 19V5" />
+      <Path d="m5 12 7-7 7 7" />
+    </>
+  ),
+  arrowDown: (
+    <>
+      <Path d="M12 5v14" />
+      <Path d="m19 12-7 7-7-7" />
+    </>
+  ),
+
+  // ---- Category icons
+  utensils: (
+    <>
+      <Path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2" />
+      <Path d="M7 2v20" />
+      <Path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7" />
+    </>
+  ),
+  coffee: (
+    <>
+      <Path d="M10 2v2" />
+      <Path d="M14 2v2" />
+      <Path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1" />
+      <Path d="M6 2v2" />
+    </>
+  ),
+  shoppingCart: (
+    <>
+      <Circle cx="8" cy="21" r="1" />
+      <Circle cx="19" cy="21" r="1" />
+      <Path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+    </>
+  ),
+  car: (
+    <>
+      <Path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
+      <Circle cx="7" cy="17" r="2" />
+      <Path d="M9 17h6" />
+      <Circle cx="17" cy="17" r="2" />
+    </>
+  ),
+  fuel: (
+    <>
+      <Path d="M3 22h12" />
+      <Path d="M4 9h10" />
+      <Path d="M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18" />
+      <Path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5" />
+    </>
+  ),
+  plane: (
+    <Path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+  ),
+  shoppingBag: (
+    <>
+      <Path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+      <Path d="M3 6h18" />
+      <Path d="M16 10a4 4 0 0 1-8 0" />
+    </>
+  ),
+  shirt: (
+    <Path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z" />
+  ),
+  receiptText: (
+    <>
+      <Path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+      <Path d="M14 8H8" />
+      <Path d="M16 12H8" />
+      <Path d="M13 16H8" />
+    </>
+  ),
+  lightbulb: (
+    <>
+      <Path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+      <Path d="M9 18h6" />
+      <Path d="M10 22h4" />
+    </>
+  ),
+  clapperboard: (
+    <>
+      <Path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" />
+      <Path d="m6.2 5.3 3.1 3.9" />
+      <Path d="m12.4 3.4 3.1 4" />
+      <Path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </>
+  ),
+  gamepad: (
+    <>
+      <Path d="M6 11h4" />
+      <Path d="M8 9v4" />
+      <Path d="M15 12h.01" />
+      <Path d="M18 10h.01" />
+      <Path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258A4 4 0 0 0 17.32 5z" />
+    </>
+  ),
+  music: (
+    <>
+      <Path d="M9 18V5l12-2v13" />
+      <Circle cx="6" cy="18" r="3" />
+      <Circle cx="18" cy="16" r="3" />
+    </>
+  ),
+  pill: (
+    <>
+      <Path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z" />
+      <Path d="m8.5 8.5 7 7" />
+    </>
+  ),
+  dumbbell: (
+    <>
+      <Path d="m6.5 6.5 11 11" />
+      <Path d="m21 21-1-1" />
+      <Path d="m3 3 1 1" />
+      <Path d="m18 22 4-4" />
+      <Path d="m2 6 4-4" />
+      <Path d="m3 10 7-7" />
+      <Path d="m14 21 7-7" />
+    </>
+  ),
+  bookOpen: (
+    <>
+      <Path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <Path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </>
+  ),
+  graduationCap: (
+    <>
+      <Path d="M22 10v6" />
+      <Path d="M2 10l10-5 10 5-10 5z" />
+      <Path d="M6 12v5c3 3 9 3 12 0v-5" />
+    </>
+  ),
+  pawPrint: (
+    <>
+      <Circle cx="11" cy="4" r="2" />
+      <Circle cx="18" cy="8" r="2" />
+      <Circle cx="20" cy="16" r="2" />
+      <Path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z" />
+    </>
+  ),
+  gift: (
+    <>
+      <Rect x="3" y="8" width="18" height="4" rx="1" />
+      <Path d="M12 8v13" />
+      <Path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
+      <Path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" />
+    </>
+  ),
+  scissors: (
+    <>
+      <Circle cx="6" cy="6" r="3" />
+      <Path d="M8.12 8.12 12 12" />
+      <Path d="M20 4 8.12 15.88" />
+      <Circle cx="6" cy="18" r="3" />
+      <Path d="M14.8 14.8 20 20" />
+    </>
+  ),
+  wine: (
+    <>
+      <Path d="M8 22h8" />
+      <Path d="M7 10h10" />
+      <Path d="M12 15v7" />
+      <Path d="M12 15a5 5 0 0 0 5-5c0-2-.5-4-2-8H9c-1.5 4-2 6-2 8a5 5 0 0 0 5 5Z" />
+    </>
+  ),
+  heartPulse: (
+    <>
+      <Path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+      <Path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" />
+    </>
+  ),
+  train: (
+    <>
+      <Rect width="16" height="16" x="4" y="3" rx="2" />
+      <Path d="M4 11h16" />
+      <Path d="M12 3v8" />
+      <Path d="m8 19-2 3" />
+      <Path d="m18 22-2-3" />
+      <Path d="M8 15h.01" />
+      <Path d="M16 15h.01" />
+    </>
+  ),
+  briefcase: (
+    <>
+      <Rect width="20" height="14" x="2" y="7" rx="2" />
+      <Path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </>
+  ),
+  wrench: (
+    <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+  ),
+  package: (
+    <>
+      <Path d="m7.5 4.27 9 5.15" />
+      <Path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+      <Path d="m3.3 7 8.7 5 8.7-5" />
+      <Path d="M12 22V12" />
+    </>
+  ),
+  laptop: (
+    <Path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" />
+  ),
+  landmark: (
+    <>
+      <Path d="M3 22h18" />
+      <Path d="M6 18v-7" />
+      <Path d="M10 18v-7" />
+      <Path d="M14 18v-7" />
+      <Path d="M18 18v-7" />
+      <Path d="M12 2 20 7H4z" />
     </>
   ),
 } as const;

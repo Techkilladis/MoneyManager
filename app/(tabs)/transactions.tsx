@@ -7,7 +7,6 @@ import { categoryService, ledgerService, memberService } from '@/services';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { useScreenData } from '@/hooks/useScreenData';
 import { FormattedTransaction } from '@/domain/transaction';
-import { categoryGlyph } from '@/domain/glyphs';
 import { formatDayLabel, formatINR, pluralize, startOfDay } from '@/utils/format';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
@@ -180,14 +179,13 @@ export default function HistoryScreen() {
           {categoryId ? (
             <Chip
               label={activeCategory?.name ?? 'Uncategorized'}
-              emoji={activeCategory ? categoryGlyph(activeCategory.icon) : undefined}
               selected
-              color={activeCategory?.color}
-              icon={activeCategory ? undefined : 'x'}
+              color={activeCategory?.color ?? colors.textTertiary}
+              trailingIcon="x"
               onPress={() => setCategoryId(null)}
             />
           ) : null}
-          {activeMember ? <Chip label={activeMember.name} selected color={activeMember.color} onPress={() => setMemberId(null)} /> : null}
+          {activeMember ? <Chip label={activeMember.name} selected color={activeMember.color} trailingIcon="x" onPress={() => setMemberId(null)} /> : null}
           <Pressable onPress={() => { setCategoryId(null); setMemberId(null); }} hitSlop={8}>
             <Text variant="labelStrong" color={colors.brand}>
               Clear
@@ -202,7 +200,9 @@ export default function HistoryScreen() {
           style={({ pressed }) => [styles.pending, pressed && { opacity: 0.85 }]}
           accessibilityRole="button"
         >
-          <Icon name="zap" size={16} color={colors.brand} />
+          <View style={styles.pendingIcon}>
+            <Icon name="zap" size={16} color={colors.textOnBrand} />
+          </View>
           <Text variant="labelStrong" color={colors.brand} style={{ flex: 1 }}>
             {data.pendingCount === 1 ? '1 UPI payment waiting for review' : `${data.pendingCount} UPI payments waiting for review`}
           </Text>
@@ -211,20 +211,17 @@ export default function HistoryScreen() {
       ) : null}
 
       <View style={styles.summary}>
-        <Text variant="label">{pluralize(data.totals.count, kind === 'INCOME' ? 'payment' : kind === 'EXPENSE' ? 'expense' : 'transaction')}</Text>
-        <View style={styles.summaryValues}>
-          {kind !== 'INCOME' ? (
-            <Text variant="bodyStrong" numeric>
-              {kind === 'all' && data.totals.income > 0 ? 'Spent ' : ''}
-              {formatINR(data.totals.total)}
-            </Text>
-          ) : null}
-          {kind !== 'EXPENSE' && (data.totals.income > 0 || kind === 'INCOME') ? (
-            <Text variant="bodyStrong" numeric color={colors.positive}>
-              +{formatINR(data.totals.income)}
-            </Text>
-          ) : null}
+        <View>
+          <Text variant="label">{pluralize(data.totals.count, kind === 'INCOME' ? 'payment' : kind === 'EXPENSE' ? 'expense' : 'transaction')}</Text>
+          <Text variant="title" numeric color={kind === 'INCOME' ? colors.positive : colors.text} style={{ marginTop: space.xxs }}>
+            {kind === 'INCOME' ? `+${formatINR(data.totals.income, { decimals: 'never' })}` : formatINR(data.totals.total, { decimals: 'never' })}
+          </Text>
         </View>
+        {kind === 'all' && data.totals.income > 0 ? (
+          <Text variant="bodyStrong" numeric color={colors.positive}>
+            +{formatINR(data.totals.income, { decimals: 'never' })} in
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -254,10 +251,10 @@ export default function HistoryScreen() {
           accessibilityLabel="Filters"
           style={({ pressed }) => [styles.filterBtn, filterCount > 0 && styles.filterBtnActive, pressed && { opacity: 0.8 }]}
         >
-          <Icon name="tag" size={20} color={filterCount > 0 ? colors.textOnBrand : colors.text} />
+          <Icon name="sliders" size={20} color={colors.text} />
           {filterCount > 0 ? (
             <View style={styles.filterBadge}>
-              <Text variant="caption" color={colors.brand} style={{ fontWeight: '700', fontSize: 10, lineHeight: 12 }}>
+              <Text variant="caption" color={colors.textOnBrand} style={{ fontWeight: '600', fontSize: 11, lineHeight: 14 }}>
                 {filterCount}
               </Text>
             </View>
@@ -276,7 +273,7 @@ export default function HistoryScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} tintColor={colors.brand} />}
         renderSectionHeader={({ section }) => (
           <View style={styles.dayHeader}>
-            <Text variant="labelStrong" color={colors.textSecondary}>
+            <Text variant="label">
               {section.title}
             </Text>
             <View style={styles.dayTotals}>
@@ -298,7 +295,7 @@ export default function HistoryScreen() {
           const last = index === section.data.length - 1;
           return (
             <View style={[styles.item, first && styles.itemFirst, last && styles.itemLast]}>
-              {!first ? <Divider inset={72} /> : null}
+              {!first ? <Divider /> : null}
               <TransactionRow tx={item} onPress={openTx} />
             </View>
           );
@@ -327,7 +324,7 @@ export default function HistoryScreen() {
         title="Filter"
         footer={<Button title="Show results" size="lg" fullWidth onPress={() => setShowFilters(false)} />}
       >
-        <Text variant="labelStrong" color={colors.textSecondary} style={styles.sheetLabel}>
+        <Text variant="label" style={styles.sheetLabel}>
           Category
         </Text>
         <View style={styles.wrap}>
@@ -338,15 +335,15 @@ export default function HistoryScreen() {
             <Chip
               key={c.id}
               label={c.name}
-              emoji={categoryGlyph(c.icon)}
+              categoryIcon={c.icon}
               color={c.color}
               selected={categoryId === c.id}
               onPress={() => setCategoryId(categoryId === c.id ? null : c.id)}
             />
           ))}
-          <Chip label="Uncategorized" icon="tag" selected={categoryId === 'none'} onPress={() => setCategoryId(categoryId === 'none' ? null : 'none')} />
+          <Chip label="Uncategorized" categoryIcon={null} selected={categoryId === 'none'} onPress={() => setCategoryId(categoryId === 'none' ? null : 'none')} />
         </View>
-        <Text variant="labelStrong" color={colors.textSecondary} style={styles.sheetLabel}>
+        <Text variant="label" style={styles.sheetLabel}>
           Spent on
         </Text>
         <View style={styles.wrap}>
@@ -370,29 +367,30 @@ const useStyles = makeStyles((colors) => ({
     alignItems: 'center',
     gap: space.xs,
     paddingHorizontal: space.lg,
+    paddingTop: space.sm,
   },
   filterBtn: {
-    width: 50,
-    height: 50,
+    width: 56,
+    height: 56,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   filterBtnActive: {
-    backgroundColor: colors.brand,
     borderColor: colors.brand,
   },
   filterBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
+    top: 8,
+    right: 8,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -404,10 +402,6 @@ const useStyles = makeStyles((colors) => ({
     gap: space.xs,
     paddingHorizontal: space.lg,
     paddingTop: space.sm,
-  },
-  summaryValues: {
-    flexDirection: 'row',
-    gap: space.sm,
   },
   dayTotals: {
     flexDirection: 'row',
@@ -424,20 +418,30 @@ const useStyles = makeStyles((colors) => ({
   pending: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.xs,
+    gap: space.sm,
     marginHorizontal: space.lg,
     marginTop: space.md,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.brandSoftBorder,
     backgroundColor: colors.brandSoft,
+  },
+  pendingIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summary: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'flex-end',
     paddingHorizontal: space.lg,
-    paddingTop: space.lg,
+    paddingTop: space.xl,
   },
   list: {
     paddingBottom: space.xxxl,
@@ -445,24 +449,28 @@ const useStyles = makeStyles((colors) => ({
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: space.lg + space.xxs,
-    paddingTop: space.lg,
+    paddingHorizontal: space.lg,
+    paddingTop: space.xl,
     paddingBottom: space.xs,
   },
+  // Each day is one card: rows share side borders, the first and last round off.
   item: {
     marginHorizontal: space.lg,
     backgroundColor: colors.surface,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
   itemFirst: {
+    borderTopWidth: 1,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
-    paddingTop: space.xxs,
   },
   itemLast: {
+    borderBottomWidth: 1,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,
-    paddingBottom: space.xxs,
   },
   sheetLabel: {
     marginTop: space.sm,

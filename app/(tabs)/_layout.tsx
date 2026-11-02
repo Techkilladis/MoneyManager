@@ -1,9 +1,9 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Redirect, Tabs, router } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { shadow, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Icon, IconName, Text } from '@/components/ui';
 import { session } from '@/services/session';
@@ -39,7 +39,7 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
     if (!route) return null;
     const meta = TAB_META[route.name] ?? { label: route.name, icon: 'home' as IconName };
     const focused = state.index === index;
-    const color = focused ? colors.brand : colors.textTertiary;
+    const color = focused ? colors.text : colors.textTertiary;
 
     const onPress = () => {
       const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -58,8 +58,8 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
         accessibilityLabel={meta.label}
         style={styles.tab}
       >
-        <Icon name={meta.icon} size={22} color={color} strokeWidth={focused ? 2.3 : 1.9} />
-        <Text variant="caption" color={color} style={[styles.tabLabel, focused && styles.tabLabelActive]}>
+        <Icon name={meta.icon} size={22} color={color} strokeWidth={focused ? 2.2 : 1.9} />
+        <Text variant="caption" color={color} style={[focused && styles.tabLabelActive]}>
           {meta.label}
         </Text>
       </Pressable>
@@ -77,10 +77,10 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
             router.push('/transactions/new');
           }}
           accessibilityRole="button"
-          accessibilityLabel="Add expense"
-          style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.94 }], backgroundColor: colors.brandPressed }]}
+          accessibilityLabel="Add expense — plus icon in the centre of the tab bar"
+          style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.94 }], opacity: 0.85 }]}
         >
-          <Icon name="plus" size={26} color={colors.textOnBrand} strokeWidth={2.6} />
+          <Icon name="plus" size={24} color={colors.textOnInk} strokeWidth={2.4} />
         </Pressable>
       </View>
       {renderTab(2)}
@@ -92,39 +92,36 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
 const useStyles = makeStyles((colors) => ({
   bar: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: space.xs,
+    paddingHorizontal: space.xs,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 50,
-    gap: 3,
-  },
-  tabLabel: {
-    fontSize: 11,
+    minHeight: 48,
+    gap: 4,
   },
   tabLabelActive: {
-    fontWeight: '600',
+    // caption variant already sets fontSize: 13, lineHeight: 18;
+    // tighten slightly for the tab bar context.
+    lineHeight: 16,
   },
   fabSlot: {
-    flex: 1,
     alignItems: 'center',
+    paddingHorizontal: space.xs,
   },
+  // The add button: an ink tile in the middle of the bar (thumb zone).
   fab: {
     width: 56,
-    height: 56,
-    borderRadius: 28,
-    marginTop: -22,
-    backgroundColor: colors.brand,
+    height: 48,
+    borderRadius: radius.lg,
+    backgroundColor: colors.text,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: colors.surface,
-    ...shadow.brand,
   },
 }));

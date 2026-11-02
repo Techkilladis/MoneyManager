@@ -1,48 +1,54 @@
 import React from 'react';
-import { View } from 'react-native';
-import { tint } from '@/design/tokens';
+import { View, ViewProps } from 'react-native';
+import { inkOf, tint } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { categoryGlyph, initials } from '@/domain/glyphs';
+import { categoryIcon, initials } from '@/domain/glyphs';
 import { Icon } from './Icon';
 import { Text } from './Text';
 
-/** Category emoji on a soft tile of the category colour. */
+/** Category line icon on a round badge tinted with the category colour. */
 export function CategoryAvatar({
   icon,
   color,
-  size = 44,
+  size = 40,
+  accessibilityLabel,
 }: {
   icon: string | null | undefined;
   color: string | null | undefined;
   size?: number;
-}) {
+  accessibilityLabel?: string;
+} & ViewProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const base = color ?? colors.textTertiary;
   return (
     <View
-      style={[
-        styles.center,
-        { width: size, height: size, borderRadius: size * 0.34, backgroundColor: tint(color ?? colors.textTertiary, 0.16) },
-      ]}
+      style={[styles.center, { width: size, height: size, borderRadius: size / 2, backgroundColor: tint(base, 0.14) }]}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityLabel ? 'image' : undefined}
     >
-      <Text style={{ fontSize: size * 0.46, lineHeight: size * 0.6 }}>{categoryGlyph(icon)}</Text>
+      <Icon name={categoryIcon(icon)} size={Math.round(size * 0.46)} color={inkOf(base)} />
     </View>
   );
 }
 
-/** Placeholder avatar for transactions without a category yet. */
-export function UncategorizedAvatar({ size = 44 }: { size?: number }) {
+/** Placeholder badge for transactions without a category yet. */
+export function UncategorizedAvatar({
+  size = 40,
+  accessibilityLabel = 'Uncategorized',
+}: {
+  size?: number;
+  accessibilityLabel?: string;
+} & ViewProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   return (
     <View
-      style={[
-        styles.center,
-        styles.dashed,
-        { width: size, height: size, borderRadius: size * 0.34 },
-      ]}
+      style={[styles.center, styles.dashed, { width: size, height: size, borderRadius: size / 2 }]}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="image"
     >
-      <Icon name="tag" size={size * 0.42} color={colors.textTertiary} />
+      <Icon name="tag" size={Math.round(size * 0.42)} color={colors.textTertiary} />
     </View>
   );
 }
@@ -50,20 +56,26 @@ export function UncategorizedAvatar({ size = 44 }: { size?: number }) {
 export function MemberAvatar({
   name,
   color,
-  size = 32,
+  size = 40,
+  accessibilityLabel,
 }: {
   name: string;
   color: string | null | undefined;
   size?: number;
-}) {
+  accessibilityLabel?: string;
+} & ViewProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const base = color ?? colors.brand;
   return (
     <View
-      style={[styles.center, { width: size, height: size, borderRadius: size / 2, backgroundColor: tint(base, 0.18) }]}
+      style={[styles.center, { width: size, height: size, borderRadius: size / 2, backgroundColor: tint(base, 0.16) }]}
+      accessibilityLabel={accessibilityLabel ?? name}
+      accessibilityRole="image"
     >
-      <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: base }}>{initials(name)}</Text>
+      <Text variant="labelStrong" color={inkOf(base)} style={{ fontSize: Math.round(size * 0.33), lineHeight: Math.round(size * 0.42) }}>
+        {initials(name)}
+      </Text>
     </View>
   );
 }

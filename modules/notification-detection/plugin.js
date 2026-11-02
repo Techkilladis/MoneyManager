@@ -1,96 +1,28 @@
-const { withAndroidManifest, withStringsXml } = require('expo/config-plugins');
+const { withAndroidManifest } = require('expo/config-plugins');
+
+const PERMISSIONS = [
+  'android.permission.READ_SMS',
+  'android.permission.RECEIVE_SMS',
+  // "Display over other apps": lets a new payment open the review screen.
+  'android.permission.SYSTEM_ALERT_WINDOW',
+  // Keeps capture working after the app is swiped away from Recents.
+  'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+];
 
 /**
- * Expo Config Plugin for Money Manager Notification Detection.
- * Adds the NotificationListenerService to the Android manifest.
+ * Expo Config Plugin for Money Manager SMS detection.
+ * Declares the SMS and pop-up permissions in the app manifest; the receiver itself is
+ * declared by the native module's own manifest and merged automatically.
  */
-module.exports = function withNotificationDetection(config) {
-  // Add the string resource
-  config = withStringsXml(config, (config) => {
-    if (!config.modResults.resources) {
-      config.modResults.resources = { string: [] };
-    }
-    
-    if (!Array.isArray(config.modResults.resources.string)) {
-      config.modResults.resources.string = [config.modResults.resources.string];
-    }
-    
-    const stringExists = config.modResults.resources.string.some(
-      (s) => s.$?.name === 'notification_listener_service_name'
-    );
-    
-    if (!stringExists) {
-      config.modResults.resources.string.push({
-        $: { name: 'notification_listener_service_name' },
-        _: 'Money Manager UPI Notification Listener',
-      });
-    }
-    
-    return config;
-  });
-
-  // Add the NotificationListenerService to manifest
+module.exports = function withSmsDetection(config) {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest;
-    
-    // Ensure application exists
-    if (!manifest.application) {
-      manifest.application = [{}];
+    manifest['uses-permission'] = manifest['uses-permission'] ?? [];
+    for (const name of PERMISSIONS) {
+      if (!manifest['uses-permission'].some((p) => p.$?.['android:name'] === name)) {
+        manifest['uses-permission'].push({ $: { 'android:name': name } });
+      }
     }
-    
-    const application = manifest.application[0];
-    
-    // Add the NotificationListenerService
-    if (!application.service) {
-      application.service = [];
-    }
-    
-    const service = {
-      $: {
-        'android:name': 'com.moneymanager.notification.MoneyManagerNotificationListenerService',
-        'android:label': '@string/notification_listener_service_name',
-        'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
-        'android:exported': 'true',
-      },
-      'intent-filter': [
-        {
-          action: [
-            {
-              $: {
-                'android:name': 'android.service.notification.NotificationListenerService',
-              },
-            },
-          ],
-        },
-      ],
-    };
-    
-    // Check if service already exists
-    const existingService = application.service.find(
-      (s) => s.$?.['android:name'] === 'com.moneymanager.notification.MoneyManagerNotificationListenerService'
-    );
-    
-    if (!existingService) {
-      application.service.push(service);
-    }
-    
-    // Add BIND_NOTIFICATION_LISTENER_SERVICE permission
-    if (!manifest['uses-permission']) {
-      manifest['uses-permission'] = [];
-    }
-    
-    const permissionExists = manifest['uses-permission'].some(
-      (p) => p.$?.['android:name'] === 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'
-    );
-    
-    if (!permissionExists) {
-      manifest['uses-permission'].push({
-        $: {
-          'android:name': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
-        },
-      });
-    }
-    
     return config;
   });
 };

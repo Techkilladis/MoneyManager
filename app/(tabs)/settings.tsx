@@ -99,7 +99,7 @@ export default function SettingsScreen() {
   const [busy, setBusy] = useState<'backup' | 'restore' | 'csv' | null>(null);
   const [pendingRestore, setPendingRestore] = useState<BackupFile | null>(null);
 
-  // Notification access and battery state change in system settings; re-read
+  // The SMS permission can change in system settings; re-read
   // whenever the app comes back to the foreground.
   const checkCapture = useCallback(() => {
     getCaptureStatus()
@@ -249,18 +249,21 @@ export default function SettingsScreen() {
 
   const simulate = () => {
     services.transaction
-      .simulateUpiNotification()
+      .simulateUpiSms()
       .then((result) => {
         if (!result) {
-          Alert.alert('Not parsed', 'The sample notification did not match any UPI parser.');
+          Alert.alert('Not parsed', 'The sample bank SMS was not recognised as a UPI payment.');
           return;
         }
         Alert.alert(
           'Parser result',
-          `Parser: ${result.parserName}\nDirection: ${result.direction ?? 'DEBIT'}\nAmount: ₹${(result.amountPaise / 100).toFixed(2)}\nMerchant: ${result.merchant ?? '—'}\nApp: ${result.sourceApp}\nConfidence: ${Math.round(result.confidence * 100)}%`
+          `Direction: ${result.direction}
+Amount: ₹${(result.amountPaise / 100).toFixed(2)}
+Merchant: ${result.merchant ?? '—'}
+Reference: ${result.transactionReference ?? '—'}`
         );
       })
-      .catch(() => Alert.alert('Unavailable', 'The native notification module is not available on this platform.'));
+      .catch(() => Alert.alert('Unavailable', 'The native SMS module is not available on this platform.'));
   };
 
   const loadSamples = () => {
@@ -276,7 +279,7 @@ export default function SettingsScreen() {
     services.notification
       .getParsingStats()
       .then((s) => Alert.alert('Capture stats', `Events: ${s.total}\nBy app: ${JSON.stringify(s.bySource)}\nBy status: ${JSON.stringify(s.byStatus)}`))
-      .catch(() => Alert.alert('Unavailable', 'The native notification module is not available.'));
+      .catch(() => Alert.alert('Unavailable', 'The native SMS module is not available.'));
   };
 
   const replayOnboarding = async () => {
@@ -294,7 +297,7 @@ export default function SettingsScreen() {
     <View style={styles.screen}>
       <ScreenHeader large title="Settings" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {capture ? <CaptureStatusCard status={capture} onChanged={checkCapture} /> : null}
+        {capture ? <View style={{ marginTop: space.md }}><CaptureStatusCard status={capture} onChanged={checkCapture} /></View> : null}
 
         <Text variant="overline" style={styles.groupLabel}>
           Organize
@@ -303,43 +306,44 @@ export default function SettingsScreen() {
           <ListRow
             title="Budgets"
             subtitle="Monthly limits and alerts"
-            left={<IconTile icon="target" color={colors.positive} />}
+            left={<IconTile icon="target" />}
             value={data ? (data.counts.budgets ? `${data.counts.budgets} active` : 'None') : undefined}
             chevron
             onPress={() => router.push('/budgets')}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="Recurring payments"
             subtitle="Subscriptions, rent and bills"
-            left={<IconTile icon="repeat" color="#0EA5E9" />}
+            left={<IconTile icon="repeat" />}
             value={data ? (data.counts.recurring ? String(data.counts.recurring) : 'None') : undefined}
             chevron
             onPress={() => router.push('/recurring')}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="People & splits"
-            subtitle={data && data.owed > 0 ? `${formatINR(data.owed)} owed to you` : 'Who an expense was for, split bills'}
-            left={<IconTile icon="users" color={colors.info} />}
+            subtitle={data && data.owed > 0 ? `${formatINR(data.owed, { decimals: 'never' })} owed to you` : 'Who an expense was for, split bills'}
+            subtitleColor={data && data.owed > 0 ? colors.positive : undefined}
+            left={<IconTile icon="users" />}
             value={data ? String(data.counts.members) : undefined}
             chevron
             onPress={() => router.push('/members')}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="Categories"
             subtitle="Expense and income categories"
-            left={<IconTile icon="tag" color="#F97316" />}
+            left={<IconTile icon="shapes" />}
             value={data ? String(data.counts.categories) : undefined}
             chevron
             onPress={() => router.push('/categories')}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="Monthly recap"
             subtitle="Last month at a glance"
-            left={<IconTile icon="sparkles" color="#A855F7" />}
+            left={<IconTile icon="sparkles" />}
             chevron
             onPress={() => router.push('/recap')}
           />
@@ -369,7 +373,7 @@ export default function SettingsScreen() {
                   : 'Needs a screen lock on your phone'
                 : undefined
             }
-            left={<IconTile icon="lock" color={colors.brand} />}
+            left={<IconTile icon="lock" />}
             right={<Switch value={!!prefs?.appLockEnabled} onValueChange={(v) => void toggleLock(v)} disabled={!data} />}
           />
           {prefs?.appLockEnabled ? (
@@ -402,21 +406,21 @@ export default function SettingsScreen() {
           <ListRow
             title="Budget alerts"
             subtitle="At 80% and 100% of a budget"
-            left={<IconTile icon="target" color={colors.positive} />}
+            left={<IconTile icon="target" />}
             right={<Switch value={!!prefs?.budgetAlertsEnabled && notificationsOn} onValueChange={(v) => void toggleAlert('budgetAlertsEnabled', v)} disabled={!data} />}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="Bill reminders"
             subtitle="The day before a recurring payment"
-            left={<IconTile icon="repeat" color="#0EA5E9" />}
+            left={<IconTile icon="repeat" />}
             right={<Switch value={!!prefs?.billRemindersEnabled && notificationsOn} onValueChange={(v) => void toggleAlert('billRemindersEnabled', v)} disabled={!data} />}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title="Monthly recap"
             subtitle="On the 1st of every month"
-            left={<IconTile icon="sparkles" color="#A855F7" />}
+            left={<IconTile icon="sparkles" />}
             right={<Switch value={!!prefs?.recapEnabled && notificationsOn} onValueChange={(v) => void toggleAlert('recapEnabled', v)} disabled={!data} />}
           />
         </Card>
@@ -432,38 +436,31 @@ export default function SettingsScreen() {
                 ? `Last backup ${timeAgo(prefs.lastBackupAt)}`
                 : 'Save a backup file to Drive, Files or email'
             }
-            left={<IconTile icon="upload" color={colors.brand} />}
+            left={<IconTile icon="cloudUpload" />}
             chevron
             disabled={busy !== null}
             onPress={() => void backup()}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title={busy === 'restore' ? 'Opening…' : 'Restore from backup'}
             subtitle="Replace this phone's data with a backup file"
-            left={<IconTile icon="download" color={colors.info} />}
+            left={<IconTile icon="download" />}
             chevron
             disabled={busy !== null}
             onPress={() => void pickRestore()}
           />
-          <Divider inset={72} />
+          <Divider />
           <ListRow
             title={busy === 'csv' ? 'Preparing export…' : 'Export as CSV'}
             subtitle="Open in Sheets or Excel"
-            left={<IconTile icon="share" color="#14B8A6" />}
+            left={<IconTile icon="fileSpreadsheet" />}
             chevron
             disabled={busy !== null}
             onPress={() => void exportCsv()}
           />
-          <Divider inset={72} />
-          <ListRow
-            title="Delete all transactions"
-            subtitle="Erase transactions, budgets and history"
-            left={<IconTile icon="trash" color={colors.negative} />}
-            destructive
-            onPress={confirmClear}
-          />
         </Card>
+        <Button title="Delete all transactions" icon="trash" variant="dangerSoft" fullWidth onPress={confirmClear} style={{ marginTop: space.sm }} />
 
         {Platform.OS === 'android' ? (
           <>
@@ -490,20 +487,20 @@ export default function SettingsScreen() {
               <ListRow
                 title="Load sample data"
                 subtitle="Adds clearly marked sample expenses"
-                left={<IconTile icon="database" color="#A855F7" />}
+                left={<IconTile icon="database" />}
                 onPress={loadSamples}
               />
-              <Divider inset={72} />
+              <Divider />
               <ListRow
                 title="Test the UPI parser"
-                subtitle="Parse a sample Google Pay notification"
-                left={<IconTile icon="flask" color="#A855F7" />}
+                subtitle="Parse a sample bank SMS"
+                left={<IconTile icon="flask" />}
                 onPress={simulate}
               />
-              <Divider inset={72} />
-              <ListRow title="Capture statistics" left={<IconTile icon="chart" color="#A855F7" />} onPress={showStats} />
-              <Divider inset={72} />
-              <ListRow title="Show onboarding again" left={<IconTile icon="sparkles" color="#A855F7" />} onPress={() => void replayOnboarding()} />
+              <Divider />
+              <ListRow title="Capture statistics" left={<IconTile icon="chart" />} onPress={showStats} />
+              <Divider />
+              <ListRow title="Show onboarding again" left={<IconTile icon="sparkles" />} onPress={() => void replayOnboarding()} />
             </Card>
           </>
         ) : null}
@@ -556,9 +553,8 @@ const useStyles = makeStyles((colors) => ({
     paddingBottom: space.xxxl,
   },
   groupLabel: {
-    marginTop: space.xl,
-    marginBottom: space.xs,
-    marginLeft: space.xxs,
+    marginTop: space.xxl,
+    marginBottom: space.sm,
   },
   group: {
     overflow: 'hidden',

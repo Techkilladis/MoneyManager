@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 // Import the native module. Expo modules (expo.modules.kotlin) are exposed
@@ -14,27 +14,11 @@ const isModuleAvailable = !!MoneyManagerNotificationDetection;
 // Type Definitions
 // ============================================
 
-export interface NormalizedNotification {
-  notificationId: string;
-  packageName: string;
-  title?: string;
-  text?: string;
-  bigText?: string;
-  subText?: string;
-  postTime: number;
-  when?: number;
-}
-
-export interface ParsedUpiTransaction {
+export interface ParsedSms {
   amountPaise: number;
-  merchant?: string;
-  sourceApp: string;
-  transactionTimestamp: number;
-  transactionReference?: string;
-  parserName: string;
-  parserVersion?: string;
-  confidence: number;
-  direction?: 'DEBIT' | 'CREDIT';
+  merchant?: string | null;
+  transactionReference?: string | null;
+  direction: 'DEBIT' | 'CREDIT';
 }
 
 export interface PendingUpiEvent {
@@ -56,16 +40,33 @@ export interface PendingUpiEvent {
 }
 
 export interface CaptureHealth {
+  /** READ_SMS + RECEIVE_SMS are both granted. */
   accessEnabled: boolean;
-  listenerConnected: boolean;
-  lastConnectedAt: number | null;
-  lastDisconnectedAt: number | null;
-  lastUpiNotificationAt: number | null;
+  lastUpiMessageAt: number | null;
   lastCaptureAt: number | null;
-  ignoringBatteryOptimizations: boolean;
   manufacturer: string;
   sdkInt: number;
   widgetCount: number;
+  /** "Display over other apps" is allowed, so a new payment opens the review screen by itself. */
+  popupEnabled?: boolean;
+  /** A heads-up notification is posted for each new payment. */
+  notificationsEnabled?: boolean;
+  /** Last time the live SMS receiver ran (any SMS). */
+  lastReceiverAt?: number | null;
+  /** Last time an inbox scan found a payment the live receiver never saw. */
+  lastMissedAt?: number | null;
+  /** Left out of battery optimisation. */
+  batteryUnrestricted?: boolean;
+  /** The phone has an OEM Autostart switch (Xiaomi, Oppo, Vivo, Huawei...). */
+  hasAutostartSetting?: boolean;
+  isXiaomi?: boolean;
+  /** Xiaomi "Display pop-up windows while running in the background"; null when unreadable. */
+  backgroundPopupAllowed?: boolean | null;
+}
+
+export interface SmsScanResult {
+  scanned: number;
+  captured: number;
 }
 
 export interface WidgetSnapshot {
@@ -73,10 +74,6 @@ export interface WidgetSnapshot {
   month: string;
   dayKey: string;
   monthKey: string;
-}
-
-export interface NotificationAccessStatus {
-  enabled: boolean;
 }
 
 export interface ParsingStats {
@@ -92,18 +89,21 @@ export interface ParsingStats {
 
 interface NativeModuleInterface {
   initialize(): Promise<{ success: boolean }>;
-  isNotificationAccessEnabled(): Promise<NotificationAccessStatus>;
-  openNotificationAccessSettings(): Promise<void>;
+  isSmsAccessEnabled(): Promise<{ enabled: boolean }>;
+  scanSmsInbox(firstScanDays: number): Promise<SmsScanResult>;
   getPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
   getAllPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
+  getPendingUpiEvent(id: string): Promise<{ event: PendingUpiEvent | null }>;
   consumePendingUpiEvent(id: string): Promise<void>;
   dismissPendingUpiEvent(id: string): Promise<void>;
   getParsingStats(): Promise<ParsingStats>;
-  simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null>;
+  simulateSms(sender: string, body: string): Promise<ParsedSms | null>;
   getCaptureHealth(): Promise<CaptureHealth>;
-  requestIgnoreBatteryOptimizations(): Promise<void>;
   openAppDetailsSettings(): Promise<void>;
-  requestListenerRebind(): Promise<boolean>;
+  openPopupSettings(): Promise<void>;
+  openAutostartSettings(): Promise<void>;
+  requestBatteryUnrestricted(): Promise<void>;
+  openBackgroundPopupSettings(): Promise<void>;
   updateWidget(data: WidgetSnapshot): Promise<void>;
 }
 
@@ -141,23 +141,43 @@ class NotificationDetectionService {
     }
   }
 
-  async isNotificationAccessEnabled(): Promise<boolean> {
+  async isSmsAccessEnabled(): Promise<boolean> {
     if (!this.nativeModule) return false;
     try {
-      const result = await this.nativeModule.isNotificationAccessEnabled();
+      const result = await this.nativeModule.isSmsAccessEnabled();
       return result.enabled;
     } catch (error) {
-      console.error('NotificationDetectionService: Failed to check access', error);
+      console.error('NotificationDetectionService: Failed to check SMS access', error);
       return false;
     }
   }
 
-  async openNotificationAccessSettings(): Promise<void> {
-    if (!this.nativeModule) return;
+  /** Shows the system SMS permission prompt. Resolves true when both permissions are granted. */
+  async requestSmsAccess(): Promise<boolean> {
+    if (Platform.OS !== 'android') return false;
     try {
-      await this.nativeModule.openNotificationAccessSettings();
+      const result = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.READ_SMS,
+        PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+      ]);
+      return Object.values(result).every((r) => r === PermissionsAndroid.RESULTS.GRANTED);
     } catch (error) {
-      console.error('NotificationDetectionService: Failed to open settings', error);
+      console.error('NotificationDetectionService: SMS permission request failed', error);
+      return false;
+    }
+  }
+
+  /**
+   * Reads recent bank SMS and stores any UPI payments found as pending events.
+   * The first scan looks back `firstScanDays`; later scans continue from the last one.
+   */
+  async scanSmsInbox(firstScanDays = 7): Promise<SmsScanResult> {
+    if (!this.nativeModule) return { scanned: 0, captured: 0 };
+    try {
+      return await this.nativeModule.scanSmsInbox(firstScanDays);
+    } catch (error) {
+      console.error('NotificationDetectionService: SMS scan failed', error);
+      return { scanned: 0, captured: 0 };
     }
   }
 
@@ -180,6 +200,18 @@ class NotificationDetectionService {
     } catch (error) {
       console.error('NotificationDetectionService: Failed to get all events', error);
       return [];
+    }
+  }
+
+  /** One native event by id, whatever its status; null when unknown. */
+  async getPendingUpiEvent(id: string): Promise<PendingUpiEvent | null> {
+    if (!this.nativeModule?.getPendingUpiEvent) return null;
+    try {
+      const result = await this.nativeModule.getPendingUpiEvent(id);
+      return result.event;
+    } catch (error) {
+      console.error('NotificationDetectionService: Failed to get event', error);
+      return null;
     }
   }
 
@@ -217,7 +249,7 @@ class NotificationDetectionService {
     return this.nativeModule !== null;
   }
 
-  /** Listener/battery state used to warn when auto-capture has silently stopped. */
+  /** SMS permission and last-capture state, used to show whether auto-capture is working. */
   async getCaptureHealth(): Promise<CaptureHealth | null> {
     if (!this.nativeModule?.getCaptureHealth) return null;
     try {
@@ -228,27 +260,39 @@ class NotificationDetectionService {
     }
   }
 
-  async requestIgnoreBatteryOptimizations(): Promise<void> {
-    await this.nativeModule?.requestIgnoreBatteryOptimizations?.().catch(() => undefined);
-  }
-
   async openAppDetailsSettings(): Promise<void> {
     await this.nativeModule?.openAppDetailsSettings?.().catch(() => undefined);
   }
 
-  async requestListenerRebind(): Promise<boolean> {
-    if (!this.nativeModule?.requestListenerRebind) return false;
-    return this.nativeModule.requestListenerRebind().catch(() => false);
+  /** System screen for "Display over other apps". */
+  async openPopupSettings(): Promise<void> {
+    await this.nativeModule?.openPopupSettings?.().catch(() => undefined);
+  }
+
+  /** OEM Autostart list, so a bank SMS can wake the app after it is swiped away. */
+  async openAutostartSettings(): Promise<void> {
+    await this.nativeModule?.openAutostartSettings?.().catch(() => undefined);
+  }
+
+  /** System prompt to stop battery optimisation for the app. */
+  async requestBatteryUnrestricted(): Promise<void> {
+    await this.nativeModule?.requestBatteryUnrestricted?.().catch(() => undefined);
+  }
+
+  /** Xiaomi "Other permissions" page (background pop-ups). */
+  async openBackgroundPopupSettings(): Promise<void> {
+    await this.nativeModule?.openBackgroundPopupSettings?.().catch(() => undefined);
   }
 
   async updateWidget(data: WidgetSnapshot): Promise<void> {
     await this.nativeModule?.updateWidget?.(data).catch(() => undefined);
   }
 
-  async simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null> {
+  /** Parses a sample SMS without storing it. */
+  async simulateSms(sender: string, body: string): Promise<ParsedSms | null> {
     if (!this.nativeModule) return null;
     try {
-      return await this.nativeModule.simulateUpiNotification(notification);
+      return await this.nativeModule.simulateSms(sender, body);
     } catch (error) {
       console.error('NotificationDetectionService: Simulation failed', error);
       return null;

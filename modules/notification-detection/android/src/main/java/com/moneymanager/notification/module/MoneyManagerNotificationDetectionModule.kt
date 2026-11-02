@@ -1,22 +1,21 @@
 package com.moneymanager.notification.module
 
 import android.content.Context
-import com.moneymanager.notification.access.NotificationAccessManager
+import com.moneymanager.notification.health.BackgroundAccess
 import com.moneymanager.notification.health.CaptureHealth
 import com.moneymanager.notification.widget.SpendWidgetProvider
-import com.moneymanager.notification.normalizer.NormalizedNotification
-import com.moneymanager.notification.parsers.ParsedUpiTransaction
-import com.moneymanager.notification.parsers.ParserRegistry
+import com.moneymanager.notification.sms.CapturePopup
+import com.moneymanager.notification.sms.SmsInbox
+import com.moneymanager.notification.sms.SmsUpiParser
 import com.moneymanager.notification.store.PendingEventStore
 import com.moneymanager.notification.store.PendingUpiEvent
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import java.util.UUID
 
 /**
  * Expo Module for Money Manager Notification Detection.
- * Bridges the native notification listener to React Native.
+ * Bridges SMS-based UPI capture (live receiver + inbox scan) to React Native.
  */
 class MoneyManagerNotificationDetectionModule : Module() {
 
@@ -31,31 +30,28 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 // Initialize native components
-                NotificationAccessManager.getInstance(ctx)
                 PendingEventStore.getInstance(ctx)
-                ParserRegistry.getInstance(ctx)
                 promise.resolve(mapOf("success" to true))
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        // Notification Access
-        AsyncFunction("isNotificationAccessEnabled") { promise: Promise ->
+        // SMS access (runtime permission is requested from JS)
+        AsyncFunction("isSmsAccessEnabled") { promise: Promise ->
             val ctx = context
             if (ctx != null) {
-                val enabled = NotificationAccessManager.isNotificationAccessEnabled(ctx)
-                promise.resolve(mapOf("enabled" to enabled))
+                promise.resolve(mapOf("enabled" to SmsInbox.hasPermission(ctx)))
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
         }
 
-        AsyncFunction("openNotificationAccessSettings") { promise: Promise ->
+        // Reads recent bank SMS from the inbox and stores any UPI payments found.
+        AsyncFunction("scanSmsInbox") { firstScanDays: Int, promise: Promise ->
             val ctx = context
             if (ctx != null) {
-                NotificationAccessManager.openNotificationAccessSettings(ctx)
-                promise.resolve(null)
+                promise.resolve(SmsInbox.scan(ctx, firstScanDays))
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
@@ -68,6 +64,17 @@ class MoneyManagerNotificationDetectionModule : Module() {
                 val store = PendingEventStore.getInstance(ctx)
                 val events = store.getPendingEvents("PENDING")
                 promise.resolve(mapOf("events" to events.map { eventToMap(it) }))
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        // One event by id, whatever its status (the pop-up's review screen).
+        AsyncFunction("getPendingUpiEvent") { id: String, promise: Promise ->
+            val ctx = context
+            if (ctx != null) {
+                val event = PendingEventStore.getInstance(ctx).getEventById(id)
+                promise.resolve(mapOf("event" to event?.let { eventToMap(it) }))
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
@@ -88,6 +95,7 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 PendingEventStore.getInstance(ctx).consumeEvent(id)
+                CapturePopup.cancel(ctx, id)
                 SpendWidgetProvider.refreshAll(ctx)
                 promise.resolve(null)
             } else {
@@ -99,6 +107,7 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 PendingEventStore.getInstance(ctx).dismissEvent(id)
+                CapturePopup.cancel(ctx, id)
                 SpendWidgetProvider.refreshAll(ctx)
                 promise.resolve(null)
             } else {
@@ -111,19 +120,15 @@ class MoneyManagerNotificationDetectionModule : Module() {
             val ctx = context
             if (ctx != null) {
                 val health = CaptureHealth.snapshot(ctx).toMutableMap()
-                health["accessEnabled"] = NotificationAccessManager.isNotificationAccessEnabled(ctx)
+                health["accessEnabled"] = SmsInbox.hasPermission(ctx)
                 health["widgetCount"] = SpendWidgetProvider.installedCount(ctx)
+                health["popupEnabled"] = CapturePopup.canOpenDirectly(ctx)
+                health["notificationsEnabled"] = CapturePopup.canNotify(ctx)
+                health["batteryUnrestricted"] = BackgroundAccess.isBatteryUnrestricted(ctx)
+                health["hasAutostartSetting"] = BackgroundAccess.hasAutostartSetting(ctx)
+                health["isXiaomi"] = BackgroundAccess.isXiaomi()
+                health["backgroundPopupAllowed"] = BackgroundAccess.isBackgroundPopupAllowed(ctx)
                 promise.resolve(health)
-            } else {
-                promise.reject("ERR_CONTEXT", "Context not available", null)
-            }
-        }
-
-        AsyncFunction("requestIgnoreBatteryOptimizations") { promise: Promise ->
-            val ctx = appContext.currentActivity ?: context
-            if (ctx != null) {
-                CaptureHealth.requestIgnoreBatteryOptimizations(ctx)
-                promise.resolve(null)
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
@@ -139,10 +144,43 @@ class MoneyManagerNotificationDetectionModule : Module() {
             }
         }
 
-        AsyncFunction("requestListenerRebind") { promise: Promise ->
-            val ctx = context
+        // "Display over other apps", so a new payment can open the review screen by itself.
+        AsyncFunction("openPopupSettings") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
             if (ctx != null) {
-                promise.resolve(CaptureHealth.requestRebind(ctx))
+                CapturePopup.openOverlaySettings(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        // Keeping capture alive after the app is swiped away from Recents.
+        AsyncFunction("openAutostartSettings") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
+            if (ctx != null) {
+                BackgroundAccess.openAutostartSettings(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        AsyncFunction("requestBatteryUnrestricted") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
+            if (ctx != null) {
+                BackgroundAccess.requestBatteryUnrestricted(ctx)
+                promise.resolve(null)
+            } else {
+                promise.reject("ERR_CONTEXT", "Context not available", null)
+            }
+        }
+
+        AsyncFunction("openBackgroundPopupSettings") { promise: Promise ->
+            val ctx = appContext.currentActivity ?: context
+            if (ctx != null) {
+                BackgroundAccess.openBackgroundPopupSettings(ctx)
+                promise.resolve(null)
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
@@ -176,17 +214,19 @@ class MoneyManagerNotificationDetectionModule : Module() {
             }
         }
 
-        // Development only - simulate notification for testing
-        AsyncFunction("simulateUpiNotification") { notificationMap: Map<String, Any?>, promise: Promise ->
-            val ctx = context
-            if (ctx != null) {
-                val normalized = mapToNormalizedNotification(notificationMap)
-                val registry = ParserRegistry.getInstance(ctx)
-                val parsed = registry.tryParse(normalized)
-                promise.resolve(parsed?.let { parsedTransactionToMap(it) })
-            } else {
-                promise.reject("ERR_CONTEXT", "Context not available", null)
-            }
+        // Parses a sample SMS without storing it (diagnostics / tests).
+        AsyncFunction("simulateSms") { sender: String, body: String, promise: Promise ->
+            val parsed = SmsUpiParser.parse(sender, body)
+            promise.resolve(
+                parsed?.let {
+                    mapOf(
+                        "amountPaise" to it.amountPaise,
+                        "merchant" to it.counterparty,
+                        "transactionReference" to it.reference,
+                        "direction" to it.direction.name
+                    )
+                }
+            )
         }
     }
 
@@ -206,34 +246,6 @@ class MoneyManagerNotificationDetectionModule : Module() {
             "createdAt" to event.createdAt,
             "dedupeKey" to event.dedupeKey,
             "direction" to event.direction
-        )
-    }
-
-    private fun parsedTransactionToMap(parsed: ParsedUpiTransaction): Map<String, Any?> {
-        return mapOf(
-            "amountPaise" to parsed.amountPaise,
-            "merchant" to parsed.merchant,
-            "sourceApp" to parsed.sourceApp,
-            "transactionTimestamp" to parsed.transactionTimestamp,
-            "transactionReference" to parsed.transactionReference,
-            "parserName" to parsed.parserName,
-            "parserVersion" to parsed.parserVersion,
-            "confidence" to parsed.confidence,
-            "direction" to parsed.direction
-        )
-    }
-
-    private fun mapToNormalizedNotification(map: Map<String, Any?>): NormalizedNotification {
-        return NormalizedNotification(
-            notificationId = map["notificationId"] as? String ?: UUID.randomUUID().toString(),
-            packageName = map["packageName"] as? String ?: "",
-            title = map["title"] as? String,
-            text = map["text"] as? String,
-            bigText = map["bigText"] as? String,
-            subText = map["subText"] as? String,
-            postTime = (map["postTime"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-            whenTime = (map["when"] as? Number)?.toLong(),
-            extras = null
         )
     }
 }

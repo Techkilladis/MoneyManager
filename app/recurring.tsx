@@ -19,13 +19,14 @@ import { haptic } from '@/utils/haptics';
 import { DateTimeSheet } from '@/components/DateTimeSheet';
 import { CategoryGrid } from '@/components/Pickers';
 import {
+  BottomBar,
   Button,
   Card,
   CategoryAvatar,
   Divider,
   EmptyState,
   Icon,
-  IconButton,
+  KeyFigure,
   LoadingView,
   ScreenHeader,
   SectionTitle,
@@ -193,45 +194,41 @@ export default function RecurringScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Recurring" back right={<IconButton icon="plus" accessibilityLabel="Add recurring payment" onPress={openNew} />} />
+      <ScreenHeader title="Recurring" subtitle="Rent, subscriptions and bills" back />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {data.items.length > 0 ? (
-          <Card style={styles.summary}>
-            <Text variant="overline">Every month</Text>
-            <Text variant="title" numeric style={{ marginTop: 2 }}>
-              {formatINR(monthly, { decimals: 'never' })}
+          <KeyFigure label="Every month" value={formatINR(monthly, { decimals: 'never' })} style={styles.figure}>
+            <Text variant="caption" style={{ marginTop: space.xxs }}>
+              {pluralize(data.items.length, 'payment')}
+              {dueSoon.length > 0 ? ` · ${dueSoon.length} due this week` : ' · reminders the day before'}
             </Text>
-            <Text variant="label">
-              {pluralize(data.items.length, 'recurring payment')}
-              {dueSoon.length > 0 ? ` · ${dueSoon.length} due this week` : ''}
-            </Text>
-          </Card>
+          </KeyFigure>
         ) : null}
 
         {data.candidates.length > 0 ? (
           <View style={styles.block}>
             <SectionTitle title="Looks recurring" />
-            <Card padded={false} style={{ overflow: 'hidden' }}>
+            <Card padded={false} style={styles.suggestions}>
               {data.candidates.map((c, i) => {
                 const cat = categoryFor(c.categoryId);
                 return (
                   <View key={c.merchantKey}>
-                    {i > 0 ? <Divider inset={space.md} /> : null}
+                    {i > 0 ? <Divider /> : null}
                     <View style={styles.candidate}>
                       <View style={styles.rowTop}>
-                        {cat ? <CategoryAvatar icon={cat.icon} color={cat.color} size={40} /> : <UncategorizedAvatar size={40} />}
+                        {cat ? <CategoryAvatar icon={cat.icon} color={cat.color} /> : <UncategorizedAvatar />}
                         <View style={{ flex: 1 }}>
-                          <Text variant="bodyStrong" numberOfLines={1}>
+                          <Text variant="body" numberOfLines={1}>
                             {c.name}
                           </Text>
-                          <Text variant="caption">
-                            {formatINR(c.amountPaise)} · {CADENCE_LABEL[c.cadence].toLowerCase()} · paid {c.occurrences} times
+                          <Text variant="caption" numeric>
+                            {formatINR(c.amountPaise, { decimals: 'never' })} · {CADENCE_LABEL[c.cadence].toLowerCase()} · paid {c.occurrences} times
                           </Text>
                         </View>
                       </View>
                       <View style={styles.candidateActions}>
-                        <Button title="Not recurring" variant="ghost" size="sm" onPress={() => void ignore(c)} />
                         <Button title="Track it" icon="plus" size="sm" onPress={() => void accept(c)} />
+                        <Button title="Not recurring" variant="secondary" size="sm" onPress={() => void ignore(c)} />
                       </View>
                     </View>
                   </View>
@@ -242,27 +239,22 @@ export default function RecurringScreen() {
         ) : null}
 
         {data.items.length === 0 && data.candidates.length === 0 ? (
-          <Card style={styles.block}>
-            <EmptyState
-              compact
-              icon="repeat"
-              title="No recurring payments yet"
-              message="Track rent, subscriptions and recharges to see what's due and get a reminder the day before."
-              actionLabel="Add recurring payment"
-              onAction={openNew}
-            />
-          </Card>
+          <EmptyState
+            icon="repeat"
+            title="No recurring payments yet"
+            message="Track rent, subscriptions and recharges to see what's due and get a reminder the day before."
+          />
         ) : null}
 
         {data.items.length > 0 ? (
           <View style={styles.block}>
             <SectionTitle title="Upcoming" />
-            <Card padded={false} style={{ overflow: 'hidden' }}>
+            <Card padded={false}>
               {data.items.map((r, i) => {
                 const soon = !r.paidThisPeriod && r.daysUntilDue <= 3;
                 return (
                   <View key={r.id}>
-                    {i > 0 ? <Divider inset={72} /> : null}
+                    {i > 0 ? <Divider /> : null}
                     <Pressable
                       onPress={() => openEdit(r)}
                       style={({ pressed }) => [styles.item, pressed && { backgroundColor: colors.surfaceMuted }]}
@@ -270,16 +262,19 @@ export default function RecurringScreen() {
                     >
                       {r.category ? <CategoryAvatar icon={r.category.icon} color={r.category.color} /> : <UncategorizedAvatar />}
                       <View style={{ flex: 1 }}>
-                        <Text variant="bodyStrong" numberOfLines={1}>
+                        <Text variant="body" numberOfLines={1}>
                           {r.name}
                         </Text>
-                        <Text variant="caption" color={soon ? colors.warning : r.paidThisPeriod ? colors.positive : undefined}>
+                        <Text
+                          variant={soon || r.paidThisPeriod ? 'labelStrong' : 'caption'}
+                          color={soon ? colors.warning : r.paidThisPeriod ? colors.positive : undefined}
+                        >
                           {dueLabel(r)}
                         </Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text variant="bodyStrong" numeric>
-                          {formatINR(r.amountPaise)}
+                        <Text variant="bodyStrong" numeric color={r.paidThisPeriod ? colors.textTertiary : colors.text}>
+                          {formatINR(r.amountPaise, { decimals: 'never' })}
                         </Text>
                         <Text variant="caption">{CADENCE_LABEL[r.cadence]}</Text>
                       </View>
@@ -288,12 +283,16 @@ export default function RecurringScreen() {
                 );
               })}
             </Card>
-            <Text variant="caption" align="center" style={{ marginTop: space.sm }}>
+            <Text variant="caption" style={{ marginTop: space.sm }}>
               Paying one moves it to the next due date automatically.
             </Text>
           </View>
         ) : null}
       </ScrollView>
+
+      <BottomBar>
+        <Button title="Add recurring payment" icon="plus" size="lg" fullWidth onPress={openNew} />
+      </BottomBar>
 
       <Sheet
         visible={draft !== null}
@@ -325,11 +324,11 @@ export default function RecurringScreen() {
               icon="wallet"
               containerStyle={{ marginTop: space.md }}
             />
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+            <Text variant="label" style={styles.label}>
               Repeats
             </Text>
             <SegmentedControl options={CADENCES} value={draft.cadence} onChange={(cadence) => setDraft({ ...draft, cadence })} />
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+            <Text variant="label" style={styles.label}>
               Next due
             </Text>
             <Pressable
@@ -352,7 +351,7 @@ export default function RecurringScreen() {
               </View>
               <Switch value={draft.remind} onValueChange={(remind) => setDraft({ ...draft, remind })} />
             </View>
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+            <Text variant="label" style={styles.label}>
               Category
             </Text>
             <CategoryGrid categories={data.categories} value={draft.categoryId} onChange={(categoryId) => setDraft({ ...draft, categoryId })} />
@@ -380,14 +379,18 @@ const useStyles = makeStyles((colors) => ({
   },
   content: {
     paddingHorizontal: space.lg,
-    paddingTop: space.sm,
     paddingBottom: space.xxxl,
   },
-  summary: {
-    gap: 2,
+  figure: {
+    paddingTop: space.xl,
   },
   block: {
-    marginTop: space.xl,
+    marginTop: space.xxl,
+  },
+  // Suggestions sit on a moss wash: they're proposals, not records.
+  suggestions: {
+    borderColor: colors.brandSoftBorder,
+    backgroundColor: colors.brandSoft,
   },
   candidate: {
     padding: space.md,
@@ -400,13 +403,14 @@ const useStyles = makeStyles((colors) => ({
   },
   candidateActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: space.xs,
+    marginLeft: 52,
   },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+    minHeight: 64,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
@@ -418,10 +422,10 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    height: 52,
+    height: 56,
     paddingHorizontal: space.md,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },

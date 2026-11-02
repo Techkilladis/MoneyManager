@@ -87,7 +87,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, scr
                   </Text>
                 ) : null}
               </View>
-              <IconButton icon="x" size={36} background={colors.surfaceMuted} onPress={onClose} accessibilityLabel="Close" />
+              <IconButton icon="x" size={44} background={colors.surfaceMuted} onPress={onClose} accessibilityLabel="Close" />
             </View>
           ) : null}
           {body}
@@ -117,17 +117,17 @@ const useStyles = makeStyles((colors) => ({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.borderStrong,
+    backgroundColor: colors.surfaceMuted,
     marginTop: space.xs,
     marginBottom: space.xs,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: space.sm,
     paddingHorizontal: space.lg,
     paddingTop: space.xs,
-    paddingBottom: space.sm,
+    paddingBottom: space.md,
   },
   scroll: {
     flexGrow: 0,

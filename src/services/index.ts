@@ -1,13 +1,13 @@
 // Services - Business logic layer connecting repositories to UI
 
-import { transactionRepository } from '../database/repositories/transactionRepository';
+import { CreateTransactionInput, transactionRepository } from '../database/repositories/transactionRepository';
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
 import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
-import { notificationDetectionService } from './notificationDetection';
+import { notificationDetectionService, PendingUpiEvent } from './notificationDetection';
 import { openDatabase } from '../database/db';
 import { getClassificationSuggestion, recordClassification, recordCorrection, ClassificationSuggestion, getMerchantMemoryStats, shouldPrefill, getPrefillMode } from './classification';
 import { normalizeMerchantFull } from './merchantNormalization';
@@ -19,12 +19,39 @@ import * as recurringService from './recurring';
 import * as alertsService from './alerts';
 import * as recapService from './recap';
 import * as backupService from './backup';
-import { TransactionKind } from '../database/schema';
+import { Transaction, TransactionKind } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
 export interface TransactionSnapshot {
   row: Record<string, string | number | null>;
   splits: Record<string, string | number | null>[];
+}
+
+/** A native SMS capture as a pending app transaction; the native event id is the idempotency key. */
+function captureInput(event: PendingUpiEvent): CreateTransactionInput {
+  return {
+    amountPaise: Number(event.amountPaise),
+    merchant: event.merchant || 'Unknown Merchant',
+    transactionTimestamp: event.transactionTimestamp,
+    categoryId: null,
+    memberId: null,
+    note: null,
+    status: 'PENDING',
+    sourceApp: event.sourceApp,
+    notificationId: null,
+    sourceEventId: event.id,
+    sourceType: 'UPI_NOTIFICATION',
+    // Money received (CREDIT) is captured as income.
+    kind: event.direction === 'CREDIT' ? 'INCOME' : 'EXPENSE',
+    is_pending_capture: 1,
+    is_dismissed: 0,
+    dismissed_at: null,
+    parserMetadata: JSON.stringify({
+      parserName: event.parserName,
+      parserVersion: event.parserVersion,
+      confidence: event.confidence,
+    }),
+  };
 }
 
 function afterSpendingChange() {
@@ -64,37 +91,20 @@ export const transactionService = {
   async syncPendingNativeEvents(): Promise<number> {
     try {
       await notificationDetectionService.initialize();
+      // Pick up bank SMS that arrived while the app wasn't running; the live
+      // receiver handles the rest. No-op until SMS permission is granted.
+      await notificationDetectionService.scanSmsInbox();
       const events = await notificationDetectionService.getPendingUpiEvents();
 
       let created = 0;
       for (const event of events) {
-        const result = await transactionRepository.createWithIdempotency({
-          amountPaise: Number(event.amountPaise),
-          merchant: event.merchant || 'Unknown Merchant',
-          transactionTimestamp: event.transactionTimestamp,
-          categoryId: null,
-          memberId: null,
-          note: null,
-          status: 'PENDING' as const,
-          sourceApp: event.sourceApp,
-          // The Android notification id (sbn.id) is not unique across
-          // payments, so it must not participate in deduplication; the
-          // native event id (sourceEventId) is the idempotency key.
-          notificationId: null,
-          sourceEventId: event.id,
-          sourceType: 'UPI_NOTIFICATION' as const,
-          // Money received (CREDIT) is captured as income.
-          kind: event.direction === 'CREDIT' ? ('INCOME' as const) : ('EXPENSE' as const),
-          is_pending_capture: 1,
-          is_dismissed: 0,
-          dismissed_at: null,
-          parserMetadata: JSON.stringify({
-            parserName: event.parserName,
-            parserVersion: event.parserVersion,
-            confidence: event.confidence,
-          }),
-        });
-        if (result.isNew) created++;
+        // One bad or racing event must not hold back the ones after it.
+        try {
+          const result = await transactionRepository.createWithIdempotency(captureInput(event));
+          if (result.isNew) created++;
+        } catch (error) {
+          console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+        }
       }
 
       if (events.length > 0) {
@@ -204,6 +214,24 @@ export const transactionService = {
       kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
       sharedPaise: tx.sharedPaise ?? 0,
     };
+  },
+
+  // The capture pop-up's review screen: the app transaction for one native
+  // event, created on the spot when the app hasn't synced it yet. Null when
+  // the event is unknown or was already settled before it reached the app.
+  async ensureCaptureForEvent(sourceEventId: string): Promise<Transaction | null> {
+    const existing = await transactionRepository.getBySourceEventId(sourceEventId);
+    if (existing) return existing;
+    await notificationDetectionService.initialize();
+    const event = await notificationDetectionService.getPendingUpiEvent(sourceEventId);
+    if (!event || event.status !== 'PENDING') return null;
+    try {
+      return (await transactionRepository.createWithIdempotency(captureInput(event))).transaction;
+    } catch (error) {
+      // A background sync can insert the same event first (unique sourceEventId).
+      console.warn('[Capture] Create raced with sync:', error);
+      return transactionRepository.getBySourceEventId(sourceEventId);
+    }
   },
 
   // Resolve a pending capture by its native event id (deep-link path).
@@ -548,16 +576,12 @@ export const transactionService = {
     }
   },
 
-  // Simulate UPI notification for testing
-  async simulateUpiNotification() {
-    return notificationDetectionService.simulateUpiNotification({
-      notificationId: `test-${Date.now()}`,
-      packageName: 'com.google.android.apps.nbu.paisa.user',
-      title: 'Payment Successful',
-      text: '₹250.00 paid to Test Merchant via Google Pay',
-      bigText: '₹250.00 paid to Test Merchant via Google Pay. Reference: TEST123',
-      postTime: Date.now(),
-    });
+  // Parse a sample bank SMS for testing (nothing is stored).
+  async simulateUpiSms() {
+    return notificationDetectionService.simulateSms(
+      'AX-HDFCBK',
+      'Rs.250.00 debited from a/c **1234 on 12-10-24 to VPA testmerchant@ybl(UPI Ref No 412345678901)'
+    );
   },
 };
 

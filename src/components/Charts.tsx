@@ -72,8 +72,8 @@ export function BarChart({
               <View
                 style={{
                   height: h,
-                  borderRadius: data.length > 20 ? 2 : 6,
-                  backgroundColor: d.value === 0 ? colors.surfaceMuted : d.highlight || isSelected ? color : `${color}99`,
+                  borderRadius: data.length > 20 ? 2 : 4,
+                  backgroundColor: d.value === 0 ? colors.surfaceMuted : d.highlight || isSelected ? color : colors.borderStrong,
                   opacity: dim ? 0.35 : 1,
                 }}
               />
@@ -106,8 +106,8 @@ export interface DonutSlice {
 
 export function Donut({
   slices,
-  size = 168,
-  thickness = 22,
+  size = 160,
+  thickness = 16,
   children,
 }: {
   slices: DonutSlice[];
@@ -158,7 +158,7 @@ export function Donut({
 // ------------------------------------------------------------ Stacked bar
 
 /** Single horizontal bar split by share — compact category overview. */
-export function StackedBar({ slices, height = 10 }: { slices: DonutSlice[]; height?: number }) {
+export function StackedBar({ slices, height = 8 }: { slices: DonutSlice[]; height?: number }) {
   const styles = useStyles();
   const total = slices.reduce((s, x) => s + x.value, 0);
   return (
@@ -202,13 +202,14 @@ const useStyles = makeStyles((colors) => ({
     alignItems: 'center',
   },
   axisLabel: {
-    fontSize: 10,
+    fontSize: 11,
+    lineHeight: 14,
     width: 40,
   },
   stacked: {
     flexDirection: 'row',
     overflow: 'hidden',
-    gap: 2,
+    gap: 3,
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.pill,
   },

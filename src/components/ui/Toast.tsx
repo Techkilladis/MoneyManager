@@ -98,9 +98,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             ]}
           >
             <View style={[styles.badge, { backgroundColor: toneColor }]}>
-              <Icon name={toneIcon[toast.tone]} size={14} color="#FFFFFF" strokeWidth={3} />
+              <Icon name={toneIcon[toast.tone]} size={14} color={colors.textOnBrand} strokeWidth={3} />
             </View>
-            <Text variant="labelStrong" color="#FFFFFF" style={{ flexShrink: 1 }}>
+            <Text variant="labelStrong" color={colors.textOnInk} style={{ flexShrink: 1 }}>
               {toast.message}
             </Text>
             {toast.action ? (
@@ -110,7 +110,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 accessibilityRole="button"
                 style={({ pressed }) => [styles.action, pressed && { opacity: 0.6 }]}
               >
-                <Text variant="labelStrong" color={scheme === 'dark' ? '#B4AEFF' : '#A5A0FF'}>
+                <Text variant="labelStrong" color={scheme === 'dark' ? colors.brandPressed : '#7EDDBB'}>
                   {toast.action.label}
                 </Text>
               </Pressable>
@@ -138,10 +138,8 @@ const useStyles = makeStyles((colors, scheme) => ({
     paddingLeft: space.sm,
     paddingRight: space.lg,
     borderRadius: radius.pill,
-    // Always a dark pill so it reads over any screen.
-    backgroundColor: scheme === 'dark' ? '#2B3050' : colors.text,
-    borderWidth: scheme === 'dark' ? 1 : 0,
-    borderColor: colors.borderStrong,
+    // An ink pill: dark on paper, light on the dark theme.
+    backgroundColor: colors.text,
     ...shadow.raised,
   },
   badge: {
@@ -155,6 +153,6 @@ const useStyles = makeStyles((colors, scheme) => ({
     marginLeft: space.xs,
     paddingLeft: space.sm,
     borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.2)',
+    borderLeftColor: scheme === 'dark' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)',
   },
 }));

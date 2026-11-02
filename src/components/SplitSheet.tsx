@@ -90,7 +90,7 @@ function SplitEditor({ visible, onClose, amountPaise, members, initial, onSave, 
         Total {formatINR(amountPaise)}. Only your share counts towards your spending; the rest is owed to you.
       </Text>
 
-      <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+      <Text variant="label" style={styles.label}>
         Split with
       </Text>
       {people.length === 0 ? (

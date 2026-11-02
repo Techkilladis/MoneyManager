@@ -2,29 +2,6 @@
 // Types
 // ============================================
 
-export interface NormalizedNotification {
-  notificationId: string;
-  packageName: string;
-  title?: string;
-  text?: string;
-  bigText?: string;
-  subText?: string;
-  postTime: number;
-  when?: number;
-}
-
-export interface ParsedUpiTransaction {
-  amountPaise: number;
-  merchant?: string;
-  sourceApp: string;
-  transactionTimestamp: number;
-  transactionReference?: string;
-  parserName: string;
-  parserVersion?: string;
-  confidence: number;
-  direction?: 'DEBIT' | 'CREDIT';
-}
-
 export interface PendingUpiEvent {
   id: string;
   amountPaise: number;
@@ -44,20 +21,9 @@ export interface PendingUpiEvent {
 
 export type TransactionStatus = 'PENDING' | 'CONSUMED' | 'DISMISSED' | 'FAILED';
 
-export interface NotificationAccessStatus {
-  enabled: boolean;
-}
-
-// ============================================
-// Event Types
-// ============================================
-
-export interface PendingUpiEventEvent {
-  event: PendingUpiEvent;
-}
-
-export interface NotificationAccessChangedEvent {
-  enabled: boolean;
+export interface SmsScanResult {
+  scanned: number;
+  captured: number;
 }
 
 // ============================================
@@ -65,16 +31,16 @@ export interface NotificationAccessChangedEvent {
 // ============================================
 
 export interface MoneyManagerNotificationDetectionModuleType {
-  // Initialization
   initialize(): Promise<{ success: boolean }>;
 
-  // Notification Access
-  isNotificationAccessEnabled(): Promise<NotificationAccessStatus>;
-  openNotificationAccessSettings(): Promise<void>;
+  // SMS access (READ_SMS + RECEIVE_SMS; the runtime prompt is requested from JS)
+  isSmsAccessEnabled(): Promise<{ enabled: boolean }>;
+  scanSmsInbox(firstScanDays: number): Promise<SmsScanResult>;
 
   // Pending Events
   getPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
   getAllPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
+  getPendingUpiEvent(id: string): Promise<{ event: PendingUpiEvent | null }>;
   consumePendingUpiEvent(id: string): Promise<void>;
   dismissPendingUpiEvent(id: string): Promise<void>;
 
@@ -85,18 +51,20 @@ export interface MoneyManagerNotificationDetectionModuleType {
     byParser: Record<string, number>;
     byStatus: Record<string, number>;
   }>;
+  simulateSms(
+    sender: string,
+    body: string
+  ): Promise<{ amountPaise: number; merchant: string | null; transactionReference: string | null; direction: 'DEBIT' | 'CREDIT' } | null>;
 
-  // Capture reliability
   getCaptureHealth(): Promise<Record<string, unknown>>;
-  requestIgnoreBatteryOptimizations(): Promise<void>;
   openAppDetailsSettings(): Promise<void>;
-  requestListenerRebind(): Promise<boolean>;
+  openPopupSettings(): Promise<void>;
+  openAutostartSettings(): Promise<void>;
+  requestBatteryUnrestricted(): Promise<void>;
+  openBackgroundPopupSettings(): Promise<void>;
 
   // Home-screen widget
   updateWidget(data: { today: string; month: string; dayKey: string; monthKey: string }): Promise<void>;
-
-  // Development only - simulate notification for testing
-  simulateUpiNotification(notification: NormalizedNotification): Promise<ParsedUpiTransaction | null>;
 }
 
 // ============================================

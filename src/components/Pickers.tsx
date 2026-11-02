@@ -1,12 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { radius, space, tint } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member } from '@/database/schema';
-import { categoryGlyph } from '@/domain/glyphs';
-import { Icon, MemberAvatar, Text } from './ui';
+import { CategoryAvatar, Chip, Icon, MemberAvatar, Text } from './ui';
 
-/** Four-column grid of category tiles. Tapping the selected tile clears it. */
+/** Four-column grid of category badges. Tapping the selected one clears it. */
 export function CategoryGrid({
   categories,
   value,
@@ -26,7 +25,6 @@ export function CategoryGrid({
     <View style={styles.grid}>
       {categories.map((c) => {
         const selected = c.id === value;
-        const accent = c.color ?? colors.brand;
         return (
           <Pressable
             key={c.id}
@@ -34,46 +32,95 @@ export function CategoryGrid({
             accessibilityRole="button"
             accessibilityState={{ selected }}
             accessibilityLabel={c.name}
-            style={styles.tileSlot}
+            style={({ pressed }) => [styles.tileSlot, pressed && { opacity: 0.7 }]}
           >
-            {({ pressed }) => (
-              <View
-                style={[
-                  styles.tile,
-                  { backgroundColor: selected ? tint(accent, 0.18) : pressed ? colors.surfaceMuted : colors.surface },
-                  { borderColor: selected ? accent : colors.border },
-                ]}
-              >
-                <Text style={styles.tileEmoji}>{categoryGlyph(c.icon)}</Text>
-                <Text variant="caption" color={selected ? colors.text : colors.textSecondary} numberOfLines={1} style={styles.tileLabel}>
-                  {c.name}
-                </Text>
-                {suggestedId === c.id && !selected ? (
-                  <View style={[styles.suggestDot, { backgroundColor: accent }]} />
-                ) : null}
-                {selected ? (
-                  <View style={[styles.check, { backgroundColor: accent }]}>
-                    <Icon name="check" size={10} color={colors.textOnBrand} strokeWidth={3.5} />
-                  </View>
-                ) : null}
-              </View>
-            )}
+            <View style={[styles.ring, { borderColor: selected ? colors.brand : 'transparent' }]}>
+              <CategoryAvatar icon={c.icon} color={c.color} size={48} />
+              {selected ? (
+                <View style={styles.check}>
+                  <Icon name="check" size={11} color={colors.textOnBrand} strokeWidth={3.5} />
+                </View>
+              ) : suggestedId === c.id ? (
+                <View style={[styles.check, styles.suggest]}>
+                  <Icon name="sparkles" size={10} color={colors.brand} strokeWidth={2.5} />
+                </View>
+              ) : null}
+            </View>
+            <Text variant="caption" color={selected ? colors.text : colors.textSecondary} numberOfLines={1} style={styles.tileLabel}>
+              {c.name}
+            </Text>
           </Pressable>
         );
       })}
       {onManage ? (
-        <Pressable onPress={onManage} style={styles.tileSlot} accessibilityRole="button" accessibilityLabel="Manage categories">
-          {({ pressed }) => (
-            <View style={[styles.tile, styles.tileDashed, pressed && { backgroundColor: colors.surfaceMuted }]}>
+        <Pressable
+          onPress={onManage}
+          style={({ pressed }) => [styles.tileSlot, pressed && { opacity: 0.7 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Manage categories"
+        >
+          <View style={[styles.ring, { borderColor: 'transparent' }]}>
+            <View style={styles.newBadge}>
               <Icon name="plus" size={20} color={colors.textTertiary} />
-              <Text variant="caption" numberOfLines={1} style={styles.tileLabel}>
-                New
-              </Text>
             </View>
-          )}
+          </View>
+          <Text variant="caption" numberOfLines={1} style={styles.tileLabel}>
+            New
+          </Text>
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * One scrollable row of category chips for forms: the selected and suggested
+ * categories first, then the rest, then "More" (opens the full grid).
+ */
+export function CategoryChips({
+  categories,
+  value,
+  onChange,
+  suggestedId,
+  onMore,
+  limit = 6,
+}: {
+  categories: Category[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+  suggestedId?: string | null;
+  onMore?: () => void;
+  limit?: number;
+}) {
+  const styles = useStyles();
+  const ordered = useMemo(() => {
+    const first = [value, suggestedId].filter((id, i, all): id is string => !!id && all.indexOf(id) === i);
+    const head = first.map((id) => categories.find((c) => c.id === id)).filter((c): c is Category => !!c);
+    const rest = categories.filter((c) => !first.includes(c.id));
+    return [...head, ...rest].slice(0, Math.max(limit, head.length));
+  }, [categories, value, suggestedId, limit]);
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipRow}
+      keyboardShouldPersistTaps="handled"
+      style={styles.bleed}
+    >
+      {ordered.map((c) => (
+        <Chip
+          key={c.id}
+          label={c.name}
+          categoryIcon={c.icon}
+          color={c.color}
+          selected={c.id === value}
+          trailingIcon={c.id === value ? 'check' : undefined}
+          onPress={() => onChange(c.id === value ? null : c.id)}
+        />
+      ))}
+      {onMore ? <Chip label="More" icon="layoutGrid" onPress={onMore} style={{ height: 44 }} /> : null}
+    </ScrollView>
   );
 }
 
@@ -93,20 +140,22 @@ export function MemberChips({
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow} keyboardShouldPersistTaps="handled">
       {members.map((m) => {
         const selected = m.id === value;
-        const accent = m.color ?? colors.brand;
         return (
           <Pressable
             key={m.id}
             onPress={() => onChange(selected ? null : m.id)}
             accessibilityRole="button"
             accessibilityState={{ selected }}
+            accessibilityLabel={`${m.name}${selected ? ' (selected)' : ''}`}
             style={[
               styles.member,
-              { borderColor: selected ? accent : colors.border, backgroundColor: selected ? tint(accent, 0.14) : colors.surface },
+              selected
+                ? { borderColor: colors.brandSoftBorder, backgroundColor: colors.brandSoft }
+                : { borderColor: colors.border, backgroundColor: colors.surface },
             ]}
           >
-            <MemberAvatar name={m.name} color={m.color} size={26} />
-            <Text variant="labelStrong" color={selected ? colors.text : colors.textSecondary}>
+            <MemberAvatar name={m.name} color={m.color} size={30} />
+            <Text variant="labelStrong" color={selected ? colors.brand : colors.textSecondary}>
               {m.name}
             </Text>
           </Pressable>
@@ -121,48 +170,54 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginHorizontal: -space.xxs,
+    rowGap: space.md,
   },
   tileSlot: {
     width: '25%',
-    padding: space.xxs,
-  },
-  tile: {
     alignItems: 'center',
-    justifyContent: 'center',
-    height: 76,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
     paddingHorizontal: space.xxs,
   },
-  tileDashed: {
-    borderStyle: 'dashed',
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.background,
-  },
-  tileEmoji: {
-    fontSize: 24,
-    lineHeight: 30,
+  ring: {
+    padding: 3,
+    borderRadius: 32,
+    borderWidth: 2,
   },
   tileLabel: {
-    marginTop: 4,
-  },
-  suggestDot: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    marginTop: 6,
+    maxWidth: '100%',
   },
   check: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    top: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.brand,
+    borderWidth: 2,
+    borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  suggest: {
+    backgroundColor: colors.brandSoft,
+  },
+  newBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bleed: {
+    marginHorizontal: -space.lg,
+  },
+  chipRow: {
+    gap: space.xs,
+    paddingHorizontal: space.lg,
   },
   memberRow: {
     gap: space.xs,
@@ -172,10 +227,10 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-    height: 40,
+    height: 44,
     paddingLeft: 6,
-    paddingRight: 14,
+    paddingRight: space.md,
     borderRadius: radius.pill,
-    borderWidth: 1.5,
+    borderWidth: 1,
   },
 }));

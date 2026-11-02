@@ -1,25 +1,19 @@
 import React from 'react';
 import { Text as RNText, TextProps as RNTextProps, TextStyle, StyleSheet } from 'react-native';
-import { font } from '@/design/tokens';
-import { makeStyles, useTheme } from '@/design/theme';
+import { font, fontFamily } from '@/design/tokens';
+import { useTheme } from '@/design/theme';
 import type { Palette } from '@/design/tokens';
 
 const variants = StyleSheet.create({
-  hero: { fontSize: font.size.hero, lineHeight: 42, fontWeight: font.weight.bold, letterSpacing: -0.8 },
-  title: { fontSize: font.size.title, lineHeight: 28, fontWeight: font.weight.bold, letterSpacing: -0.4 },
-  heading: { fontSize: 18, lineHeight: 24, fontWeight: font.weight.semibold, letterSpacing: -0.2 },
-  body: { fontSize: font.size.body, lineHeight: 22, fontWeight: font.weight.regular },
-  bodyStrong: { fontSize: font.size.body, lineHeight: 22, fontWeight: font.weight.semibold },
-  label: { fontSize: font.size.label, lineHeight: 20, fontWeight: font.weight.regular },
-  labelStrong: { fontSize: font.size.label, lineHeight: 20, fontWeight: font.weight.semibold },
-  caption: { fontSize: font.size.caption, lineHeight: 16, fontWeight: font.weight.regular },
-  overline: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
+  hero: { fontSize: font.size.hero, lineHeight: 48, fontWeight: font.weight.semibold, letterSpacing: -1 },
+  title: { fontSize: font.size.title, lineHeight: 28, fontWeight: font.weight.semibold, letterSpacing: -0.4 },
+  heading: { fontSize: font.size.body, lineHeight: 22, fontWeight: font.weight.semibold, letterSpacing: -0.1 },
+  body: { fontSize: font.size.body, lineHeight: 22, fontWeight: font.weight.regular, letterSpacing: -0.1 },
+  bodyStrong: { fontSize: font.size.body, lineHeight: 22, fontWeight: font.weight.semibold, letterSpacing: -0.1 },
+  label: { fontSize: font.size.label, lineHeight: 18, fontWeight: font.weight.regular },
+  labelStrong: { fontSize: font.size.label, lineHeight: 18, fontWeight: font.weight.semibold },
+  caption: { fontSize: font.size.caption, lineHeight: 18, fontWeight: font.weight.regular },
+  overline: { fontSize: font.size.label, lineHeight: 18, fontWeight: font.weight.semibold },
 });
 
 export type TextVariant = keyof typeof variants;
@@ -44,23 +38,25 @@ export interface TextProps extends RNTextProps {
   numeric?: boolean;
 }
 
-export function Text({ variant = 'body', color, align, numeric, style, ...rest }: TextProps) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <RNText
-      {...rest}
-      style={[
-        variants[variant],
-        { color: color ?? defaultColor(colors)[variant] },
-        align ? { textAlign: align } : null,
-        numeric ? styles.numeric : null,
-        style,
-      ]}
-    />
-  );
+const NUMERIC: TextStyle = { fontVariant: ['tabular-nums'], letterSpacing: -0.4 };
+
+/** Inter ships one family per weight; anything 500+ uses the semibold face. */
+export function fontFor(weight: TextStyle['fontWeight']): string {
+  const n = typeof weight === 'number' ? weight : weight === 'bold' ? 700 : Number(weight ?? 400);
+  return n >= 500 ? fontFamily.semibold : fontFamily.regular;
 }
 
-const useStyles = makeStyles((colors) => ({
-  numeric: { fontVariant: ['tabular-nums'] },
-}));
+export function Text({ variant = 'body', color, align, numeric, style, ...rest }: TextProps) {
+  const { colors } = useTheme();
+  const flat = StyleSheet.flatten([
+    variants[variant],
+    { color: color ?? defaultColor(colors)[variant] },
+    align ? { textAlign: align } : null,
+    numeric ? NUMERIC : null,
+    style,
+  ]);
+  // A custom family plus fontWeight makes Android synthesise or fall back,
+  // so the weight is expressed through the family alone.
+  const { fontWeight, ...resolved } = flat;
+  return <RNText {...rest} style={[resolved, { fontFamily: fontFor(fontWeight) }]} />;
+}

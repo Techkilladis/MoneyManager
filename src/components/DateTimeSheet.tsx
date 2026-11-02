@@ -1,7 +1,7 @@
 // Calendar + time picker in a bottom sheet. Pure JS, so it needs no extra
 // native module or rebuild.
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Button, IconButton, Sheet, Text } from './ui';
@@ -100,7 +100,7 @@ function DateTimeBody({ value, onClose, onChange, maxDate }: Omit<Props, 'visibl
           { label: '2 days ago', days: 2 },
         ].map((q) => (
           <Pressable key={q.label} onPress={() => quick(q.days)} style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}>
-            <Text variant="labelStrong" color={colors.brand}>
+            <Text variant="label">
               {q.label}
             </Text>
           </Pressable>
@@ -208,14 +208,16 @@ const useStyles = makeStyles((colors) => ({
     marginBottom: space.md,
   },
   quick: {
-    paddingHorizontal: space.sm,
-    height: 34,
+    paddingHorizontal: 14,
+    height: 36,
     justifyContent: 'center',
     borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   quickPressed: {
-    backgroundColor: colors.brandSoftBorder,
+    backgroundColor: colors.surfaceMuted,
   },
   monthRow: {
     flexDirection: 'row',
@@ -252,7 +254,7 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: 'space-between',
     marginTop: space.md,
     paddingTop: space.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   stepper: {

@@ -1,18 +1,33 @@
-// Shared add/edit form for expenses and income: big amount entry, merchant
-// with recent suggestions, category grid (pre-filled from merchant memory),
-// member chips, date/time and note.
+// Shared add/edit form for expenses and income. Deliberately light: one big
+// amount, who it was paid to (with recent suggestions), one row of category
+// chips (pre-filled from merchant memory), and the optional details — when,
+// for whom, note — folded into rows that open sheets.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { font, radius, space } from '@/design/tokens';
+import { font, fontFamily, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member, TransactionKind } from '@/database/schema';
 import { categoryService, classificationService, ledgerService, memberService } from '@/services';
 import { formatDayLabel, formatTime, parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { DateTimeSheet } from './DateTimeSheet';
-import { CategoryGrid, MemberChips } from './Pickers';
-import { Button, Chip, Icon, ScreenHeader, SegmentedControl, Text, TextField } from './ui';
+import { CategoryChips, CategoryGrid } from './Pickers';
+import {
+  BottomBar,
+  Button,
+  Card,
+  Chip,
+  Divider,
+  Icon,
+  IconName,
+  ListRow,
+  MemberAvatar,
+  ScreenHeader,
+  SegmentedControl,
+  Sheet,
+  Text,
+  TextField,
+} from './ui';
 
 export interface TransactionFormValues {
   amountPaise: number;
@@ -35,7 +50,14 @@ interface Props {
   headerRight?: React.ReactNode;
   /** Show the Expense / Income switch. */
   allowKindChange?: boolean;
+  /** Presented as a modal: close with an "x" instead of a back arrow. */
+  modal?: boolean;
 }
+
+const KINDS = [
+  { value: 'EXPENSE' as TransactionKind, label: 'Expense' },
+  { value: 'INCOME' as TransactionKind, label: 'Income' },
+];
 
 export function TransactionForm({
   title,
@@ -46,10 +68,10 @@ export function TransactionForm({
   onSubmit,
   headerRight,
   allowKindChange = true,
+  modal = false,
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const insets = useSafeAreaInsets();
   const [amount, setAmount] = useState(initial?.amountText ?? '');
   const [merchant, setMerchant] = useState(initial?.merchant ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(initial?.categoryId ?? null);
@@ -63,7 +85,7 @@ export function TransactionForm({
   const [members, setMembers] = useState<Member[]>([]);
   const [recentMerchants, setRecentMerchants] = useState<string[]>([]);
   const [suggestedId, setSuggestedId] = useState<string | null>(null);
-  const [showDate, setShowDate] = useState(false);
+  const [sheet, setSheet] = useState<'date' | 'category' | 'member' | 'note' | null>(null);
   const [merchantFocused, setMerchantFocused] = useState(false);
   const [errors, setErrors] = useState<{ amount?: string; merchant?: string; form?: string }>({});
   const [saving, setSaving] = useState(false);
@@ -179,7 +201,7 @@ export function TransactionForm({
   };
 
   const visibleCategories = categories.filter((c) => c.kind === kind);
-  const accent = income ? colors.positive : colors.brand;
+  const member = members.find((m) => m.id === memberId);
 
   const query = merchant.trim().toLowerCase();
   const merchantSuggestions = recentMerchants
@@ -188,32 +210,22 @@ export function TransactionForm({
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={title} back right={headerRight} />
+      <ScreenHeader
+        title={allowKindChange ? '' : title}
+        back={!modal}
+        close={modal}
+        right={headerRight}
+        center={allowKindChange ? <SegmentedControl compact options={KINDS} value={kind} onChange={changeKind} /> : null}
+      />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {allowKindChange ? (
-            <SegmentedControl
-              options={[
-                { value: 'EXPENSE' as TransactionKind, label: 'Expense' },
-                { value: 'INCOME' as TransactionKind, label: 'Income' },
-              ]}
-              value={kind}
-              onChange={changeKind}
-              style={{ marginTop: space.xs }}
-            />
-          ) : null}
-
-          {/* Amount */}
-          <Pressable style={styles.amountBlock} onPress={() => amountRef.current?.focus()}>
-            <Text variant="overline" color={income ? colors.positive : undefined}>
-              {income ? 'Amount received' : 'Amount'}
-            </Text>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {/* Amount: the one dominant field */}
+          <Pressable style={styles.amountBlock} onPress={() => amountRef.current?.focus()} accessibilityLabel={title}>
+            <Text variant="label">{income ? 'Amount received' : 'Amount'}</Text>
             <View style={styles.amountRow}>
-              <Text style={[styles.amountInput, styles.rupee, !amount ? { color: colors.textDisabled } : income ? { color: colors.positive } : null]}>₹</Text>
+              <Text variant="title" color={colors.textTertiary} style={styles.rupee}>
+                ₹
+              </Text>
               <TextInput
                 ref={amountRef}
                 value={amount}
@@ -225,23 +237,22 @@ export function TransactionForm({
                 placeholderTextColor={colors.textDisabled}
                 keyboardType="decimal-pad"
                 autoFocus={autoFocusAmount}
-                selectionColor={accent}
-                cursorColor={accent}
+                selectionColor={colors.brand}
+                cursorColor={colors.brand}
                 style={[styles.amountInput, income && amount ? { color: colors.positive } : null]}
                 accessibilityLabel="Amount in rupees"
               />
             </View>
             {errors.amount ? (
-              <Text variant="caption" color={colors.negative}>
+              <Text variant="caption" color={colors.negative} style={{ marginTop: space.xxs }}>
                 {errors.amount}
               </Text>
             ) : null}
           </Pressable>
 
-          {/* Merchant */}
+          {/* Who */}
           <TextField
             label={income ? 'Received from' : 'Paid to'}
-            icon="store"
             value={merchant}
             onChangeText={(t) => {
               setMerchant(t);
@@ -262,75 +273,47 @@ export function TransactionForm({
               horizontal
               showsHorizontalScrollIndicator={false}
               keyboardShouldPersistTaps="always"
+              style={styles.bleed}
               contentContainerStyle={styles.suggestions}
             >
               {merchantSuggestions.map((m) => (
-                <Chip key={m} label={m} icon="clock" onPress={() => pickMerchant(m)} />
+                <Chip key={m} label={m} icon="history" onPress={() => pickMerchant(m)} />
               ))}
             </ScrollView>
           ) : null}
 
           {/* Category */}
           <View style={styles.sectionHead}>
-            <Text variant="labelStrong" color={colors.textSecondary}>
-              Category
-            </Text>
+            <Text variant="label">Category</Text>
             {suggestionApplied && suggestedId === categoryId ? (
               <View style={styles.hint}>
-                <Icon name="sparkles" size={13} color={colors.brand} />
+                <Icon name="sparkles" size={14} color={colors.brand} />
                 <Text variant="caption" color={colors.brand}>
                   From your history
                 </Text>
               </View>
             ) : null}
           </View>
-          <CategoryGrid
+          <CategoryChips
             categories={visibleCategories}
             value={categoryId}
             onChange={pickCategory}
             suggestedId={suggestedId}
-            onManage={() => router.push('/categories')}
+            onMore={() => setSheet('category')}
           />
 
-          {/* Member */}
-          {members.length > 0 && !income ? (
-            <>
-              <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
-                Spent on
-              </Text>
-              <MemberChips members={members} value={memberId} onChange={setMemberId} />
-            </>
-          ) : null}
-
-          {/* Date */}
-          <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
-            When
-          </Text>
-          <Pressable
-            onPress={() => setShowDate(true)}
-            style={({ pressed }) => [styles.dateRow, pressed && { backgroundColor: colors.surfaceMuted }]}
-            accessibilityRole="button"
-            accessibilityLabel="Change date and time"
-          >
-            <Icon name="calendar" size={18} color={colors.textTertiary} />
-            <Text variant="body" style={{ flex: 1 }}>
-              {formatDayLabel(date.getTime())}, {formatTime(date.getTime())}
-            </Text>
-            <Text variant="labelStrong" color={colors.brand}>
-              Change
-            </Text>
-          </Pressable>
-
-          {/* Note */}
-          <TextField
-            label="Note"
-            value={note}
-            onChangeText={setNote}
-            placeholder="Optional — what was it for?"
-            multiline
-            maxLength={200}
-            containerStyle={{ marginTop: space.lg }}
-          />
+          {/* Optional details, folded away */}
+          <Card padded={false} style={styles.details}>
+            <DetailRow icon="calendar" label="When" value={`${formatDayLabel(date.getTime())}, ${formatTime(date.getTime())}`} onPress={() => setSheet('date')} />
+            {!income && members.length > 0 ? (
+              <>
+                <Divider />
+                <DetailRow icon="user" label="For" value={member?.name ?? 'Not set'} muted={!member} onPress={() => setSheet('member')} />
+              </>
+            ) : null}
+            <Divider />
+            <DetailRow icon="note" label="Note" value={note.trim() || 'Add'} muted={!note.trim()} onPress={() => setSheet('note')} />
+          </Card>
 
           {errors.form ? (
             <Text variant="label" color={colors.negative} align="center" style={{ marginTop: space.md }}>
@@ -339,13 +322,91 @@ export function TransactionForm({
           ) : null}
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
+        <BottomBar>
           <Button title={submitLabel} size="lg" fullWidth loading={saving} onPress={submit} icon="check" />
-        </View>
+        </BottomBar>
       </KeyboardAvoidingView>
 
-      <DateTimeSheet visible={showDate} value={date} onClose={() => setShowDate(false)} onChange={setDate} />
+      <DateTimeSheet visible={sheet === 'date'} value={date} onClose={() => setSheet(null)} onChange={setDate} />
+
+      <Sheet visible={sheet === 'category'} onClose={() => setSheet(null)} title="Category">
+        <CategoryGrid
+          categories={visibleCategories}
+          value={categoryId}
+          onChange={(id) => {
+            pickCategory(id);
+            setSheet(null);
+          }}
+          suggestedId={suggestedId}
+          onManage={() => {
+            setSheet(null);
+            router.push('/categories');
+          }}
+        />
+      </Sheet>
+
+      <Sheet visible={sheet === 'member'} onClose={() => setSheet(null)} title="Who was it for?">
+        <Card padded={false}>
+          {members.map((m, i) => (
+            <View key={m.id}>
+              {i > 0 ? <Divider /> : null}
+              <ListRow
+                title={m.name}
+                left={<MemberAvatar name={m.name} color={m.color} />}
+                right={m.id === memberId ? <Icon name="check" size={20} color={colors.brand} /> : null}
+                onPress={() => {
+                  setMemberId(m.id === memberId ? null : m.id);
+                  setSheet(null);
+                }}
+              />
+            </View>
+          ))}
+        </Card>
+      </Sheet>
+
+      <Sheet
+        visible={sheet === 'note'}
+        onClose={() => setSheet(null)}
+        title="Note"
+        footer={<Button title="Done" size="lg" fullWidth onPress={() => setSheet(null)} />}
+      >
+        <TextField value={note} onChangeText={setNote} placeholder="What was it for?" multiline maxLength={200} autoFocus />
+      </Sheet>
     </View>
+  );
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  muted = false,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  muted?: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      style={({ pressed }) => [styles.detailRow, pressed && { backgroundColor: colors.surfaceMuted }]}
+    >
+      <Icon name={icon} size={20} color={colors.textTertiary} />
+      <Text variant="body" style={{ flex: 1 }}>
+        {label}
+      </Text>
+      <Text variant="label" color={muted ? colors.textTertiary : colors.textSecondary} numberOfLines={1} style={styles.detailValue}>
+        {value}
+      </Text>
+      <Icon name="chevronRight" size={18} color={colors.textTertiary} />
+    </Pressable>
   );
 }
 
@@ -360,8 +421,8 @@ const useStyles = makeStyles((colors) => ({
   },
   amountBlock: {
     alignItems: 'center',
-    paddingTop: space.md,
-    paddingBottom: space.xl,
+    paddingTop: space.xl,
+    paddingBottom: space.xxl,
   },
   amountRow: {
     flexDirection: 'row',
@@ -370,54 +431,48 @@ const useStyles = makeStyles((colors) => ({
     marginTop: space.xs,
   },
   rupee: {
-    marginRight: 2,
-    lineHeight: 58,
+    marginRight: space.xxs,
   },
   amountInput: {
-    fontSize: 48,
-    fontWeight: font.weight.bold,
+    fontSize: font.size.hero,
+    fontFamily: fontFamily.semibold,
     color: colors.text,
     letterSpacing: -1,
-    minWidth: 40,
+    minWidth: 32,
     padding: 0,
     fontVariant: ['tabular-nums'],
+  },
+  bleed: {
+    marginHorizontal: -space.lg,
   },
   suggestions: {
     gap: space.xs,
     paddingTop: space.sm,
+    paddingHorizontal: space.lg,
   },
   sectionHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: space.xl,
-    marginBottom: space.xs,
+    marginTop: space.xxl,
+    marginBottom: space.sm,
   },
   hint: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  label: {
-    marginTop: space.xl,
-    marginBottom: space.xs,
+  details: {
+    marginTop: space.xxl,
   },
-  dateRow: {
+  detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    minHeight: 50,
+    minHeight: 56,
     paddingHorizontal: space.md,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
-  footer: {
-    paddingHorizontal: space.lg,
-    paddingTop: space.sm,
-    backgroundColor: colors.background,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+  detailValue: {
+    maxWidth: '50%',
   },
 }));

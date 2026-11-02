@@ -13,6 +13,7 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -43,3 +44,12 @@ yarn-error.*
 # local module gradle build output
 modules/*/android/build/
 modules/*/android/.cxx/
+
+# Superdesign scratch HTML
+.superdesign/tmp/
+
+# IDE + tool scratch (not project source)
+.idea/
+.playwright-mcp/
+.superdesign/
+graphify-out/

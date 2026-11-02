@@ -1,8 +1,7 @@
 import React, { useCallback } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { radius, space, tint } from '@/design/tokens';
+import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { ledgerService, recapService, recurringService, splitService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
@@ -23,11 +22,14 @@ import {
   EmptyState,
   ErrorView,
   Icon,
-  IconTile,
+  IconButton,
+  IconName,
+  KeyFigure,
   LoadingView,
   ProgressBar,
   ScreenHeader,
   SectionTitle,
+  StatusChip,
   Text,
   UncategorizedAvatar,
 } from '@/components/ui';
@@ -41,13 +43,23 @@ type HomeData = HomeSummary & {
 
 async function fetchHome(): Promise<HomeData> {
   const [summary, capture, recap, upcoming, owed] = await Promise.all([
-    ledgerService.getHomeSummary(),
+    ledgerService.getHomeSummary().catch((err) => {
+      console.error('[Home] getHomeSummary failed:', err);
+      throw err;
+    }),
     getCaptureStatus().catch(() => null),
     recapService.getRecapCard().catch(() => null),
     recurringService.getUpcoming(7).catch(() => []),
     splitService.getTotalOwed().catch(() => 0),
   ]);
   return { ...summary, capture, recap, upcoming: upcoming.filter((r) => !r.paidThisPeriod), owed };
+}
+
+function dueLabel(days: number): string {
+  if (days < 0) return 'Overdue';
+  if (days === 0) return 'Due today';
+  if (days === 1) return 'Due tomorrow';
+  return `Due in ${days} days`;
 }
 
 export default function HomeScreen() {
@@ -59,32 +71,40 @@ export default function HomeScreen() {
   if (error && !data) return <ErrorView message={error} onRetry={reload} />;
   if (!data) return <LoadingView />;
 
-  const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
+  const now = new Date();
+  const monthName = now.toLocaleDateString('en-IN', { month: 'long' });
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader large eyebrow={greeting()} title="Your spending" />
+      <ScreenHeader
+        large
+        eyebrow={greeting()}
+        title={monthName}
+        right={
+          <View style={{ flexDirection: 'row', gap: space.xs, alignItems: 'center' }}>
+            <IconButton icon="mic" color={colors.textSecondary} accessibilityLabel="Add by voice" onPress={() => router.push('/voice-capture')} />
+            <IconButton icon="search" color={colors.textSecondary} accessibilityLabel="Search history" onPress={() => router.push('/transactions')} />
+          </View>
+        }
+      />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} tintColor={colors.brand} />}
       >
-        <HeroCard data={data} monthName={monthName} />
-
-        {data.pending.length > 0 ? <PendingCard data={data} /> : null}
+        <Summary data={data} />
 
         {data.capture ? (
-          <View style={data.capture.state === 'ok' || data.capture.state === 'battery' || data.capture.state === 'unsupported' ? null : styles.block}>
+          <View style={data.capture.state === 'off' || data.capture.missed ? styles.section : null}>
             <CaptureStatusCard status={data.capture} compact onChanged={reload} />
           </View>
         ) : null}
 
-        {data.recap ? <RecapCard recap={data.recap} onDismiss={reload} /> : null}
-
-        {data.upcoming.length > 0 ? <UpcomingCard items={data.upcoming} /> : null}
+        <ReviewQueue data={data} onChanged={reload} />
+        <NeedsYou data={data} onChanged={reload} />
 
         {!data.hasAnyTransactions ? (
-          <Card style={styles.block}>
+          <Card style={styles.section}>
             <EmptyState
               compact
               icon="wallet"
@@ -96,32 +116,17 @@ export default function HomeScreen() {
           </Card>
         ) : (
           <>
-            {data.topCategories.length > 0 ? <CategoryCard data={data} monthName={monthName} /> : null}
+            {data.topCategories.length > 0 ? <WhereItWent data={data} /> : null}
 
-            {data.owed > 0 ? (
-              <Card style={styles.block} onPress={() => router.push('/members')}>
-                <View style={styles.nudge}>
-                  <IconTile icon="users" color={colors.positive} />
-                  <View style={{ flex: 1 }}>
-                    <Text variant="bodyStrong">{formatINR(data.owed)} owed to you</Text>
-                    <Text variant="caption" style={{ marginTop: 2 }}>
-                      From split expenses. Send a reminder with your UPI link.
-                    </Text>
-                  </View>
-                  <Icon name="chevronRight" size={18} color={colors.textDisabled} />
-                </View>
-              </Card>
-            ) : null}
-
-            <View style={styles.block}>
+            <View style={styles.section}>
               <SectionTitle title="Recent" action="See all" onAction={() => router.push('/transactions')} />
-              <Card padded={false} style={styles.listCard}>
+              <Card padded={false}>
                 {data.recent.length === 0 ? (
                   <EmptyState compact icon="receipt" title="No confirmed expenses yet" message="Review your pending payments to see them here." />
                 ) : (
                   data.recent.map((tx, i) => (
                     <View key={tx.id}>
-                      {i > 0 ? <Divider inset={72} /> : null}
+                      {i > 0 ? <Divider /> : null}
                       <TransactionRow tx={tx} onPress={openTx} showDate />
                     </View>
                   ))
@@ -135,242 +140,299 @@ export default function HomeScreen() {
   );
 }
 
-function HeroCard({ data, monthName }: { data: HomeData; monthName: string }) {
+/** The month's spend on the paper, then budget progress and quick stats. */
+function Summary({ data }: { data: HomeData }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [whole, fraction] = splitINR(data.monthTotal);
   const base = data.lastMonthToDate;
   const change = base > 0 ? (data.monthTotal - base) / base : null;
-  const up = change !== null && change > 0;
+  const now = new Date();
+  const daysLeft = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate();
+  const budget = data.budget;
+  const over = budget ? budget.spent > budget.limit : false;
 
   return (
-    <LinearGradient colors={[colors.heroStart, colors.heroEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-      <Text variant="overline" color={colors.textOnDarkMuted}>
-        Spent in {monthName}
-      </Text>
-      <View style={styles.heroAmount}>
-        <Text variant="hero" color={colors.textOnDark} numeric style={{ fontSize: 40, lineHeight: 46 }}>
-          {whole}
-        </Text>
-        <Text variant="heading" color={colors.textOnDarkSubtle} numeric style={{ marginBottom: 5 }}>
-          {fraction}
-        </Text>
-      </View>
-
-      <View style={styles.deltaRow}>
-        {change !== null && Math.abs(change) >= 0.005 ? (
-          <View style={[styles.deltaPill, { backgroundColor: up ? 'rgba(255,107,107,0.22)' : 'rgba(52,211,153,0.22)' }]}>
-            <Icon name={up ? 'trendingUp' : 'trendingDown'} size={14} color={up ? '#FFB4B4' : '#A7F3D0'} />
-            <Text variant="caption" color={colors.textOnDark}>
-              {Math.round(Math.abs(change) * 100)}% {up ? 'more' : 'less'} than last month so far
+    <View style={styles.summary}>
+      <KeyFigure label="Spent this month" value={whole} fraction={fraction}>
+        <View style={styles.deltaRow}>
+          {change !== null && Math.abs(change) >= 0.005 ? (
+            <>
+              <StatusChip
+                tone={change > 0 ? 'up' : 'down'}
+                icon={change > 0 ? 'trendingUp' : 'trendingDown'}
+                label={`${Math.round(Math.abs(change) * 100)}%`}
+              />
+              <Text variant="caption">vs. last month so far</Text>
+            </>
+          ) : (
+            <Text variant="caption">
+              {data.monthCount > 0 ? `${pluralize(data.monthCount, 'expense')} this month` : 'No spending yet this month'}
             </Text>
-          </View>
-        ) : (
-          <Text variant="caption" color={colors.textOnDarkMuted}>
-            {data.monthCount > 0 ? `${pluralize(data.monthCount, 'expense')} this month` : 'No spending yet this month'}
-          </Text>
-        )}
-      </View>
-
-      {data.monthIncome > 0 ? (
-        <View style={styles.heroIncome}>
-          <View style={styles.heroIncomeItem}>
-            <Icon name="arrowDownLeft" size={14} color="#A7F3D0" />
-            <Text variant="caption" color={colors.textOnDarkMuted}>
-              In {formatINR(data.monthIncome, { decimals: 'never' })}
-            </Text>
-          </View>
-          <Text variant="caption" color={data.monthLeft >= 0 ? colors.textOnDark : '#FFB4B4'}>
-            {data.monthLeft >= 0
-              ? `${formatINR(data.monthLeft, { decimals: 'never' })} left${data.savingsRate !== null ? ` · saving ${Math.round(data.savingsRate * 100)}%` : ''}`
-              : `${formatINR(-data.monthLeft, { decimals: 'never' })} more than you earned`}
-          </Text>
+          )}
         </View>
-      ) : null}
+      </KeyFigure>
 
-      {data.budget ? (
-        <View style={styles.heroBudget}>
-          <View style={styles.heroBudgetText}>
-            <Text variant="caption" color={colors.textOnDarkMuted}>
-              {data.budget.overall ? 'Monthly budget' : 'Budgets'} {formatINR(data.budget.spent, { decimals: 'never' })} of{' '}
-              {formatINR(data.budget.limit, { decimals: 'never' })}
-            </Text>
-            <Text variant="caption" color={data.budget.spent > data.budget.limit ? '#FFB4B4' : colors.textOnDark}>
-              {data.budget.spent > data.budget.limit
-                ? `${formatINR(data.budget.spent - data.budget.limit, { decimals: 'never' })} over`
-                : `${formatINR(data.budget.limit - data.budget.spent, { decimals: 'never' })} left`}
-            </Text>
-          </View>
-          <ProgressBar
-            value={data.budget.limit > 0 ? data.budget.spent / data.budget.limit : 0}
-            color={data.budget.spent > data.budget.limit ? '#FF8A8A' : '#FFFFFF'}
-            track="rgba(255,255,255,0.18)"
-            height={6}
-          />
-        </View>
-      ) : null}
-
-      <View style={styles.heroStats}>
-        <HeroStat label="Today" value={formatINR(data.todayTotal, { decimals: 'never' })} />
-        <View style={styles.heroDivider} />
-        <HeroStat label="This week" value={formatINR(data.weekTotal, { decimals: 'never' })} />
-        <View style={styles.heroDivider} />
-        <HeroStat label="Daily avg" value={formatINR(data.dailyAverage, { decimals: 'never' })} />
-      </View>
-    </LinearGradient>
-  );
-}
-
-function HeroStat({ label, value }: { label: string; value: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={{ flex: 1 }}>
-      <Text variant="caption" color={colors.textOnDarkSubtle}>
-        {label}
-      </Text>
-      <Text variant="bodyStrong" color={colors.textOnDark} numeric numberOfLines={1} adjustsFontSizeToFit style={{ marginTop: 2 }}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function RecapCard({ recap, onDismiss }: { recap: MonthlyRecap; onDismiss: () => void }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <Pressable
-      onPress={() => router.push(`/recap?month=${recap.monthKey}`)}
-      accessibilityRole="button"
-      style={({ pressed }) => [styles.block, pressed && { opacity: 0.92 }]}
-    >
-      <LinearGradient colors={['#7C3AED', '#4F46E5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.recap}>
-        <View style={{ flex: 1 }}>
-          <View style={styles.recapLabel}>
-            <Icon name="sparkles" size={14} color="#FDE68A" />
-            <Text variant="overline" color={colors.textOnDarkMuted}>
-              Your {recap.monthName} recap
-            </Text>
-          </View>
-          <Text variant="heading" color="#FFFFFF" numeric style={{ marginTop: space.xxs }}>
-            {formatINR(recap.spent, { decimals: 'never' })} spent
-          </Text>
-          <Text variant="caption" color={colors.textOnDarkMuted} style={{ marginTop: 2 }}>
-            {recapHeadline(recap)} Tap to see the details.
-          </Text>
-        </View>
-        <Pressable
-          hitSlop={10}
-          accessibilityLabel="Dismiss recap"
-          onPress={() => void dismissRecapCard(recap.monthKey).then(onDismiss)}
-          style={styles.recapClose}
-        >
-          <Icon name="x" size={16} color={colors.textOnDarkMuted} />
-        </Pressable>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-function UpcomingCard({ items }: { items: RecurringView[] }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const total = items.reduce((s, r) => s + r.amountPaise, 0);
-  return (
-    <View style={styles.block}>
-      <SectionTitle title="Due this week" action="All bills" onAction={() => router.push('/recurring')} />
-      <Card padded={false} style={styles.listCard}>
-        {items.slice(0, 4).map((r, i) => (
-          <View key={r.id}>
-            {i > 0 ? <Divider inset={72} /> : null}
-            <Pressable
-              onPress={() => router.push('/recurring')}
-              style={({ pressed }) => [styles.billRow, pressed && { backgroundColor: colors.surfaceMuted }]}
-            >
-              {r.category ? <CategoryAvatar icon={r.category.icon} color={r.category.color} /> : <UncategorizedAvatar />}
-              <View style={{ flex: 1 }}>
-                <Text variant="bodyStrong" numberOfLines={1}>
-                  {r.name}
-                </Text>
-                <Text variant="caption" color={r.daysUntilDue <= 1 ? colors.warning : undefined}>
-                  {r.daysUntilDue < 0
-                    ? 'Overdue'
-                    : r.daysUntilDue === 0
-                      ? 'Due today'
-                      : r.daysUntilDue === 1
-                        ? 'Due tomorrow'
-                        : `Due in ${r.daysUntilDue} days`}
-                </Text>
-              </View>
-              <Text variant="bodyStrong" numeric>
-                {formatINR(r.amountPaise, { decimals: 'never' })}
+      <Card style={styles.section}>
+        {budget ? (
+          <>
+            <View style={styles.between}>
+              <Text variant="label">{budget.overall ? 'Monthly budget' : 'Budgets'}</Text>
+              <Text variant="caption" numeric>
+                {pluralize(daysLeft, 'day')} left
               </Text>
-            </Pressable>
-          </View>
-        ))}
-        {items.length > 1 ? (
-          <View style={styles.billTotal}>
-            <Text variant="caption">{pluralize(items.length, 'payment')} coming up</Text>
-            <Text variant="labelStrong" numeric>
-              {formatINR(total, { decimals: 'never' })}
+            </View>
+            <View style={{ marginTop: space.sm }}>
+              <ProgressBar
+                value={budget.limit > 0 ? budget.spent / budget.limit : 0}
+                color={over ? colors.negative : budget.spent / budget.limit >= 0.9 ? colors.warning : colors.brand}
+              />
+            </View>
+            <View style={[styles.between, { marginTop: space.sm }]}>
+              <Text variant="bodyStrong" numeric color={over ? colors.negative : colors.text}>
+                {formatINR(Math.abs(budget.limit - budget.spent), { decimals: 'never' })}
+                <Text variant="body" color={over ? colors.negative : colors.textSecondary}>
+                  {over ? ' over' : ' left'}
+                </Text>
+              </Text>
+              <Text variant="caption" numeric>
+                of {formatINR(budget.limit, { decimals: 'never' })}
+              </Text>
+            </View>
+            <Divider style={{ marginVertical: space.md }} />
+          </>
+        ) : null}
+        <View style={styles.stats}>
+          <Stat label="Today" value={formatINR(data.todayTotal, { decimals: 'never' })} />
+          <View style={styles.statDivider} />
+          <Stat label="This week" value={formatINR(data.weekTotal, { decimals: 'never' })} />
+          <View style={styles.statDivider} />
+          {data.monthIncome > 0 ? (
+            <Stat label="Earned" value={formatINR(data.monthIncome, { decimals: 'never' })} color={colors.positive} />
+          ) : (
+            <Stat label="Daily avg" value={formatINR(data.dailyAverage, { decimals: 'never' })} />
+          )}
+        </View>
+        {!budget ? (
+          <Pressable onPress={() => router.push('/budgets')} hitSlop={8} style={{ marginTop: space.md }} accessibilityRole="button">
+            <Text variant="labelStrong" color={colors.brand}>
+              Set a monthly budget
             </Text>
-          </View>
+          </Pressable>
         ) : null}
       </Card>
     </View>
   );
 }
 
-function PendingCard({ data }: { data: HomeData }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const count = data.pending.length;
-  const preview = data.pending.slice(0, 3).map((t) => t.merchant).join(', ');
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <Card style={[styles.block, styles.pendingCard]} flat>
-      <View style={styles.pendingTop}>
-        <View style={styles.pendingIcon}>
-          <Icon name="zap" size={20} color={colors.textOnBrand} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text variant="bodyStrong">
-            {count === 1 ? '1 payment to review' : `${count} payments to review`}
-          </Text>
-          <Text variant="caption" numberOfLines={1} style={{ marginTop: 2 }}>
-            {formatINR(data.pendingTotal)} detected · {preview}
-          </Text>
-        </View>
-      </View>
-      <Button title={count === 1 ? 'Review payment' : 'Review payments'} icon="check" fullWidth onPress={() => router.push('/quick-capture')} />
-    </Card>
+    <View style={{ flex: 1 }}>
+      <Text variant="caption">{label}</Text>
+      <Text variant="bodyStrong" numeric color={color} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ marginTop: space.xxs }}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
-function CategoryCard({ data, monthName }: { data: HomeData; monthName: string }) {
+/** Review queue — the only urgent action, set apart on a moss wash. */
+function ReviewQueue({ data, onChanged }: { data: HomeData; onChanged: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const count = data.pending.length;
+  if (count === 0) return null;
+
+  const preview = data.pending.slice(0, 3).map((t) => t.merchant).join(', ');
+  return (
+    <View style={styles.section}>
+      <View style={styles.reviewRow}>
+        <View style={styles.reviewIcon}>
+          <Icon name="zap" size={20} color={colors.textOnBrand} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="bodyStrong">{count === 1 ? '1 payment to review' : `${count} payments to review`}</Text>
+          <Text variant="label" numeric numberOfLines={1}>
+            {formatINR(data.pendingTotal, { decimals: 'never' })} · {preview}
+          </Text>
+        </View>
+        <Button title="Review" size="sm" onPress={() => router.push('/quick-capture')} />
+      </View>
+    </View>
+  );
+}
+
+/** Upcoming bills, owed money, recap nudge, and the voice-capture shortcut. */
+function NeedsYou({ data, onChanged }: { data: HomeData; onChanged: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const bills = data.upcoming.slice(0, 3);
+  const rows: React.ReactNode[] = [];
+
+  for (const r of bills) {
+    const soon = r.daysUntilDue <= 1;
+    rows.push(
+      <AttentionRow
+        key={r.id}
+        left={r.category ? <CategoryAvatar icon={r.category.icon} color={r.category.color} /> : <UncategorizedAvatar />}
+        title={r.name}
+        meta={dueLabel(r.daysUntilDue)}
+        metaColor={soon ? colors.warning : undefined}
+        metaStrong={soon}
+        value={formatINR(r.amountPaise, { decimals: 'never' })}
+        onPress={() => router.push('/recurring')}
+      />
+    );
+  }
+
+  if (data.owed > 0) {
+    rows.push(
+      <AttentionRow
+        key="owed"
+        left={<Badge icon="coins" color={colors.positive} background={colors.positiveSoft} />}
+        title="Owed to you"
+        meta="From split expenses"
+        value={formatINR(data.owed, { decimals: 'never' })}
+        valueColor={colors.positive}
+        chevron
+        onPress={() => router.push('/members')}
+      />
+    );
+  }
+
+  const recap = data.recap;
+  if (recap) {
+    rows.push(
+      <AttentionRow
+        key="recap"
+        left={<Badge icon="sparkles" color={colors.warning} background={colors.warningSoft} />}
+        title={`${recap.monthName} recap is ready`}
+        meta={`${formatINR(recap.spent, { decimals: 'never' })} spent · ${recapHeadline(recap)}`}
+        onPress={() => router.push(`/recap?month=${recap.monthKey}`)}
+        trailing={
+          <IconButton
+            icon="x"
+            size={32}
+            background="transparent"
+            color={colors.textTertiary}
+            accessibilityLabel="Dismiss recap"
+            onPress={() => void dismissRecapCard(recap.monthKey).then(onChanged)}
+          />
+        }
+      />
+    );
+  }
+
+  // Voice / text transaction entry
+  rows.push(
+    <AttentionRow
+      key="voice"
+      left={<Badge icon="mic" color={colors.brand} background={colors.brandSoft} />}
+      title="Add by voice or text"
+      meta={'"paid ₹200 for swiggy" or "lunch 300"'}
+      chevron
+      onPress={() => router.push('/voice-capture')}
+    />
+  );
+
+  if (rows.length === 0) return null;
+
+  return (
+    <View style={styles.section}>
+      <SectionTitle
+        title="Needs you"
+        action={bills.length > 0 ? 'All bills' : undefined}
+        onAction={bills.length > 0 ? () => router.push('/recurring') : undefined}
+      />
+      <Card padded={false}>
+        {rows.map((row, i) => (
+          <View key={i}>
+            {i > 0 ? <Divider /> : null}
+            {row}
+          </View>
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+function Badge({ icon, color, background }: { icon: IconName; color: string; background: string }) {
+  return (
+    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: background, alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name={icon} size={20} color={color} />
+    </View>
+  );
+}
+
+function AttentionRow({
+  left,
+  title,
+  meta,
+  metaColor,
+  metaStrong,
+  value,
+  valueColor,
+  chevron,
+  trailing,
+  onPress,
+}: {
+  left: React.ReactNode;
+  title: string;
+  meta: string;
+  metaColor?: string;
+  metaStrong?: boolean;
+  value?: string;
+  valueColor?: string;
+  chevron?: boolean;
+  trailing?: React.ReactNode;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surfaceMuted }]}>
+      {left}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text variant="body" numberOfLines={1}>
+          {title}
+        </Text>
+        <Text variant={metaStrong ? 'labelStrong' : 'caption'} color={metaColor} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
+      {value ? (
+        <Text variant="bodyStrong" numeric color={valueColor}>
+          {value}
+        </Text>
+      ) : null}
+      {trailing}
+      {chevron ? <Icon name="chevronRight" size={18} color={colors.textTertiary} /> : null}
+    </Pressable>
+  );
+}
+
+function WhereItWent({ data }: { data: HomeData }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const top = data.topCategories.slice(0, 4);
   return (
-    <View style={styles.block}>
-      <SectionTitle title={`${monthName} by category`} action="Insights" onAction={() => router.push('/analytics')} />
+    <View style={styles.section}>
+      <SectionTitle title="Where it went" action="Insights" onAction={() => router.push('/analytics')} />
       <Card>
         <StackedBar slices={data.topCategories.map((c) => ({ key: c.categoryId ?? 'none', value: c.totalPaise, color: c.color ?? colors.textTertiary }))} />
-        <View style={{ marginTop: space.sm }}>
+        <View style={{ marginTop: space.md, gap: space.sm }}>
           {top.map((c) => (
             <View key={c.categoryId ?? 'none'} style={styles.catRow}>
               {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
-              <View style={{ flex: 1 }}>
-                <Text variant="labelStrong">{c.name}</Text>
-                <Text variant="caption">{pluralize(c.count, 'expense')}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text variant="labelStrong" numeric>
-                  {formatINR(c.totalPaise, { decimals: 'never' })}
-                </Text>
-                <Text variant="caption" numeric>
-                  {Math.round(c.share * 100)}%
-                </Text>
-              </View>
+              <Text variant="body" numberOfLines={1} style={{ flex: 1 }}>
+                {c.name}
+              </Text>
+              <Text variant="caption" numeric style={styles.pct}>
+                {Math.round(c.share * 100)}%
+              </Text>
+              <Text variant="bodyStrong" numeric style={styles.catAmount}>
+                {formatINR(c.totalPaise, { decimals: 'never' })}
+              </Text>
             </View>
           ))}
         </View>
@@ -388,130 +450,66 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: space.lg,
     paddingBottom: space.xxxl,
   },
-  block: {
-    marginTop: space.xl,
+  section: {
+    marginTop: space.xxl,
   },
-  listCard: {
-    overflow: 'hidden',
-    paddingVertical: space.xxs,
-  },
-  hero: {
-    borderRadius: radius.xxl,
-    padding: space.xl,
-  },
-  heroAmount: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: space.xs,
+  summary: {
+    paddingTop: space.xl,
   },
   deltaRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
     marginTop: space.xs,
   },
-  deltaPill: {
+  between: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.pill,
-  },
-  heroBudget: {
-    marginTop: space.lg,
-    gap: space.xs,
-  },
-  heroBudgetText: {
-    flexDirection: 'row',
+    alignItems: 'baseline',
     justifyContent: 'space-between',
   },
-  heroStats: {
+  stats: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: space.lg,
-    paddingTop: space.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-    gap: space.sm,
-  },
-  heroDivider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  pendingCard: {
-    backgroundColor: tint(colors.brand, 0.08),
-    borderWidth: 1,
-    borderColor: colors.brandSoftBorder,
+    alignItems: 'stretch',
     gap: space.md,
   },
-  pendingTop: {
+  statDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+  },
+  reviewRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+    padding: space.md,
+    backgroundColor: colors.brandSoft,
   },
-  pendingIcon: {
+  reviewIcon: {
     width: 40,
     height: 40,
-    borderRadius: 14,
+    borderRadius: 20,
     backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nudge: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-  },
-  heroIncome: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: space.md,
-  },
-  heroIncomeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  recap: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.sm,
-    padding: space.lg,
-    borderRadius: radius.xl,
-  },
-  recapLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  recapClose: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  billRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
+    minHeight: 64,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
-  },
-  billTotal: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
   },
   catRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    paddingVertical: space.xs,
+  },
+  pct: {
+    width: 40,
+    textAlign: 'right',
+  },
+  catAmount: {
+    minWidth: 80,
+    textAlign: 'right',
   },
 }));

@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
-import { radius, space, swatches, tint } from '@/design/tokens';
+import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
+import { inkOf, radius, space, swatches, tint } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Category, TransactionKind } from '@/database/schema';
 import { haptic } from '@/utils/haptics';
 import { categoryService } from '@/services';
 import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
-import { categoryEmojiChoices, categoryGlyph } from '@/domain/glyphs';
+import { categoryIcon, categoryIconChoices } from '@/domain/glyphs';
 import {
+  BottomBar,
   Button,
   Card,
   CategoryAvatar,
   Divider,
   Icon,
-  IconButton,
+  IconName,
   ListRow,
   LoadingView,
   ScreenHeader,
@@ -28,16 +29,20 @@ import {
 interface Draft {
   id: string | null;
   name: string;
-  icon: string;
+  icon: IconName;
   color: string;
 }
 
 const fetchCategories = () => categoryService.getAll();
 
+const GRID_COLUMNS = 6;
+const GRID_GAP = space.xs;
+
 export default function CategoriesScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const toast = useToast();
+  const { width } = useWindowDimensions();
   const { data, reload } = useScreenData(fetchCategories);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +51,14 @@ export default function CategoriesScreen() {
 
   if (!data) return <LoadingView />;
   const visible = data.filter((c) => c.kind === kind);
+  const cell = Math.floor((width - space.lg * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS);
 
   const open = (c?: Category) => {
     setError(null);
     setDraft(
       c
-        ? { id: c.id, name: c.name, icon: categoryGlyph(c.icon), color: c.color ?? swatches[0] }
-        : { id: null, name: '', icon: categoryEmojiChoices[0], color: swatches[data.length % (swatches.length - 1)] }
+        ? { id: c.id, name: c.name, icon: categoryIcon(c.icon), color: c.color ?? swatches[0] }
+        : { id: null, name: '', icon: categoryIconChoices[0], color: swatches[data.length % (swatches.length - 1)] }
     );
   };
 
@@ -96,7 +102,7 @@ export default function CategoriesScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Categories" back right={<IconButton icon="plus" accessibilityLabel="Add category" onPress={() => open()} />} />
+      <ScreenHeader title="Categories" subtitle="Tap one to change its name, icon or colour" back />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <SegmentedControl
           options={[
@@ -105,18 +111,21 @@ export default function CategoriesScreen() {
           ]}
           value={kind}
           onChange={setKind}
-          style={{ marginBottom: space.md }}
+          style={{ marginBottom: space.lg }}
         />
-        <Card padded={false} style={{ overflow: 'hidden' }}>
+        <Card padded={false}>
           {visible.map((c, i) => (
             <View key={c.id}>
-              {i > 0 ? <Divider inset={72} /> : null}
-              <ListRow title={c.name} left={<CategoryAvatar icon={c.icon} color={c.color} size={40} />} chevron onPress={() => open(c)} />
+              {i > 0 ? <Divider /> : null}
+              <ListRow title={c.name} left={<CategoryAvatar icon={c.icon} color={c.color} />} chevron onPress={() => open(c)} />
             </View>
           ))}
         </Card>
-        <Button title="Add category" icon="plus" variant="secondary" fullWidth onPress={() => open()} style={{ marginTop: space.lg }} />
       </ScrollView>
+
+      <BottomBar>
+        <Button title="Add category" icon="plus" size="lg" fullWidth onPress={() => open()} />
+      </BottomBar>
 
       <Sheet
         visible={draft !== null}
@@ -124,57 +133,80 @@ export default function CategoriesScreen() {
         title={draft?.id ? 'Edit category' : kind === 'INCOME' ? 'New income category' : 'New category'}
         footer={
           <View style={{ gap: space.xs }}>
-            <Button title="Save" size="lg" fullWidth loading={saving} onPress={save} />
-            {draft?.id ? <Button title="Delete category" variant="ghost" fullWidth onPress={() => void remove()} /> : null}
+            <Button title="Save category" size="lg" fullWidth loading={saving} onPress={save} />
+            {draft?.id ? <Button title="Delete category" variant="dangerSoft" fullWidth onPress={() => void remove()} /> : null}
           </View>
         }
       >
         {draft ? (
           <>
+            {/* Live preview with the name field beside it */}
             <View style={styles.preview}>
               <CategoryAvatar icon={draft.icon} color={draft.color} size={64} />
+              <TextField
+                label="Name"
+                value={draft.name}
+                onChangeText={(name) => setDraft({ ...draft, name })}
+                placeholder="e.g. Groceries"
+                autoCapitalize="words"
+                maxLength={24}
+                error={error}
+                containerStyle={{ flex: 1 }}
+              />
             </View>
-            <TextField
-              label="Name"
-              value={draft.name}
-              onChangeText={(name) => setDraft({ ...draft, name })}
-              placeholder="e.g. Groceries"
-              autoCapitalize="words"
-              maxLength={24}
-              error={error}
-            />
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+
+            <Text variant="label" style={styles.label}>
               Icon
             </Text>
-            <View style={styles.wrap}>
-              {categoryEmojiChoices.map((e) => {
-                const selected = draft.icon === e;
+            <View style={styles.grid}>
+              {categoryIconChoices.map((name) => {
+                const selected = draft.icon === name;
                 return (
                   <Pressable
-                    key={e}
-                    onPress={() => setDraft({ ...draft, icon: e })}
-                    style={[styles.emoji, selected && { backgroundColor: tint(draft.color, 0.2), borderColor: draft.color }]}
-                    accessibilityLabel={`Icon ${e}`}
+                    key={name}
+                    onPress={() => {
+                      haptic.select();
+                      setDraft({ ...draft, icon: name });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Icon ${name}`}
+                    style={[
+                      styles.iconCell,
+                      { width: cell, height: cell, borderRadius: cell / 2 },
+                      selected && { backgroundColor: tint(draft.color, 0.16), borderColor: inkOf(draft.color) },
+                    ]}
                   >
-                    <Text style={{ fontSize: 22, lineHeight: 28 }}>{e}</Text>
+                    <Icon name={name} size={22} color={selected ? inkOf(draft.color) : colors.textSecondary} />
                   </Pressable>
                 );
               })}
             </View>
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+
+            <Text variant="label" style={styles.label}>
               Colour
             </Text>
-            <View style={styles.wrap}>
-              {swatches.map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setDraft({ ...draft, color: s })}
-                  style={[styles.swatch, { backgroundColor: s }]}
-                  accessibilityLabel={`Colour ${s}`}
-                >
-                  {draft.color === s ? <Icon name="check" size={16} color="#FFFFFF" strokeWidth={3} /> : null}
-                </Pressable>
-              ))}
+            <View style={styles.grid}>
+              {swatches.map((s) => {
+                const selected = draft.color === s;
+                return (
+                  <Pressable
+                    key={s}
+                    onPress={() => {
+                      haptic.select();
+                      setDraft({ ...draft, color: s });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Colour ${s}`}
+                    style={[styles.swatchRing, { width: cell, height: cell, borderRadius: cell / 2 }, selected && { borderColor: s }]}
+                  >
+                    <View style={[styles.swatch, { backgroundColor: s, borderRadius: cell / 2 }]}>
+                      {selected ? <Icon name="check" size={18} color="#FFFFFF" strokeWidth={3} /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           </>
         ) : null}
@@ -190,36 +222,42 @@ const useStyles = makeStyles((colors) => ({
   },
   content: {
     paddingHorizontal: space.lg,
-    paddingTop: space.sm,
+    paddingTop: space.lg,
     paddingBottom: space.xxxl,
   },
   preview: {
-    alignItems: 'center',
-    marginBottom: space.md,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
   },
   label: {
-    marginTop: space.lg,
-    marginBottom: space.xs,
+    marginTop: space.xl,
+    marginBottom: space.sm,
   },
-  wrap: {
+  grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: space.xs,
+    gap: GRID_GAP,
   },
-  emoji: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
+  iconCell: {
+    borderWidth: 2,
     borderColor: 'transparent',
     backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  swatchRing: {
+    borderWidth: 2,
+    borderColor: 'transparent',
+    padding: 3,
+  },
   swatch: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

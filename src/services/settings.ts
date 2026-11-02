@@ -29,6 +29,8 @@ export interface SettingsShape {
   lastBackupAt: number | null;
   /** Overall monthly spending budget in paise (0 = not set). */
   overallBudgetPaise: number;
+  /** Background-capture setup steps the user has opened (their state can't always be read). */
+  captureStepsOpened: string[];
 }
 
 const DEFAULTS: SettingsShape = {
@@ -46,6 +48,7 @@ const DEFAULTS: SettingsShape = {
   recurringIgnored: [],
   lastBackupAt: null,
   overallBudgetPaise: 0,
+  captureStepsOpened: [],
 };
 
 type Key = keyof SettingsShape;

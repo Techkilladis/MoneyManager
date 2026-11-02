@@ -6,7 +6,7 @@ Privacy-first personal finance application focused on automatically capturing UP
 ## Core User Flow
 1. User makes UPI payment using Google Pay, PhonePe, Paytm, BHIM, or other UPI apps
 2. Android receives UPI payment notification
-3. Native NotificationListenerService detects notification
+3. Native SMS receiver detects a bank SMS
 4. Native parser extracts: amount, merchant, UPI app, timestamp, transaction reference, raw notification
 5. Transaction stored locally as pending/unclassified
 6. Quick Capture flow asks "What was this for?"
@@ -22,7 +22,7 @@ Privacy-first personal finance application focused on automatically capturing UP
 - Expo SDK 52, React Native 0.76, React 18.3, TypeScript
 - Android-first, Expo Development Build
 - SQLite local database (Expo SQLite)
-- NotificationListenerService for UPI detection
+- SMS receiver + inbox scan for UPI detection
 - Categories, members, merchants, budgets, analytics
 - Quick Capture for transaction classification
 - Git repository with documentation

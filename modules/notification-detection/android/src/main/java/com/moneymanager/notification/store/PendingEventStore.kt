@@ -112,6 +112,24 @@ class PendingEventStore private constructor(context: Context) {
     }
 
     /**
+     * True when this SMS (or the same UPI payment, matched by reference, amount
+     * and direction) already produced an event, whatever its status now.
+     */
+    fun isKnownSms(dedupeKey: String, reference: String?, amountPaise: Long, direction: String): Boolean {
+        synchronized(lock) {
+            val db = dbHelper.readableDatabase
+            try {
+                val sql = "SELECT 1 FROM pending_upi_events WHERE dedupeKey = ?" +
+                    if (reference != null) " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)" else ""
+                val args = if (reference != null) arrayOf(dedupeKey, reference, amountPaise.toString(), direction) else arrayOf(dedupeKey)
+                db.rawQuery("$sql LIMIT 1", args).use { return it.moveToFirst() }
+            } finally {
+                db.close()
+            }
+        }
+    }
+
+    /**
      * Gets all pending events, optionally filtered by status.
      */
     fun getPendingEvents(status: String? = null): List<PendingUpiEvent> {

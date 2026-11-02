@@ -8,7 +8,7 @@ Privacy-first personal finance application for Android focused on automatically 
 - **React**: 18.3.x
 - **TypeScript**: 5.5.x
 - **Database**: Expo SQLite (local-first)
-- **Native**: Kotlin (NotificationListenerService)
+- **Native**: Kotlin (SMS BroadcastReceiver + inbox reader)
 - **Charts**: react-native-gifted-charts (SVG-based)
 
 ## Quick Start
@@ -49,13 +49,13 @@ MoneyManagerExpo52/
 │   ├── domain/                 # Models, category glyphs
 │   ├── services/               # Ledger queries, budgets, analytics, classification, native bridge
 │   └── utils/format.ts         # INR / date formatting
-├── modules/notification-detection/  # Native Kotlin NotificationListenerService
+├── modules/notification-detection/  # Native Kotlin SMS detection
 ├── android/                    # GENERATED - do not edit manually
 └── docs/
 ```
 
 ## Features
-- **Automatic UPI capture**: a native NotificationListenerService detects payments from Google Pay, PhonePe, Paytm, BHIM and more; they wait in a review queue
+- **Automatic UPI capture**: a native SMS receiver (plus an inbox scan) detects UPI payments in bank SMS; they wait in a review queue
 - **Quick review**: confirm or ignore captured payments one after another, with categories pre-filled from merchant memory
 - **Manual entry**: big-number amount entry, recent-merchant suggestions, category grid, people, date/time picker, notes
 - **History**: search, period chips, category/person filters, grouped by day with daily totals
@@ -85,7 +85,7 @@ See `docs/project-status.md` for current phase and progress.
 - Local-first + Privacy-first + Financial data correctness
 - Money stored as integer paise (₹125.50 = 12550)
 - No cloud backend for MVP
-- Native Kotlin NotificationListenerService for UPI detection
+- Native Kotlin SMS receiver + inbox scan for UPI detection
 - Expo Development Build (not Expo Go)
 - **No AI/ML on device** — deterministic algorithms only
 

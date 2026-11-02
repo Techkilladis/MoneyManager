@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
-import { space, swatches } from '@/design/tokens';
+import { radius, space, swatches } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Member } from '@/database/schema';
 import { memberService, splitService } from '@/services';
@@ -12,15 +12,18 @@ import { formatINR, pluralize } from '@/utils/format';
 import { haptic } from '@/utils/haptics';
 import { requestMoney } from '@/utils/requestMoney';
 import {
+  BottomBar,
   Button,
   Card,
   Divider,
   Icon,
-  IconButton,
+  IconTile,
+  KeyFigure,
   ListRow,
   LoadingView,
   MemberAvatar,
   ScreenHeader,
+  SectionTitle,
   Sheet,
   Text,
   TextField,
@@ -143,37 +146,49 @@ export default function MembersScreen() {
     ]);
   };
 
+  const openUpi = () => {
+    setUpiError(null);
+    setUpiDraft({ id: loaded.upi.upiId, name: loaded.upi.upiName });
+  };
+
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="People" back right={<IconButton icon="plus" accessibilityLabel="Add person" onPress={() => open()} />} />
+      <ScreenHeader title="People & splits" subtitle="Who an expense was for, and who owes you" back />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loaded.balances.length > 0 ? (
           <>
-            <View style={styles.owedHead}>
-              <Text variant="heading">Owed to you</Text>
-              <Text variant="bodyStrong" numeric color={colors.positive}>
-                {formatINR(totalOwed)}
+            <KeyFigure
+              label="Owed to you"
+              value={formatINR(totalOwed, { decimals: 'never' })}
+              color={colors.positive}
+              style={styles.figure}
+            >
+              <Text variant="caption" style={{ marginTop: space.xxs }}>
+                From {pluralize(loaded.balances.reduce((s, b) => s + b.items.length, 0), 'split expense')}
               </Text>
-            </View>
-            <Card padded={false} style={{ overflow: 'hidden', marginBottom: space.xl }}>
+            </KeyFigure>
+            <Card padded={false} style={styles.section}>
               {loaded.balances.map((b, i) => (
                 <View key={b.member.id}>
-                  {i > 0 ? <Divider inset={space.md} /> : null}
+                  {i > 0 ? <Divider /> : null}
                   <View style={styles.owedRow}>
-                    <MemberAvatar name={b.member.name} color={b.member.color} size={40} />
-                    <View style={{ flex: 1 }}>
-                      <Text variant="bodyStrong">{b.member.name}</Text>
-                      <Text variant="caption" numberOfLines={1}>
-                        {pluralize(b.items.length, 'expense')} · {b.items.slice(0, 2).map((x) => x.merchant).join(', ')}
+                    <View style={styles.inline}>
+                      <MemberAvatar name={b.member.name} color={b.member.color} />
+                      <View style={{ flex: 1 }}>
+                        <Text variant="body">{b.member.name}</Text>
+                        <Text variant="caption" numberOfLines={1}>
+                          {b.items.slice(0, 2).map((x) => x.merchant).join(', ')}
+                          {b.items.length > 2 ? ` +${b.items.length - 2}` : ''}
+                        </Text>
+                      </View>
+                      <Text variant="bodyStrong" numeric>
+                        {formatINR(b.owedPaise, { decimals: 'never' })}
                       </Text>
                     </View>
-                    <Text variant="bodyStrong" numeric>
-                      {formatINR(b.owedPaise)}
-                    </Text>
-                  </View>
-                  <View style={styles.owedActions}>
-                    <Button title="Settled" icon="check" variant="ghost" size="sm" onPress={() => void settle(b)} />
-                    <Button title="Request" icon="send" variant="secondary" size="sm" onPress={() => request(b)} />
+                    <View style={styles.owedActions}>
+                      <Button title="Request" icon="send" size="sm" onPress={() => request(b)} />
+                      <Button title="Settled" icon="check" variant="secondary" size="sm" onPress={() => void settle(b)} />
+                    </View>
                   </View>
                 </View>
               ))}
@@ -181,46 +196,44 @@ export default function MembersScreen() {
           </>
         ) : null}
 
-        <Text variant="label" style={styles.intro}>
-          Track who each expense was for, and split bills with friends from any expense.
-        </Text>
-        <Card padded={false} style={{ overflow: 'hidden' }}>
-          {data.map((m, i) => {
-            const owed = owedById.get(m.id);
-            return (
-              <View key={m.id}>
-                {i > 0 ? <Divider inset={72} /> : null}
-                <ListRow
-                  title={m.name}
-                  subtitle={owed ? `Owes you ${formatINR(owed.owedPaise)}` : undefined}
-                  left={<MemberAvatar name={m.name} color={m.color} size={40} />}
-                  chevron
-                  onPress={() => open(m)}
-                />
-              </View>
-            );
-          })}
-        </Card>
+        <View style={loaded.balances.length > 0 ? styles.section : styles.firstSection}>
+          <SectionTitle title="People" />
+          <Card padded={false}>
+            {data.map((m, i) => {
+              const owed = owedById.get(m.id);
+              return (
+                <View key={m.id}>
+                  {i > 0 ? <Divider /> : null}
+                  <ListRow
+                    title={m.name}
+                    left={<MemberAvatar name={m.name} color={m.color} />}
+                    value={owed ? `owes ${formatINR(owed.owedPaise, { decimals: 'never' })}` : undefined}
+                    chevron
+                    onPress={() => open(m)}
+                  />
+                </View>
+              );
+            })}
+          </Card>
+          <Text variant="caption" style={{ marginTop: space.sm }}>
+            Split any expense from its detail screen.
+          </Text>
+        </View>
 
-        <Card style={{ marginTop: space.xl }} onPress={() => {
-          setUpiError(null);
-          setUpiDraft({ id: loaded.upi.upiId, name: loaded.upi.upiName });
-        }}>
-          <View style={styles.upiRow}>
-            <View style={styles.upiIcon}>
-              <Icon name="wallet" size={20} color={colors.brand} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text variant="bodyStrong">Your UPI ID</Text>
-              <Text variant="caption">
-                {loaded.upi.upiId ? loaded.upi.upiId : 'Add it so friends can pay you back in one tap'}
-              </Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colors.textDisabled} />
-          </View>
+        <Card padded={false} style={styles.section}>
+          <ListRow
+            title="Your UPI ID"
+            subtitle={loaded.upi.upiId ? `${loaded.upi.upiId} · used in requests` : 'Add it so friends can pay you back in one tap'}
+            left={<IconTile icon="qrCode" />}
+            chevron
+            onPress={openUpi}
+          />
         </Card>
-        <Button title="Add person" icon="plus" variant="secondary" fullWidth onPress={() => open()} style={{ marginTop: space.lg }} />
       </ScrollView>
+
+      <BottomBar>
+        <Button title="Add person" icon="plus" size="lg" fullWidth onPress={() => open()} />
+      </BottomBar>
 
       <Sheet
         visible={upiDraft !== null}
@@ -231,7 +244,7 @@ export default function MembersScreen() {
         {upiDraft ? (
           <>
             <Text variant="label" style={{ marginBottom: space.md }}>
-              Used in "pay me back" requests. It's only shared when you send one.
+              Used in &quot;pay me back&quot; requests. It&apos;s only shared when you send one.
             </Text>
             <TextField
               label="UPI ID"
@@ -265,7 +278,7 @@ export default function MembersScreen() {
         footer={
           <View style={{ gap: space.xs }}>
             <Button title="Save" size="lg" fullWidth loading={saving} onPress={save} />
-            {draft?.id ? <Button title="Remove" variant="ghost" fullWidth onPress={remove} /> : null}
+            {draft?.id ? <Button title="Remove person" variant="dangerSoft" fullWidth onPress={remove} /> : null}
           </View>
         }
       >
@@ -273,30 +286,38 @@ export default function MembersScreen() {
           <>
             <View style={styles.preview}>
               <MemberAvatar name={draft.name || '?'} color={draft.color} size={64} />
+              <TextField
+                label="Name"
+                value={draft.name}
+                onChangeText={(name) => setDraft({ ...draft, name })}
+                placeholder="e.g. Sister"
+                autoCapitalize="words"
+                maxLength={24}
+                error={error}
+                containerStyle={{ flex: 1 }}
+              />
             </View>
-            <TextField
-              label="Name"
-              value={draft.name}
-              onChangeText={(name) => setDraft({ ...draft, name })}
-              placeholder="e.g. Sister"
-              autoCapitalize="words"
-              maxLength={24}
-              error={error}
-            />
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.label}>
+            <Text variant="label" style={styles.label}>
               Colour
             </Text>
             <View style={styles.wrap}>
-              {swatches.map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setDraft({ ...draft, color: s })}
-                  style={[styles.swatch, { backgroundColor: s }]}
-                  accessibilityLabel={`Colour ${s}`}
-                >
-                  {draft.color === s ? <Icon name="check" size={16} color="#FFFFFF" strokeWidth={3} /> : null}
-                </Pressable>
-              ))}
+              {swatches.map((s) => {
+                const selected = draft.color === s;
+                return (
+                  <Pressable
+                    key={s}
+                    onPress={() => setDraft({ ...draft, color: s })}
+                    style={[styles.swatchRing, selected && { borderColor: s }]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Colour ${s}`}
+                  >
+                    <View style={[styles.swatch, { backgroundColor: s }]}>
+                      {selected ? <Icon name="check" size={16} color="#FFFFFF" strokeWidth={3} /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           </>
         ) : null}
@@ -312,64 +333,61 @@ const useStyles = makeStyles((colors) => ({
   },
   content: {
     paddingHorizontal: space.lg,
-    paddingTop: space.sm,
     paddingBottom: space.xxxl,
   },
-  intro: {
-    marginBottom: space.md,
-    marginHorizontal: space.xxs,
+  figure: {
+    paddingTop: space.xl,
   },
-  owedHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: space.sm,
-    marginHorizontal: space.xxs,
+  section: {
+    marginTop: space.xxl,
   },
-  owedRow: {
+  firstSection: {
+    marginTop: space.lg,
+  },
+  inline: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
+  },
+  owedRow: {
+    padding: space.md,
   },
   owedActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: space.xs,
-    paddingHorizontal: space.sm,
-    paddingBottom: space.sm,
-  },
-  upiRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-  },
-  upiIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: space.sm,
+    marginLeft: 52,
   },
   preview: {
-    alignItems: 'center',
-    marginBottom: space.md,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
   },
   label: {
-    marginTop: space.lg,
-    marginBottom: space.xs,
+    marginTop: space.xl,
+    marginBottom: space.sm,
   },
   wrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: space.xs,
   },
+  swatchRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    padding: 3,
+  },
   swatch: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    flex: 1,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },

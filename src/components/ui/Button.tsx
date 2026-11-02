@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, PressableProps, StyleProp, View, ViewStyle } from 'react-native';
-import { radius, shadow, space } from '@/design/tokens';
+import { radius, space } from '@/design/tokens';
 import type { Palette } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Icon, IconName } from './Icon';
@@ -19,19 +19,21 @@ interface ButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   style?: StyleProp<ViewStyle>;
 }
 
-const variantColors = (colors: Palette, dark: boolean): Record<Variant, { bg: string; bgPressed: string; fg: string; border?: string }> => ({
+// primary: moss fill · secondary/outline: card with a hairline · ghost: moss text
+// danger: clay wash (confirming a destructive step) · dangerSoft: clay text only
+const variantColors = (colors: Palette): Record<Variant, { bg: string; bgPressed: string; fg: string; border?: string }> => ({
   primary: { bg: colors.brand, bgPressed: colors.brandPressed, fg: colors.textOnBrand },
-  secondary: { bg: colors.brandSoft, bgPressed: colors.brandSoftBorder, fg: colors.brand },
-  ghost: { bg: 'transparent', bgPressed: colors.surfacePressed, fg: colors.brand },
-  danger: { bg: colors.negative, bgPressed: dark ? '#DC5A5A' : '#C9363B', fg: colors.textOnBrand },
-  dangerSoft: { bg: colors.negativeSoft, bgPressed: dark ? '#4A2228' : '#F9D6D7', fg: colors.negative },
+  secondary: { bg: colors.surface, bgPressed: colors.surfaceMuted, fg: colors.text, border: colors.border },
   outline: { bg: colors.surface, bgPressed: colors.surfaceMuted, fg: colors.text, border: colors.border },
+  ghost: { bg: 'transparent', bgPressed: colors.surfaceMuted, fg: colors.brand },
+  danger: { bg: colors.negativeSoft, bgPressed: colors.surfacePressed, fg: colors.negative },
+  dangerSoft: { bg: 'transparent', bgPressed: colors.surfaceMuted, fg: colors.negative },
 });
 
-const sizes: Record<Size, { height: number; paddingH: number; icon: number; text: 'bodyStrong' | 'labelStrong' }> = {
-  lg: { height: 54, paddingH: space.xl, icon: 20, text: 'bodyStrong' },
-  md: { height: 46, paddingH: space.lg, icon: 18, text: 'labelStrong' },
-  sm: { height: 36, paddingH: space.md, icon: 16, text: 'labelStrong' },
+const sizes: Record<Size, { height: number; paddingH: number; icon: number; text: 'bodyStrong' | 'labelStrong'; radius: number }> = {
+  lg: { height: 56, paddingH: space.xl, icon: 20, text: 'bodyStrong', radius: radius.lg },
+  md: { height: 48, paddingH: space.lg, icon: 18, text: 'bodyStrong', radius: radius.lg },
+  sm: { height: 44, paddingH: space.md, icon: 16, text: 'labelStrong', radius: radius.pill },
 };
 
 export function Button({
@@ -46,8 +48,8 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const styles = useStyles();
-  const { colors, scheme } = useTheme();
-  const p = variantColors(colors, scheme === 'dark')[variant];
+  const { colors } = useTheme();
+  const p = variantColors(colors)[variant];
   const s = sizes[size];
   const inactive = disabled || loading;
 
@@ -62,13 +64,13 @@ export function Button({
         {
           height: s.height,
           paddingHorizontal: s.paddingH,
+          borderRadius: s.radius,
           backgroundColor: pressed ? p.bgPressed : p.bg,
           borderColor: p.border ?? 'transparent',
           borderWidth: p.border ? 1 : 0,
           opacity: inactive && !loading ? 0.45 : 1,
           transform: [{ scale: pressed ? 0.98 : 1 }],
         },
-        variant === 'primary' && !inactive ? shadow.brand : null,
         fullWidth ? styles.fullWidth : null,
         style,
       ]}
@@ -91,6 +93,7 @@ interface IconButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   icon: IconName;
   size?: number;
   color?: string;
+  /** Fill colour; without one the button is a card circle with a hairline. */
   background?: string;
   accessibilityLabel: string;
   style?: StyleProp<ViewStyle>;
@@ -98,16 +101,16 @@ interface IconButtonProps extends Omit<PressableProps, 'style' | 'children'> {
 
 export function IconButton({
   icon,
-  size = 40,
+  size = 44,
   color: colorProp,
-  background: backgroundProp,
+  background,
   style,
   ...rest
 }: IconButtonProps) {
   const { colors } = useTheme();
   const color = colorProp ?? colors.text;
-  const background = backgroundProp ?? colors.surface;
   const styles = useStyles();
+  const outlined = background === undefined;
   return (
     <Pressable
       accessibilityRole="button"
@@ -119,19 +122,20 @@ export function IconButton({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: pressed ? colors.surfacePressed : background,
+          backgroundColor: pressed ? colors.surfacePressed : background ?? colors.surface,
+          borderWidth: outlined ? 1 : 0,
+          borderColor: colors.border,
         },
         style,
       ]}
     >
-      <Icon name={icon} size={Math.round(size * 0.48)} color={color} />
+      <Icon name={icon} size={Math.round(size * 0.45)} color={color} />
     </Pressable>
   );
 }
 
-const useStyles = makeStyles((colors) => ({
+const useStyles = makeStyles(() => ({
   base: {
-    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },

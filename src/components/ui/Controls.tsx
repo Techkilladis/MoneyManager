@@ -8,9 +8,10 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { font, radius, space, tint } from '@/design/tokens';
+import { font, fontFamily, radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { haptic } from '@/utils/haptics';
+import { CategoryAvatar } from './Avatars';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
@@ -20,16 +21,25 @@ interface ChipProps {
   label: string;
   selected?: boolean;
   onPress?: () => void;
+  /** A category or person colour: shows a dot and selects in the moss style. */
   color?: string | null;
-  emoji?: string;
   icon?: IconName;
+  /** A category's stored icon: shows its badge at the start of the chip. */
+  categoryIcon?: string | null;
+  /** Trailing icon (e.g. "x" on a removable filter). */
+  trailingIcon?: IconName;
   style?: StyleProp<ViewStyle>;
 }
 
-export function Chip({ label, selected = false, onPress, color, emoji, icon, style }: ChipProps) {
+/**
+ * Pill chip. Plain chips select as ink (period filters); category and person
+ * chips select as a moss wash so their colour badge stays visible.
+ */
+export function Chip({ label, selected = false, onPress, color, icon, categoryIcon, trailingIcon, style }: ChipProps) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const accent = color ?? colors.brand;
+  const soft = categoryIcon !== undefined || !!color;
+  const fg = selected ? (soft ? colors.brand : colors.textOnInk) : colors.textSecondary;
   return (
     <Pressable
       onPress={
@@ -44,18 +54,22 @@ export function Chip({ label, selected = false, onPress, color, emoji, icon, sty
       accessibilityState={{ selected }}
       style={({ pressed }) => [
         styles.chip,
+        categoryIcon !== undefined && styles.chipWithBadge,
         selected
-          ? { backgroundColor: tint(accent, 0.14), borderColor: accent }
+          ? soft
+            ? { backgroundColor: colors.brandSoft, borderColor: colors.brandSoftBorder }
+            : { backgroundColor: colors.text, borderColor: colors.text }
           : { backgroundColor: pressed ? colors.surfaceMuted : colors.surface, borderColor: colors.border },
         style,
       ]}
     >
-      {emoji ? <Text style={styles.chipEmoji}>{emoji}</Text> : null}
-      {icon ? <Icon name={icon} size={14} color={selected ? accent : colors.textSecondary} /> : null}
-      {!emoji && !icon && color ? <View style={[styles.chipDot, { backgroundColor: color }]} /> : null}
-      <Text variant="labelStrong" color={selected ? colors.text : colors.textSecondary} numberOfLines={1}>
+      {categoryIcon !== undefined ? <CategoryAvatar icon={categoryIcon} color={color} size={30} /> : null}
+      {icon ? <Icon name={icon} size={16} color={fg} /> : null}
+      {categoryIcon === undefined && !icon && color ? <View style={[styles.chipDot, { backgroundColor: color }]} /> : null}
+      <Text variant="labelStrong" color={fg} numberOfLines={1}>
         {label}
       </Text>
+      {trailingIcon ? <Icon name={trailingIcon} size={16} color={fg} /> : null}
     </Pressable>
   );
 }
@@ -66,14 +80,16 @@ interface SegmentedProps<T extends string> {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  /** Compact pill variant (form headers). */
+  compact?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
-export function SegmentedControl<T extends string>({ options, value, onChange, style }: SegmentedProps<T>) {
+export function SegmentedControl<T extends string>({ options, value, onChange, compact = false, style }: SegmentedProps<T>) {
   const { colors } = useTheme();
   const styles = useStyles();
   return (
-    <View style={[styles.segmented, style]}>
+    <View style={[styles.segmented, compact && styles.segmentedCompact, style]}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -85,7 +101,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
             }}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            style={[styles.segment, active && styles.segmentActive]}
+            style={[styles.segment, compact && styles.segmentCompact, active && styles.segmentActive]}
           >
             <Text variant="labelStrong" color={active ? colors.text : colors.textTertiary}>
               {opt.label}
@@ -138,12 +154,12 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   return (
     <View style={containerStyle}>
       {label ? (
-        <Text variant="labelStrong" color={colors.textSecondary} style={styles.fieldLabel}>
+        <Text variant="label" style={styles.fieldLabel}>
           {label}
         </Text>
       ) : null}
       <View style={[styles.field, { borderColor }, multiline && styles.fieldMultiline]}>
-        {icon ? <Icon name={icon} size={18} color={focused ? colors.brand : colors.textTertiary} /> : null}
+        {icon ? <Icon name={icon} size={20} color={focused ? colors.brand : colors.textTertiary} /> : null}
         <TextInput
           ref={ref}
           placeholderTextColor={colors.textTertiary}
@@ -196,7 +212,7 @@ export function ProgressBar({
   );
 }
 
-const useStyles = makeStyles((colors, scheme) => ({
+const useStyles = makeStyles((colors) => ({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -206,9 +222,11 @@ const useStyles = makeStyles((colors, scheme) => ({
     borderRadius: radius.pill,
     borderWidth: 1,
   },
-  chipEmoji: {
-    fontSize: 15,
-    lineHeight: 18,
+  chipWithBadge: {
+    height: 44,
+    paddingLeft: 6,
+    paddingRight: space.md,
+    gap: space.xs,
   },
   chipDot: {
     width: 8,
@@ -218,23 +236,31 @@ const useStyles = makeStyles((colors, scheme) => ({
   segmented: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
-    padding: 3,
+    borderRadius: radius.lg,
+    padding: 4,
+  },
+  segmentedCompact: {
+    borderRadius: radius.pill,
+    alignSelf: 'center',
   },
   segment: {
     flex: 1,
-    height: 34,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.md - 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  segmentCompact: {
+    flex: 0,
+    height: 36,
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
   },
   segmentActive: {
-    backgroundColor: scheme === 'dark' ? colors.borderStrong : colors.surface,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
   },
   fieldLabel: {
     marginBottom: space.xs,
@@ -243,9 +269,9 @@ const useStyles = makeStyles((colors, scheme) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-    minHeight: 50,
+    minHeight: 56,
     paddingHorizontal: space.md,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
   },
@@ -256,6 +282,7 @@ const useStyles = makeStyles((colors, scheme) => ({
   input: {
     flex: 1,
     fontSize: font.size.body,
+    fontFamily: fontFamily.regular,
     color: colors.text,
     paddingVertical: space.sm,
   },

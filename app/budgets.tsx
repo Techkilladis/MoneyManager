@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { space } from '@/design/tokens';
 import type { Palette } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
@@ -12,15 +12,19 @@ import { useScreenData } from '@/hooks/useScreenData';
 import { amountToInput, formatCompactINR, formatINR, parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { CategoryGrid } from '@/components/Pickers';
 import {
+  BottomBar,
   Button,
   Card,
   CategoryAvatar,
+  Divider,
   EmptyState,
-  Icon,
-  IconButton,
+  IconTile,
+  KeyFigure,
+  ListRow,
   LoadingView,
   ProgressBar,
   ScreenHeader,
+  SectionTitle,
   Sheet,
   Text,
   TextField,
@@ -132,116 +136,116 @@ export default function BudgetsScreen() {
     );
   };
 
+  const over = totalSpent > totalLimit;
+  const hasAny = data.budgets.length > 0 || hasOverall;
+  const editOverall = () => {
+    setError(null);
+    setOverallDraft(hasOverall ? amountToInput(data.overall) : '');
+  };
+
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Budgets" back right={<IconButton icon="plus" accessibilityLabel="Add budget" onPress={openNew} />} />
+      <ScreenHeader title="Budgets" subtitle={`${monthName} · resets on the 1st`} back />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {!hasOverall ? (
-          <Card
-            style={{ marginBottom: space.lg }}
-            onPress={() => {
-              setError(null);
-              setOverallDraft('');
-            }}
-          >
-            <View style={styles.budgetTop}>
-              <View style={styles.overallIcon}>
-                <Icon name="wallet" size={20} color={colors.brand} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text variant="bodyStrong">Set a monthly spending budget</Text>
-                <Text variant="caption">One limit for everything you spend in a month.</Text>
-              </View>
-              <Icon name="plus" size={18} color={colors.brand} />
-            </View>
-          </Card>
-        ) : null}
-
-        {data.budgets.length === 0 && !hasOverall ? (
-          <Card>
-            <EmptyState
-              compact
-              icon="target"
-              title="Budget by category"
-              message="Pick a category and a monthly limit. Budgets reset automatically every month."
-              actionLabel="Create budget"
-              onAction={openNew}
+        {hasAny ? (
+          <View style={styles.figure}>
+            <KeyFigure
+              label={over ? `Over ${hasOverall ? 'your monthly budget' : 'your budgets'}` : 'Left this month'}
+              value={formatINR(Math.abs(totalLimit - totalSpent), { decimals: 'never' })}
+              color={over ? colors.negative : undefined}
             />
-          </Card>
-        ) : (
-          <>
-            <Card
-              style={styles.summary}
-              onPress={
-                hasOverall
-                  ? () => {
-                      setError(null);
-                      setOverallDraft(amountToInput(data.overall));
-                    }
-                  : undefined
-              }
-            >
-              <Text variant="overline">
-                {hasOverall ? 'Monthly budget' : 'Category budgets'} · {monthName} · {daysLeft} days left
-              </Text>
-              <View style={styles.summaryRow}>
-                <Text variant="title" numeric>
-                  {formatINR(totalSpent, { decimals: 'never' })}
-                </Text>
-                <Text variant="label" numeric>
-                  of {formatINR(totalLimit, { decimals: 'never' })}
-                </Text>
-              </View>
+            <View style={{ marginTop: space.md }}>
               <ProgressBar
                 value={totalLimit ? totalSpent / totalLimit : 0}
-                color={totalSpent > totalLimit ? colors.negative : colors.brand}
-                height={10}
+                color={over ? colors.negative : totalSpent / totalLimit >= 0.9 ? colors.warning : colors.brand}
               />
-              <Text variant="caption" style={{ marginTop: space.xs }}>
-                {totalSpent > totalLimit
-                  ? `${formatINR(totalSpent - totalLimit)} over your ${hasOverall ? 'monthly' : 'combined'} budget`
-                  : `${formatINR(totalLimit - totalSpent)} left · about ${formatCompactINR(Math.round((totalLimit - totalSpent) / daysLeft))} a day`}
+            </View>
+            <View style={styles.between}>
+              <Text variant="caption" numeric>
+                {formatINR(totalSpent, { decimals: 'never' })} spent of {formatINR(totalLimit, { decimals: 'never' })}
               </Text>
-            </Card>
-
-            {hasOverall && data.budgets.length === 0 ? (
-              <Button title="Add a category budget" icon="plus" variant="secondary" fullWidth onPress={openNew} style={{ marginTop: space.lg }} />
+              <Text variant="caption" numeric>
+                {daysLeft === 1 ? 'Last day' : `${daysLeft} days to go`}
+              </Text>
+            </View>
+            {!over && daysLeft > 0 ? (
+              <Text variant="label" style={{ marginTop: space.xs }}>
+                About {formatCompactINR(Math.round((totalLimit - totalSpent) / daysLeft))} a day keeps you on track.
+              </Text>
             ) : null}
+          </View>
+        ) : null}
 
-            <View style={{ gap: space.sm, marginTop: space.lg }}>
-              {data.budgets.map((b) => {
-                const over = b.spentPaise > b.budget.amountPaise;
+        {data.budgets.length > 0 ? (
+          <View style={styles.section}>
+            <SectionTitle title="By category" right={<Text variant="caption">{data.budgets.length === 1 ? '1 budget' : `${data.budgets.length} budgets`}</Text>} />
+            <Card padded={false}>
+              {data.budgets.map((b, i) => {
+                const isOver = b.spentPaise > b.budget.amountPaise;
+                const tone = statusColor(b, colors);
                 return (
-                  <Card
-                    key={b.budget.id}
-                    onPress={() => {
-                      setError(null);
-                      setEditor({ budgetId: b.budget.id, categoryId: b.budget.categoryId, amount: amountToInput(b.budget.amountPaise) });
-                    }}
-                  >
-                    <View style={styles.budgetTop}>
-                      <CategoryAvatar icon={b.category?.icon} color={b.category?.color} size={40} />
-                      <View style={{ flex: 1 }}>
-                        <Text variant="bodyStrong">{b.category?.name ?? b.budget.name}</Text>
-                        <Text variant="caption" numeric>
-                          {formatINR(b.spentPaise, { decimals: 'never' })} of {formatINR(b.budget.amountPaise, { decimals: 'never' })}
+                  <View key={b.budget.id}>
+                    {i > 0 ? <Divider /> : null}
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setError(null);
+                        setEditor({ budgetId: b.budget.id, categoryId: b.budget.categoryId, amount: amountToInput(b.budget.amountPaise) });
+                      }}
+                      style={({ pressed }) => [styles.budgetRow, pressed && { backgroundColor: colors.surfaceMuted }]}
+                    >
+                      <View style={styles.budgetTop}>
+                        <CategoryAvatar icon={b.category?.icon} color={b.category?.color} />
+                        <View style={{ flex: 1 }}>
+                          <Text variant="body">{b.category?.name ?? b.budget.name}</Text>
+                          <Text variant="caption" numeric>
+                            {formatINR(b.spentPaise, { decimals: 'never' })} of {formatINR(b.budget.amountPaise, { decimals: 'never' })}
+                          </Text>
+                        </View>
+                        <Text variant="bodyStrong" numeric color={b.status === 'HEALTHY' ? colors.text : tone}>
+                          {formatINR(Math.abs(b.remainingPaise), { decimals: 'never' })}
+                          <Text variant="label" color={b.status === 'HEALTHY' ? colors.textTertiary : tone}>
+                            {isOver ? ' over' : ' left'}
+                          </Text>
                         </Text>
                       </View>
-                      <Text variant="labelStrong" color={statusColor(b, colors)} numeric>
-                        {b.percentageUsed}%
-                      </Text>
-                    </View>
-                    <ProgressBar value={b.spentPaise / b.budget.amountPaise} color={statusColor(b, colors)} />
-                    <Text variant="caption" color={over ? colors.negative : colors.textTertiary} style={{ marginTop: space.xs }}>
-                      {over ? `${formatINR(-b.remainingPaise)} over` : `${formatINR(b.remainingPaise)} left`}
-                    </Text>
-                  </Card>
+                      <View style={styles.rowBar}>
+                        <ProgressBar value={b.spentPaise / b.budget.amountPaise} color={b.status === 'HEALTHY' ? colors.brand : tone} height={6} />
+                      </View>
+                    </Pressable>
+                  </View>
                 );
               })}
-            </View>
-          </>
-        )}
+            </Card>
+            <Text variant="caption" style={{ marginTop: space.sm }}>
+              You'll get a nudge at 80% and when a budget runs out.
+            </Text>
+          </View>
+        ) : null}
+
+        <Card padded={false} style={styles.section}>
+          <ListRow
+            title={hasOverall ? 'Monthly budget' : 'Set a monthly budget'}
+            subtitle={hasOverall ? `${formatINR(data.overall, { decimals: 'never' })} for all spending` : 'One limit for everything you spend in a month'}
+            left={<IconTile icon="wallet" />}
+            chevron
+            onPress={editOverall}
+          />
+        </Card>
+
+        {!hasAny ? (
+          <EmptyState
+            compact
+            icon="target"
+            title="Budget by category"
+            message="Pick a category and a monthly limit. Budgets reset automatically every month."
+          />
+        ) : null}
       </ScrollView>
+
+      <BottomBar>
+        <Button title="Add category budget" icon="plus" size="lg" fullWidth onPress={openNew} />
+      </BottomBar>
 
       <Sheet
         visible={editor !== null}
@@ -251,7 +255,7 @@ export default function BudgetsScreen() {
         footer={
           <View style={{ gap: space.xs }}>
             <Button title={editing ? 'Save budget' : 'Create budget'} size="lg" fullWidth loading={saving} onPress={save} />
-            {editing ? <Button title="Remove budget" variant="ghost" fullWidth onPress={() => void remove()} /> : null}
+            {editing ? <Button title="Remove budget" variant="dangerSoft" fullWidth onPress={() => void remove()} /> : null}
           </View>
         }
       >
@@ -265,7 +269,7 @@ export default function BudgetsScreen() {
               placeholder="5000"
               right={<Text variant="label">₹ / month</Text>}
             />
-            <Text variant="labelStrong" color={colors.textSecondary} style={styles.sheetLabel}>
+            <Text variant="label" style={styles.sheetLabel}>
               Category
             </Text>
             {pickable.length === 0 ? (
@@ -294,7 +298,7 @@ export default function BudgetsScreen() {
         footer={
           <View style={{ gap: space.xs }}>
             <Button title="Save" size="lg" fullWidth onPress={() => void saveOverall()} />
-            {hasOverall ? <Button title="Remove monthly budget" variant="ghost" fullWidth onPress={() => void saveOverall(true)} /> : null}
+            {hasOverall ? <Button title="Remove monthly budget" variant="dangerSoft" fullWidth onPress={() => void saveOverall(true)} /> : null}
           </View>
         }
       >
@@ -330,35 +334,34 @@ const useStyles = makeStyles((colors) => ({
   },
   content: {
     paddingHorizontal: space.lg,
-    paddingTop: space.sm,
     paddingBottom: space.xxxl,
   },
-  summary: {
-    padding: space.lg,
-    gap: space.xs,
+  figure: {
+    paddingTop: space.xl,
   },
-  summaryRow: {
+  between: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: space.xs,
-    marginBottom: space.xxs,
+    justifyContent: 'space-between',
+    marginTop: space.sm,
+  },
+  section: {
+    marginTop: space.xxl,
+  },
+  budgetRow: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
   },
   budgetTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    marginBottom: space.sm,
   },
-  overallIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  rowBar: {
+    marginTop: space.sm,
+    marginLeft: 52,
   },
   sheetLabel: {
     marginTop: space.lg,
-    marginBottom: space.xs,
+    marginBottom: space.sm,
   },
 }));

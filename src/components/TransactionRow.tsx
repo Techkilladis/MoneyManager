@@ -30,9 +30,9 @@ function TransactionRowBase({ tx, onPress, showDate = false }: Props) {
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       {tx.category ? (
-        <CategoryAvatar icon={tx.category.icon} color={tx.category.color} />
+        <CategoryAvatar icon={tx.category.icon} color={tx.category.color} size={44} />
       ) : (
-        <UncategorizedAvatar />
+        <UncategorizedAvatar size={44} />
       )}
       <View style={styles.body}>
         <Text variant="bodyStrong" numberOfLines={1}>
@@ -72,6 +72,7 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+    minHeight: 64,
     paddingVertical: space.sm,
     paddingHorizontal: space.md,
   },

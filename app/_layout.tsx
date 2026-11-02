@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppState, Platform, View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useFonts } from 'expo-font';
+// Per-weight subpaths: the package root would bundle all 18 Inter faces.
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import * as Notifications from 'expo-notifications';
 import { transactionService } from '@/services';
 import { dataEvents } from '@/services/events';
 import { initNotifications, refreshScheduledNotifications, urlFromResponse } from '@/services/alerts';
-import { healListener } from '@/services/captureHealth';
 import { syncWidget } from '@/services/widget';
 import { getSetting, setSetting } from '@/services/settings';
 import { session } from '@/services/session';
@@ -65,11 +67,19 @@ function openUrl(url: string | null) {
 }
 
 export default function RootLayout() {
+  // Inter is bundled with the app and loads in a few ms; until then show only
+  // the paper colour so text never flashes in the system font.
+  const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_600SemiBold });
   return (
     <ThemeProvider>
-      <Root />
+      {fontsLoaded || fontError ? <Root /> : <Blank />}
     </ThemeProvider>
   );
+}
+
+function Blank() {
+  const { colors } = useTheme();
+  return <View style={{ flex: 1, backgroundColor: colors.background }} />;
 }
 
 function Root() {
@@ -99,14 +109,12 @@ function Root() {
     if (state !== 'ready') return;
     void initNotifications().then(refreshScheduledNotifications);
     void syncWidget();
-    if (Platform.OS === 'android') void healListener();
 
     let timer: ReturnType<typeof setInterval> | null = setInterval(syncNative, FOREGROUND_SYNC_MS);
     const appState = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         syncNative();
-        if (Platform.OS === 'android') void healListener();
-        if (!timer) timer = setInterval(syncNative, FOREGROUND_SYNC_MS);
+            if (!timer) timer = setInterval(syncNative, FOREGROUND_SYNC_MS);
       } else {
         if (timer) {
           clearInterval(timer);
@@ -118,12 +126,18 @@ function Root() {
     const unsubscribe = dataEvents.subscribe(afterDataChange);
 
     // Notification taps: budget alerts, recap and bill reminders carry a route.
-    void Notifications.getLastNotificationResponseAsync()
-      .then((response) => {
-        openUrl(urlFromResponse(response));
-        return Notifications.clearLastNotificationResponseAsync?.();
-      })
-      .catch(() => undefined);
+    // Defer the initial response check so AppLockGate can replay it after
+    // the user unlocks (the first read here may be consumed before the lock
+    // screen appears if the app was already mounted).  A 0 ms setTimeout
+    // lets the lock gate do its own check first.
+    setTimeout(() => {
+      void Notifications.getLastNotificationResponseAsync()
+        .then((response) => {
+          openUrl(urlFromResponse(response));
+          return Notifications.clearLastNotificationResponseAsync?.();
+        })
+        .catch(() => undefined);
+    }, 0);
     const tapSub = Notifications.addNotificationResponseReceivedListener((response) => openUrl(urlFromResponse(response)));
 
     return () => {
@@ -164,6 +178,7 @@ function Root() {
           <Stack.Screen name="onboarding" options={{ animation: 'fade', gestureEnabled: false }} />
           <Stack.Screen name="transactions/new" options={{ animation: 'slide_from_bottom' }} />
           <Stack.Screen name="quick-capture" options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="voice-capture" options={{ animation: 'slide_from_bottom' }} />
           <Stack.Screen name="recap" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
       </AppLockGate>
@@ -177,9 +192,9 @@ function Splash() {
   return (
     <View style={styles.splash}>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      <LinearGradient colors={[colors.heroStart, colors.heroEnd]} style={styles.logo}>
-        <Icon name="wallet" size={34} color={colors.textOnDark} />
-      </LinearGradient>
+      <View style={styles.logo}>
+        <Icon name="wallet" size={32} color={colors.textOnBrand} />
+      </View>
       <Text variant="title" style={{ marginTop: space.lg }}>
         Money Manager
       </Text>
@@ -200,7 +215,8 @@ const useStyles = makeStyles((colors) => ({
   logo: {
     width: 76,
     height: 76,
-    borderRadius: radius.xl + 4,
+    borderRadius: radius.xxl,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
