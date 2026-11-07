@@ -17,6 +17,7 @@ import {
 } from '@/services';
 import { dataEvents } from '@/services/events';
 import { CaptureStatus, getCaptureStatus } from '@/services/captureHealth';
+import { notificationDetectionService } from '@/services/notificationDetection';
 import { getLockSupport, LockSupport, suppressLock } from '@/services/appLock';
 import { getSettings, LockTimeout, setSetting, SettingsShape, ThemePreference } from '@/services/settings';
 import { session } from '@/services/session';
@@ -42,7 +43,7 @@ import {
 
 type Prefs = Pick<
   SettingsShape,
-  'appLockEnabled' | 'appLockTimeoutMs' | 'budgetAlertsEnabled' | 'billRemindersEnabled' | 'recapEnabled' | 'lastBackupAt' | 'overallBudgetPaise'
+  'appLockEnabled' | 'appLockTimeoutMs' | 'budgetAlertsEnabled' | 'billRemindersEnabled' | 'captureMode' | 'recapEnabled' | 'lastBackupAt' | 'overallBudgetPaise'
 >;
 
 async function fetchSettings() {
@@ -57,6 +58,7 @@ async function fetchSettings() {
       'appLockTimeoutMs',
       'budgetAlertsEnabled',
       'billRemindersEnabled',
+      'captureMode',
       'recapEnabled',
       'lastBackupAt',
       'overallBudgetPaise',
@@ -425,7 +427,35 @@ Reference: ${result.transactionReference ?? '—'}`
           />
         </Card>
 
-        <Text variant="overline" style={styles.groupLabel}>
+        {Platform.OS === 'android' ? (
+          <>
+            <Text variant="overline" style={styles.groupLabel}>
+              Auto-capture
+            </Text>
+            <Card padded={false} style={styles.group}>
+              <ListRow
+                title="Auto-capture mode"
+                subtitle={prefs?.captureMode === 'auto' ? 'SMS stored silently, review from History tab' : 'Opens review form instantly on payment SMS'}
+                left={<IconTile icon="inbox" />}
+              />
+              <View style={{ marginTop: space.sm, paddingHorizontal: space.xs }}>
+                <SegmentedControl
+                  options={[
+                    { value: 'instant', label: 'Instant' },
+                    { value: 'auto', label: 'Auto' },
+                  ]}
+                  value={prefs?.captureMode ?? 'instant'}
+                  onChange={(value) => {
+                    void updatePref('captureMode', value as 'instant' | 'auto');
+                    notificationDetectionService.setCaptureMode(value);
+                  }}
+                />
+              </View>
+            </Card>
+          </>
+        ) : null}
+
+        <Text variant="overline" style={[styles.groupLabel, { marginTop: space.lg }]}>
           Backup & data
         </Text>
         <Card padded={false} style={styles.group}>

@@ -4,6 +4,7 @@ import android.content.Context
 import com.moneymanager.notification.health.BackgroundAccess
 import com.moneymanager.notification.health.CaptureHealth
 import com.moneymanager.notification.widget.SpendWidgetProvider
+import com.moneymanager.notification.sms.CaptureMode
 import com.moneymanager.notification.sms.CapturePopup
 import com.moneymanager.notification.sms.SmsInbox
 import com.moneymanager.notification.sms.SmsUpiParser
@@ -20,7 +21,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class MoneyManagerNotificationDetectionModule : Module() {
 
     private val context: Context?
-        get() = appContext.reactContext
+        get() = appContext.reactContext ?: appContext.currentActivity?.applicationContext
 
     override fun definition() = ModuleDefinition {
         Name("MoneyManagerNotificationDetection")
@@ -212,6 +213,15 @@ class MoneyManagerNotificationDetectionModule : Module() {
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }
+        }
+
+        // Capture mode: 'auto' stores silently, 'instant' opens quick-capture popup.
+        Function("setCaptureMode") { mode: String ->
+            val ctx = context
+            if (ctx != null) {
+                CaptureMode.init(ctx)
+            }
+            CaptureMode.set(mode)
         }
 
         // Parses a sample SMS without storing it (diagnostics / tests).

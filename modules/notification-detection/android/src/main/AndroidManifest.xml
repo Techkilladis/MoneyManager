@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.moneymanager.notification">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Bank SMS are read on-device to detect UPI payments. -->
     <uses-permission android:name="android.permission.READ_SMS" />

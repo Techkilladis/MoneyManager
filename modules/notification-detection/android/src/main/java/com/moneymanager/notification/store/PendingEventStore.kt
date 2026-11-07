@@ -63,34 +63,30 @@ class PendingEventStore private constructor(context: Context) {
 
         synchronized(lock) {
             val db = dbHelper.writableDatabase
-            try {
-                db.execSQL(
-                    """INSERT INTO pending_upi_events 
-                       (id, amountPaise, merchant, sourceApp, transactionTimestamp, 
-                        transactionReference, parserName, parserVersion, confidence,
-                        notificationId, status, dedupeKey, createdAt, updatedAt, direction)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    arrayOf(
-                        id,
-                        parsed.amountPaise,
-                        parsed.merchant,
-                        parsed.sourceApp,
-                        parsed.transactionTimestamp,
-                        parsed.transactionReference,
-                        parsed.parserName,
-                        parsed.parserVersion,
-                        parsed.confidence,
-                        notificationId,
-                        status,
-                        dedupeKey,
-                        now,
-                        now,
-                        parsed.direction
-                    )
+            db.execSQL(
+                """INSERT INTO pending_upi_events 
+                   (id, amountPaise, merchant, sourceApp, transactionTimestamp, 
+                    transactionReference, parserName, parserVersion, confidence,
+                    notificationId, status, dedupeKey, createdAt, updatedAt, direction)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                arrayOf(
+                    id,
+                    parsed.amountPaise,
+                    parsed.merchant,
+                    parsed.sourceApp,
+                    parsed.transactionTimestamp,
+                    parsed.transactionReference,
+                    parsed.parserName,
+                    parsed.parserVersion,
+                    parsed.confidence,
+                    notificationId,
+                    status,
+                    dedupeKey,
+                    now,
+                    now,
+                    parsed.direction
                 )
-            } finally {
-                db.close()
-            }
+            )
         }
 
         return PendingUpiEvent(
@@ -115,17 +111,25 @@ class PendingEventStore private constructor(context: Context) {
      * True when this SMS (or the same UPI payment, matched by reference, amount
      * and direction) already produced an event, whatever its status now.
      */
-    fun isKnownSms(dedupeKey: String, reference: String?, amountPaise: Long, direction: String): Boolean {
+    fun isKnownSms(dedupeKey: String, reference: String?, amountPaise: Long, direction: String, timestamp: Long = 0L): Boolean {
         synchronized(lock) {
             val db = dbHelper.readableDatabase
-            try {
-                val sql = "SELECT 1 FROM pending_upi_events WHERE dedupeKey = ?" +
-                    if (reference != null) " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)" else ""
-                val args = if (reference != null) arrayOf(dedupeKey, reference, amountPaise.toString(), direction) else arrayOf(dedupeKey)
-                db.rawQuery("$sql LIMIT 1", args).use { return it.moveToFirst() }
-            } finally {
-                db.close()
+            var sql = "SELECT 1 FROM pending_upi_events WHERE dedupeKey = ?"
+            val args = mutableListOf(dedupeKey)
+            if (reference != null && reference.isNotBlank()) {
+                sql += " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)"
+                args.add(reference)
+                args.add(amountPaise.toString())
+                args.add(direction)
+            } else if (timestamp > 0L) {
+                // Guard against timestamp drift between live receiver & inbox scan:
+                // match if same amount, direction, and timestamp within 5 minutes
+                sql += " OR (amountPaise = ? AND direction = ? AND ABS(transactionTimestamp - ?) < 300000)"
+                args.add(amountPaise.toString())
+                args.add(direction)
+                args.add(timestamp.toString())
             }
+            db.rawQuery("$sql LIMIT 1", args.toTypedArray()).use { return it.moveToFirst() }
         }
     }
 
@@ -135,24 +139,20 @@ class PendingEventStore private constructor(context: Context) {
     fun getPendingEvents(status: String? = null): List<PendingUpiEvent> {
         synchronized(lock) {
             val db = dbHelper.readableDatabase
-            try {
-                val selection = if (status != null) "status = ?" else null
-                val selectionArgs = if (status != null) arrayOf(status) else null
-                
-                val cursor = db.query(
-                    "pending_upi_events",
-                    null,
-                    selection,
-                    selectionArgs,
-                    null,
-                    null,
-                    "createdAt DESC"
-                )
-                
-                return cursorToEvents(cursor)
-            } finally {
-                db.close()
-            }
+            val selection = if (status != null) "status = ?" else null
+            val selectionArgs = if (status != null) arrayOf(status) else null
+            
+            val cursor = db.query(
+                "pending_upi_events",
+                null,
+                selection,
+                selectionArgs,
+                null,
+                null,
+                "createdAt DESC"
+            )
+            
+            return cursorToEvents(cursor)
         }
     }
 
@@ -176,19 +176,17 @@ class PendingEventStore private constructor(context: Context) {
     fun getEventById(id: String): PendingUpiEvent? {
         synchronized(lock) {
             val db = dbHelper.readableDatabase
-            try {
-                val cursor = db.query(
-                    "pending_upi_events",
-                    null,
-                    "id = ?",
-                    arrayOf(id),
-                    null,
-                    null,
-                    null
-                )
-                return if (cursor.moveToFirst()) cursorToEvent(cursor) else null
-            } finally {
-                db.close()
+            val cursor = db.query(
+                "pending_upi_events",
+                null,
+                "id = ?",
+                arrayOf(id),
+                null,
+                null,
+                null
+            )
+            return cursor.use {
+                if (it.moveToFirst()) cursorToEvent(it) else null
             }
         }
     }
@@ -217,15 +215,11 @@ class PendingEventStore private constructor(context: Context) {
     private fun updateStatus(id: String, status: String) {
         synchronized(lock) {
             val db = dbHelper.writableDatabase
-            try {
-                val now = System.currentTimeMillis()
-                db.execSQL(
-                    "UPDATE pending_upi_events SET status = ?, updatedAt = ? WHERE id = ?",
-                    arrayOf(status, now, id)
-                )
-            } finally {
-                db.close()
-            }
+            val now = System.currentTimeMillis()
+            db.execSQL(
+                "UPDATE pending_upi_events SET status = ?, updatedAt = ? WHERE id = ?",
+                arrayOf(status, now, id)
+            )
         }
     }
 
@@ -306,29 +300,37 @@ class PendingEventStore private constructor(context: Context) {
     }
 
     private fun cursorToEvents(cursor: Cursor): List<PendingUpiEvent> {
-        val events = mutableListOf<PendingUpiEvent>()
-        while (cursor.moveToNext()) {
-            events.add(cursorToEvent(cursor))
+        cursor.use {
+            val events = mutableListOf<PendingUpiEvent>()
+            while (it.moveToNext()) {
+                events.add(cursorToEvent(it))
+            }
+            return events
         }
-        cursor.close()
-        return events
     }
 
     private fun cursorToEvent(cursor: Cursor): PendingUpiEvent {
+        val statusStr = cursor.getString(cursor.getColumnIndexOrThrow("status"))
+        val status = try {
+            PendingUpiEvent.Status.valueOf(statusStr)
+        } catch (_: Exception) {
+            PendingUpiEvent.Status.PENDING
+        }
+
         return PendingUpiEvent(
             id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
             amountPaise = cursor.getLong(cursor.getColumnIndexOrThrow("amountPaise")),
-            merchant = cursor.getString(cursor.getColumnIndexOrThrow("merchant")),
-            sourceApp = cursor.getString(cursor.getColumnIndexOrThrow("sourceApp")),
+            merchant = cursor.getString(cursor.getColumnIndexOrThrow("merchant")) ?: "",
+            sourceApp = cursor.getString(cursor.getColumnIndexOrThrow("sourceApp")) ?: "BANK_SMS",
             transactionTimestamp = cursor.getLong(cursor.getColumnIndexOrThrow("transactionTimestamp")),
             transactionReference = cursor.getString(cursor.getColumnIndexOrThrow("transactionReference")),
-            parserName = cursor.getString(cursor.getColumnIndexOrThrow("parserName")),
-            parserVersion = cursor.getString(cursor.getColumnIndexOrThrow("parserVersion")),
+            parserName = cursor.getString(cursor.getColumnIndexOrThrow("parserName")) ?: "BankSmsParser",
+            parserVersion = cursor.getString(cursor.getColumnIndexOrThrow("parserVersion")) ?: "1.0.0",
             confidence = cursor.getDouble(cursor.getColumnIndexOrThrow("confidence")),
-            notificationId = cursor.getString(cursor.getColumnIndexOrThrow("notificationId")),
-            status = PendingUpiEvent.Status.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("status"))),
+            notificationId = cursor.getString(cursor.getColumnIndexOrThrow("notificationId")) ?: "",
+            status = status,
             createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("createdAt")),
-            dedupeKey = cursor.getString(cursor.getColumnIndexOrThrow("dedupeKey")),
+            dedupeKey = cursor.getString(cursor.getColumnIndexOrThrow("dedupeKey")) ?: "",
             direction = cursor.getColumnIndex("direction").let { if (it >= 0) cursor.getString(it) ?: "DEBIT" else "DEBIT" }
         )
     }

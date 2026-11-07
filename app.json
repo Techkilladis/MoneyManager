@@ -16,9 +16,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
         "android.permission.RECORD_AUDIO"
       ],
       "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT"
       ]
@@ -67,6 +70,13 @@
         "projectId": "794dc62b-9f69-4790-8eaa-668231a10bc6"
       }
     },
-    "owner": "zenova1109"
+    "owner": "zenova1109",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/794dc62b-9f69-4790-8eaa-668231a10bc6"
+    },
+    "ios": {}
   }
 }

@@ -453,6 +453,25 @@ export const transactionRepository = {
         return { transaction: existing, isNew: false };
       }
     }
+
+    // Deduplication guard against repeat SMS scans: check if an identical UPI transaction
+    // (same amount, merchant, kind, and timestamp within 5 minutes) already exists in the DB
+    if (input.sourceType === 'UPI_NOTIFICATION') {
+      const database = await openDatabase();
+      const duplicate = await database.getFirstAsync<any>(
+        `SELECT * FROM transactions 
+         WHERE sourceType = 'UPI_NOTIFICATION'
+         AND amountPaise = ?
+         AND kind = ?
+         AND merchant = ?
+         AND ABS(transactionTimestamp - ?) < 300000
+         LIMIT 1`,
+        [input.amountPaise, input.kind ?? 'EXPENSE', input.merchant, input.transactionTimestamp]
+      );
+      if (duplicate) {
+        return { transaction: mapTransactionRow(duplicate), isNew: false };
+      }
+    }
     
     const transaction = await this.create(input);
     return { transaction, isNew: true };

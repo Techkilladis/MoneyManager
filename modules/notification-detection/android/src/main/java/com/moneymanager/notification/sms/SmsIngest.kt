@@ -2,6 +2,7 @@ package com.moneymanager.notification.sms
 
 import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import com.moneymanager.notification.health.CaptureHealth
 import com.moneymanager.notification.parsers.ParsedUpiTransaction
 import com.moneymanager.notification.store.PendingEventStore
@@ -26,7 +27,7 @@ object SmsIngest {
             val direction = result.direction.name
             val key = SmsUpiParser.smsKey(sender, timestamp, body.orEmpty())
             val store = PendingEventStore.getInstance(context)
-            if (store.isKnownSms(key, result.reference, result.amountPaise, direction)) return false
+            if (store.isKnownSms(key, result.reference, result.amountPaise, direction, timestamp)) return false
 
             var confidence = 0.6
             if (result.counterparty != null) confidence += 0.2
@@ -46,7 +47,12 @@ object SmsIngest {
             val event = store.createEvent(parsed, notificationId = key.take(16), dedupeKey = key)
             CaptureHealth.recordCapture(context)
             SpendWidgetProvider.refreshAll(context)
-            if (popup) CapturePopup.show(context, event)
+            val autoMode = CaptureMode.isAutoMode(context)
+            if (popup && !autoMode) {
+                CapturePopup.show(context, event)
+            } else if (autoMode) {
+                Toast.makeText(context, "CDC saved", Toast.LENGTH_SHORT).show()
+            }
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Error processing SMS", e)

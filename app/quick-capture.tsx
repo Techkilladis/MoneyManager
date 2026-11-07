@@ -12,6 +12,7 @@ import { makeStyles, useTheme } from '@/design/theme';
 import { Category, Member } from '@/database/schema';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { categoryService, classificationService, memberService, transactionService } from '@/services';
+import { notificationDetectionService } from '@/services/notificationDetection';
 import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { FormattedTransaction } from '@/domain/transaction';
@@ -47,16 +48,76 @@ export default function QuickCaptureScreen() {
   const params = useLocalSearchParams<{ id?: string; sourceEventId?: string; leave?: string }>();
   const toast = useToast();
   const [reviewed, setReviewed] = useState<string[]>([]);
+  const [scanning, setScanning] = useState(false);
+
+  const handleManualScan = useCallback(async () => {
+    if (scanning) return;
+    setScanning(true);
+    try {
+      const res = await notificationDetectionService.scanSmsInbox(1);
+      if (res.captured > 0) {
+        await transactionService.syncPendingNativeEvents();
+        dataEvents.emit();
+        toast.show(`Found ${res.captured} new payment${res.captured === 1 ? '' : 's'}`);
+      } else {
+        toast.show('No new payments found in recent SMS');
+      }
+    } catch {
+      toast.show('Could not scan messages');
+    } finally {
+      setScanning(false);
+    }
+  }, [scanning, toast]);
 
   const fetcher = useCallback(async () => {
     let startId = params.id ?? null;
     if (!startId && params.sourceEventId) {
       // The pop-up usually beats the app's own sync of the new SMS payment.
       const tx = await transactionService.ensureCaptureForEvent(params.sourceEventId);
-      startId = tx?.id ?? null;
+      if (tx) {
+        // Guard: if the transaction was already reviewed between the deep-link and
+        // now (race condition when another app was in the foreground), skip it and
+        // fall back to showing whatever pending queue exists.
+        if (tx.status === 'PENDING') {
+          startId = tx.id;
+        } else {
+          console.debug('[QuickCapture] Deep-linked transaction already reviewed:', tx.id, 'status:', tx.status);
+        }
+      }
     }
-    // Read the queue only now, so it includes a payment created just above.
-    const pending = await transactionRepository.getPending(); // newest first
+    // Read the queue
+    let pending = await transactionRepository.getPending(); // newest first
+
+    // If queue is empty or requested payment isn't in pending,
+    // sync pending native events immediately to guarantee any SMS captured
+    // while the app was offloaded from RAM is imported into the database!
+    if (pending.length === 0 || (startId && !pending.some((t) => t.id === startId))) {
+      await transactionService.syncPendingNativeEvents();
+      pending = await transactionRepository.getPending();
+      if (!startId && params.sourceEventId) {
+        const tx = await transactionRepository.getBySourceEventId(params.sourceEventId);
+        if (tx && tx.status === 'PENDING') {
+          startId = tx.id;
+        }
+      }
+    }
+
+    // Automated fallback: If no pending reviews exist, perform a quick 1-day scan of recent SMS
+    if (pending.length === 0 && Platform.OS === 'android') {
+      try {
+        const scanRes = await notificationDetectionService.scanSmsInbox(1);
+        if (scanRes.captured > 0) {
+          await transactionService.syncPendingNativeEvents();
+          pending = await transactionRepository.getPending();
+          if (pending.length > 0) {
+            dataEvents.emit();
+          }
+        }
+      } catch (scanErr) {
+        console.warn('[QuickCapture] Automated fallback SMS scan failed:', scanErr);
+      }
+    }
+
     return { queue: pending.map((t) => t.id).reverse(), startId };
   }, [params.id, params.sourceEventId]);
 
@@ -85,7 +146,7 @@ export default function QuickCaptureScreen() {
 
   const remaining = data.queue.filter((id) => !reviewed.includes(id));
   const current =
-    data.startId && remaining.includes(data.startId) ? data.startId : data.startId && reviewed.length === 0 ? null : remaining[0] ?? null;
+    data.startId && remaining.includes(data.startId) ? data.startId : remaining[0] ?? null;
   const total = remaining.length + reviewed.length;
 
   if (!current) {
@@ -104,11 +165,17 @@ export default function QuickCaptureScreen() {
                 ? 'This payment has already been confirmed or ignored.'
                 : 'New UPI payments detected from your notifications will appear here.'
           }
-          actionLabel="Done"
-          onAction={() => {
-            if (done) toast.show('All payments reviewed');
-            router.back();
-          }}
+          actionLabel={!done && Platform.OS === 'android' ? (scanning ? 'Scanning...' : 'Scan recent SMS') : 'Done'}
+          onAction={
+            !done && Platform.OS === 'android'
+              ? handleManualScan
+              : () => {
+                  if (done) toast.show('All payments reviewed');
+                  router.back();
+                }
+          }
+          secondaryLabel={!done && Platform.OS === 'android' ? 'Done' : undefined}
+          onSecondary={!done && Platform.OS === 'android' ? () => router.back() : undefined}
         />
       </View>
     );

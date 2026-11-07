@@ -12,6 +12,7 @@ import { dataEvents } from '@/services/events';
 import { initNotifications, refreshScheduledNotifications, urlFromResponse } from '@/services/alerts';
 import { syncWidget } from '@/services/widget';
 import { getSetting, setSetting } from '@/services/settings';
+import { notificationDetectionService } from '@/services/notificationDetection';
 import { session } from '@/services/session';
 import { openDatabase } from '@/database/db';
 import { radius, space } from '@/design/tokens';
@@ -109,6 +110,12 @@ function Root() {
     if (state !== 'ready') return;
     void initNotifications().then(refreshScheduledNotifications);
     void syncWidget();
+
+    // Push the user's captureMode preference into the native module so SmsIngest
+    // can decide whether to open the popup or store silently.
+    getSetting('captureMode').then((mode) => {
+      notificationDetectionService.setCaptureMode(mode ?? 'instant');
+    }).catch(() => undefined);
 
     let timer: ReturnType<typeof setInterval> | null = setInterval(syncNative, FOREGROUND_SYNC_MS);
     const appState = AppState.addEventListener('change', (next) => {

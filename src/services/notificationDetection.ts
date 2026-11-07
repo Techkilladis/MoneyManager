@@ -105,6 +105,7 @@ interface NativeModuleInterface {
   requestBatteryUnrestricted(): Promise<void>;
   openBackgroundPopupSettings(): Promise<void>;
   updateWidget(data: WidgetSnapshot): Promise<void>;
+  setCaptureMode(mode: string): void;
 }
 
 // ============================================
@@ -286,6 +287,14 @@ class NotificationDetectionService {
 
   async updateWidget(data: WidgetSnapshot): Promise<void> {
     await this.nativeModule?.updateWidget?.(data).catch(() => undefined);
+  }
+
+  /**
+   * Set capture mode: 'auto' stores SMS silently (toast "CDC saved"),
+   * 'instant' opens quick-capture popup immediately on payment SMS.
+   */
+  setCaptureMode(mode: string): void {
+    this.nativeModule?.setCaptureMode?.(mode);
   }
 
   /** Parses a sample SMS without storing it. */

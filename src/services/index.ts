@@ -9,6 +9,7 @@ import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
 import { notificationDetectionService, PendingUpiEvent } from './notificationDetection';
 import { openDatabase } from '../database/db';
+import { dataEvents } from './events';
 import { getClassificationSuggestion, recordClassification, recordCorrection, ClassificationSuggestion, getMerchantMemoryStats, shouldPrefill, getPrefillMode } from './classification';
 import { normalizeMerchantFull } from './merchantNormalization';
 import * as budgetService from './budget';
@@ -91,14 +92,13 @@ export const transactionService = {
   async syncPendingNativeEvents(): Promise<number> {
     try {
       await notificationDetectionService.initialize();
-      // Pick up bank SMS that arrived while the app wasn't running; the live
-      // receiver handles the rest. No-op until SMS permission is granted.
-      await notificationDetectionService.scanSmsInbox();
-      const events = await notificationDetectionService.getPendingUpiEvents();
 
+      // Step 1: Immediately sync all existing pending native events
+      // (captured in real time by SmsReceiver) so they are in SQLite
+      // before doing the heavier inbox scan.
+      const initialEvents = await notificationDetectionService.getPendingUpiEvents();
       let created = 0;
-      for (const event of events) {
-        // One bad or racing event must not hold back the ones after it.
+      for (const event of initialEvents) {
         try {
           const result = await transactionRepository.createWithIdempotency(captureInput(event));
           if (result.isNew) created++;
@@ -107,8 +107,33 @@ export const transactionService = {
         }
       }
 
-      if (events.length > 0) {
-        console.log(`[Sync] Native pending events: ${events.length} seen, ${created} new pending captures`);
+      if (created > 0) {
+        dataEvents.emit();
+      }
+
+      // Step 2: Scan SMS inbox for any missed messages while app was not running
+      try {
+        const scanRes = await notificationDetectionService.scanSmsInbox();
+        if (scanRes.captured > 0) {
+          const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
+          for (const event of inboxEvents) {
+            try {
+              const result = await transactionRepository.createWithIdempotency(captureInput(event));
+              if (result.isNew) created++;
+            } catch (error) {
+              console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+            }
+          }
+          if (created > 0) {
+            dataEvents.emit();
+          }
+        }
+      } catch (scanError) {
+        console.warn('[Sync] SMS inbox scan skipped/failed:', scanError);
+      }
+
+      if (created > 0) {
+        console.log(`[Sync] Native pending events: synced ${created} new captures`);
       }
       return created;
     } catch (error) {
@@ -221,7 +246,11 @@ export const transactionService = {
   // the event is unknown or was already settled before it reached the app.
   async ensureCaptureForEvent(sourceEventId: string): Promise<Transaction | null> {
     const existing = await transactionRepository.getBySourceEventId(sourceEventId);
-    if (existing) return existing;
+    // Only return transactions that are still pending review. A background sync may have
+    // already created this transaction and the user could have reviewed it by now — in
+    // which case returning it would cause quick-capture to show "Nothing to review" with
+    // an empty queue even though other pending payments exist. (Race condition fix.)
+    if (existing && existing.status === 'PENDING') return existing;
     await notificationDetectionService.initialize();
     const event = await notificationDetectionService.getPendingUpiEvent(sourceEventId);
     if (!event || event.status !== 'PENDING') return null;

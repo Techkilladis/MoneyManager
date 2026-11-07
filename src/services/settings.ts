@@ -31,6 +31,8 @@ export interface SettingsShape {
   overallBudgetPaise: number;
   /** Background-capture setup steps the user has opened (their state can't always be read). */
   captureStepsOpened: string[];
+  /** Whether UPI notifications create pending events silently ('auto') or open quick-capture instantly ('instant'). */
+  captureMode: 'instant' | 'auto';
 }
 
 const DEFAULTS: SettingsShape = {
@@ -49,6 +51,7 @@ const DEFAULTS: SettingsShape = {
   lastBackupAt: null,
   overallBudgetPaise: 0,
   captureStepsOpened: [],
+  captureMode: 'instant', // default: open quick-capture instantly on UPI notification
 };
 
 type Key = keyof SettingsShape;
