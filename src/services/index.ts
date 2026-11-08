@@ -605,6 +605,26 @@ export const transactionService = {
     }
   },
 
+  // Undo a dismissed transaction - restores it back to pending state
+  async undismissTransaction(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const existing = await transactionRepository.getById(id);
+      if (!existing) {
+        return { success: false, error: 'Transaction not found' };
+      }
+
+      await transactionRepository.update(id, {
+        is_dismissed: 0,
+        dismissed_at: null,
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('[transactionService] Undismiss failed:', error);
+      return { success: false, error: 'Failed to restore transaction' };
+    }
+  },
+
   // Parse a sample bank SMS for testing (nothing is stored).
   async simulateUpiSms() {
     return notificationDetectionService.simulateSms(

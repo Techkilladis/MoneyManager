@@ -128,4 +128,67 @@ class UpiMessageParserTest {
         assertEquals("Netflix", result.counterparty)
         assertEquals("987654321012", result.reference)
     }
+
+    // ------------------------------------------------------------ bank SMS formats (user samples)
+
+    @Test
+    fun parsesICICIDualPartyDebit() {
+        // "ICICI Bank Acct XX172 debited for Rs 625.00 on 08-Nov-26; TAMILAGA UNAVU credited. UPI:006743575869."
+        val result = parse(
+            "ICICI Bank Acct XX172 debited for Rs 625.00 on 08-Nov-26; TAMILAGA UNAVU credited. UPI:006743575869. Call 18002662 for dispute."
+        )
+        assertNotNull(result)
+        assertEquals(Direction.DEBIT, result?.direction)
+        assertEquals(62500L, result!!.amountPaise)
+        assertEquals("TAMILAGA UNAVU", result.counterparty)
+    }
+
+    @Test
+    fun parsesICICIDualPartyDebitWithFullName() {
+        // "ICICI Bank Acct XX172 debited for Rs 1695.00 on 07-Nov-26; VENKATESH A M credited."
+        val result = parse(
+            "ICICI Bank Acct XX172 debited for Rs 1695.00 on 07-Nov-26; VENKATESH A M credited. UPI:006723958737."
+        )
+        assertNotNull(result)
+        assertEquals(Direction.DEBIT, result?.direction)
+        assertEquals(169500L, result!!.amountPaise)
+        assertEquals("VENKATESH A M", result.counterparty)
+    }
+
+    @Test
+    fun parsesICICIDualPartyDebitShopName() {
+        // "ICICI Bank Acct XX172 debited for Rs 368.00 on 04-Nov-26; Pothys Madurai credited."
+        val result = parse(
+            "ICICI Bank Acct XX172 debited for Rs 368.00 on 04-Nov-26; Pothys Madurai credited. UPI:006591114305."
+        )
+        assertNotNull(result)
+        assertEquals(Direction.DEBIT, result?.direction)
+        assertEquals(36800L, result!!.amountPaise)
+        assertEquals("Pothys Madurai", result.counterparty)
+    }
+
+    @Test
+    fun parsesICICICreditFromMr() {
+        // "Dear Customer, Acct XX172 is credited with Rs 30.00 on 03-Apr-26 from Mr Arnav Astu. UPI:645934930351."
+        val result = parse(
+            "Dear Customer, Acct XX172 is credited with Rs 30.00 on 03-Apr-26 from Mr Arnav Astu. UPI:645934930351."
+        )
+        assertNotNull(result)
+        assertEquals(Direction.CREDIT, result?.direction)
+        assertEquals(3000L, result!!.amountPaise)
+        // From_PARTY matches "from Mr Arnav Astu" — honorific "Mr" should be stripped
+        assertNotNull(result.counterparty)
+    }
+
+    @Test
+    fun parsesICICICreditFromMrWithAnotherName() {
+        // "Dear Customer, Acct XX172 is credited with Rs 184.00 on 21-Feb-26 from Mr P N Megaraja. UPI:605208731014."
+        val result = parse(
+            "Dear Customer, Acct XX172 is credited with Rs 184.00 on 21-Feb-26 from Mr P N Megaraja. UPI:605208731014."
+        )
+        assertNotNull(result)
+        assertEquals(Direction.CREDIT, result?.direction)
+        assertEquals(18400L, result!!.amountPaise)
+        assertNotNull(result.counterparty)
+    }
 }

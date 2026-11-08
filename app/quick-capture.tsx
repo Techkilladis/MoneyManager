@@ -222,14 +222,20 @@ function ReviewCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'category' | 'member' | 'note' | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   const [celebrate] = useState(() => new Animated.Value(0));
   const mountedRef = useRef(true);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -316,6 +322,11 @@ function ReviewCard({
   const dismiss = async () => {
     if (!tx) return;
     setBusy('dismiss');
+    // Clear any existing undo timer before dismissing
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     const result = await transactionService.dismissTransaction(tx.id);
     if (!mountedRef.current) return;
     setBusy(null);
@@ -324,7 +335,25 @@ function ReviewCard({
       return;
     }
     dataEvents.emit();
-    onReviewed(id);
+    // Show dismissed state with undo capability
+    setDismissed(true);
+    toast.show('Payment ignored', 'info', {
+      label: 'Undo',
+      onPress: async () => {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+        await transactionService.undismissTransaction(tx.id);
+        if (mountedRef.current) setDismissed(false);
+      },
+    });
+    // Auto-expire after 5 seconds — move to next without undo
+    timeoutRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      timeoutRef.current = null;
+      onReviewed(id);
+    }, 5000);
   };
 
   const counter = total > 1 ? `${position} of ${total}` : undefined;
@@ -457,24 +486,42 @@ function ReviewCard({
         </ScrollView>
 
         <BottomBar style={styles.footer}>
-          <Button
-            title="Ignore"
-            variant="secondary"
-            size="lg"
-            loading={busy === 'dismiss'}
-            disabled={busy !== null || !!success}
-            onPress={dismiss}
-            style={styles.ignore}
-          />
-          <Button
-            title="Confirm"
-            icon="check"
-            size="lg"
-            loading={busy === 'confirm'}
-            disabled={busy !== null || !!success}
-            onPress={confirm}
-            style={{ flex: 1 }}
-          />
+          {dismissed ? (
+            <Button
+              title="Undo — restore ignored payment"
+              icon="arrowLeft"
+              size="lg"
+              onPress={() => {
+                if (timeoutRef.current) {
+                  clearTimeout(timeoutRef.current);
+                  timeoutRef.current = null;
+                }
+                setDismissed(false);
+              }}
+              style={{ flex: 1 }}
+            />
+          ) : (
+            <>
+              <Button
+                title="Ignore"
+                variant="secondary"
+                size="lg"
+                loading={busy === 'dismiss'}
+                disabled={busy !== null || !!success}
+                onPress={dismiss}
+                style={styles.ignore}
+              />
+              <Button
+                title="Confirm"
+                icon="check"
+                size="lg"
+                loading={busy === 'confirm'}
+                disabled={busy !== null || !!success}
+                onPress={confirm}
+                style={{ flex: 1 }}
+              />
+            </>
+          )}
         </BottomBar>
       </KeyboardAvoidingView>
 

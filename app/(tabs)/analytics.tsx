@@ -222,6 +222,9 @@ export default function InsightsScreen() {
     });
   }
 
+  // Cap at 3 insights to avoid overwhelming the user
+  insights.length = Math.min(insights.length, 3);
+
   return (
     <View style={styles.screen}>
       <ScreenHeader large title="Insights" />

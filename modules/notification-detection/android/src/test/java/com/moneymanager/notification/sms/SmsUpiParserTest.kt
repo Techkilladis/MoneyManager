@@ -117,4 +117,137 @@ class SmsUpiParserTest {
         assertNotEquals(a, SmsUpiParser.smsKey("AX-HDFCBK", 1001L, "body"))
         assertNotEquals(a, SmsUpiParser.smsKey("AX-HDFCBK", 1000L, "body2"))
     }
+
+    // ------------------------------------------------------------ Indian Bank "Sent Rs..." format
+
+    @Test
+    fun indianBankSentToCinemaWithConcatenatedRRN() {
+        val r = parse(
+            "Sent Rs.400.00 from A/c *1224 on 07-11-26 to Radiance CINEMA.RRN 006712871613.Avl Bal Rs.6177.67.Not you?SMS BLOCK to 9289592895-Indian Bank",
+            "Indian Bank"
+        )
+        assertNotNull(r)
+        assertEquals(40000L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("Radiance CINEMA", r.counterparty)
+        assertEquals("006712871613", r.reference)
+    }
+
+    @Test
+    fun indianBankSentToJioWithConcatenatedRRN() {
+        val r = parse(
+            "Sent Rs.219.00 from A/c *1224 on 03-11-26 to MYJIO.RRN 887100482194.Avl Bal Rs.5132.67.Not you?SMS BLOCK to 9289592895-Indian Bank",
+            "Indian Bank"
+        )
+        assertNotNull(r)
+        assertEquals(21900L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("MYJIO", r.counterparty)
+        assertEquals("887100482194", r.reference)
+    }
+
+    @Test
+    fun indianBankCreditedByPersonWithRRN() {
+        val r = parse(
+            "Your A/c *1224 is credited with Rs.60.00 on 27-10-26 by RUKSHATH T. RRN 006320782490. Available balance is Rs. 646.67 - Indian Bank",
+            "Indian Bank"
+        )
+        assertNotNull(r)
+        assertEquals(6000L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        assertEquals("RUKSHATH T", r.counterparty)
+        assertEquals("006320782490", r.reference)
+    }
+
+    @Test
+    fun indianBankSentToPersonWithInitials() {
+        val r = parse(
+            "Sent Rs.46.00 from A/c *1224 on 27-10-26 to Ms Dhanyataa.RRN 205318847947.Avl Bal Rs.586.67.Not you?SMS BLOCK to 9289592895-Indian Bank",
+            "Indian Bank"
+        )
+        assertNotNull(r)
+        assertEquals(4600L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("Dhanyataa", r.counterparty)
+        assertEquals("205318847947", r.reference)
+    }
+
+    @Test
+    fun indianBankCreditedByNPCI() {
+        val r = parse(
+            "Your A/c *1224 is credited with Rs.2.00 on 19-08-26 by NPCI BHIM. RRN 103878964445. Available balance is Rs. 2117.27 - Indian Bank",
+            "Indian Bank"
+        )
+        assertNotNull(r)
+        assertEquals(200L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        // NPCI BHIM is a system credit — may or may not extract as counterparty
+    }
+
+    // ------------------------------------------------------------ ICICI dual-party format
+
+    @Test
+    fun iciciDualPartyDebitTamilagaUnavu() {
+        val r = parse(
+            "ICICI Bank Acct XX172 debited for Rs 625.00 on 08-Nov-26; TAMILAGA UNAVU credited. UPI:006743575869. Call 18002662 for dispute. SMS BLOCK 172 to 9215676766.",
+            "ICICI Bank"
+        )
+        assertNotNull(r)
+        assertEquals(62500L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("TAMILAGA UNAVU", r.counterparty)
+        assertEquals("006743575869", r.reference)
+    }
+
+    @Test
+    fun iciciDualPartyDebitVenkatesh() {
+        val r = parse(
+            "ICICI Bank Acct XX172 debited for Rs 1695.00 on 07-Nov-26; VENKATESH A M credited. UPI:006723958737. Call 18002662 for dispute.",
+            "ICICI Bank"
+        )
+        assertNotNull(r)
+        assertEquals(169500L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("VENKATESH A M", r.counterparty)
+        assertEquals("006723958737", r.reference)
+    }
+
+    @Test
+    fun iciciDualPartyDebitPothys() {
+        val r = parse(
+            "ICICI Bank Acct XX172 debited for Rs 368.00 on 04-Nov-26; Pothys Madurai credited. UPI:006591114305. Call 18002662 for dispute.",
+            "ICICI Bank"
+        )
+        assertNotNull(r)
+        assertEquals(36800L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("Pothys Madurai", r.counterparty)
+        assertEquals("006591114305", r.reference)
+    }
+
+    @Test
+    fun iciciCreditFromMrArnav() {
+        val r = parse(
+            "Dear Customer, Acct XX172 is credited with Rs 30.00 on 03-Apr-26 from Mr Arnav Astu. UPI:645934930351.",
+            "ICICI Bank"
+        )
+        assertNotNull(r)
+        assertEquals(3000L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        assertNotNull(r.counterparty) // "Arnav Astu" after stripping "Mr"
+        assertEquals("645934930351", r.reference)
+    }
+
+    @Test
+    fun iciciCreditFromMrMegaraja() {
+        val r = parse(
+            "Dear Customer, Acct XX172 is credited with Rs 184.00 on 21-Feb-26 from Mr P N Megaraja. UPI:605208731014.",
+            "ICICI Bank"
+        )
+        assertNotNull(r)
+        assertEquals(18400L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        assertNotNull(r.counterparty) // "P N Megaraja" after stripping "Mr"
+        assertEquals("605208731014", r.reference)
+    }
 }

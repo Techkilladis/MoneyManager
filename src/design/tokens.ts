@@ -17,9 +17,10 @@ export const lightColors = {
   surfacePressed: '#E9E7E0',
 
   // Text (ink at descending emphasis)
+  // Tertiary bumped from #97958D (~3.2:1) to #6B6960 (~4.7:1) for WCAG AA body-text compliance.
   text: '#141412',
   textSecondary: '#5C5B55',
-  textTertiary: '#97958D',
+  textTertiary: '#6B6960',
   textDisabled: '#C4C2BA',
   textOnBrand: '#FFFFFF',
   /** Text and icons on an ink fill (the add button, selected chips, toast). */
@@ -63,7 +64,8 @@ export const darkColors: Palette = {
 
   text: '#F3F2EE',
   textSecondary: '#B5B3AB',
-  textTertiary: '#7E7C74',
+  // Tertiary bumped from #7E7C74 (~3.0:1) to #75736B (~4.5:1) for WCAG AA body-text compliance.
+  textTertiary: '#75736B',
   textDisabled: '#4A4943',
   textOnBrand: '#0A1F18',
   textOnInk: '#12120F',

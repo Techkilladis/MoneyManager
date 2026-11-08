@@ -48,11 +48,22 @@ object SmsUpiParser {
         """(?=\s+(?:on|via|using|ref|refno|upi|from|at|bal|avl|if|not|date|for|is|has|was|credited|debited)\b|[.,;()\[\n]|\s*$)"""
     private const val NAME = """[A-Za-z][A-Za-z0-9 .&'\-]{1,40}?"""
     // "to Mr P N Megarajan" (Indian Bank): the title isn't part of the name.
-    private const val HONORIFIC = """(?:(?:Mr|Mrs|Ms|Miss|Dr|Shri|Smt)\.?\s+)?"""
+    private const val HONORIFIC = """(?:(?:Mr|Mrs|Ms|Miss|Dr|Shri|Smt|Md|Mohd)\.?\s+)?"""
 
     private val VPA = Regex("""\b(?:to|from|by)\s+VPA\s+([\w.\-]{2,}@[A-Za-z]\w*)""", I)
     private val TO_PARTY = Regex("""\b(?:trf\s+to|transfer(?:red)?\s+to|to)\s+$HONORIFIC($NAME)$END""", I)
     private val FROM_PARTY = Regex("""\b(?:from|by)\s+$HONORIFIC($NAME)$END""", I)
+
+    // ICICI dual-party format: "debited for Rs 625; TAMILAGA UNAVU credited"
+    private val DUAL_PARTY_DEBIT = Regex(
+        """[;.;]\s+([A-Za-z][A-Za-z0-9 .&'\-]{2,40}?)\s+credited""", I
+    )
+
+    // Indian Bank "Sent Rs..." with merchant immediately before .RRN — use lookahead
+    // to stop at ".RRN", ".Avl", ".Not" etc. without consuming the delimiter.
+    private val TO_PARTY_LOOKAHEAD = Regex(
+        """\bto\s+$HONORIFIC([A-Za-z][A-Za-z0-9 .&'\-]+?)(?=\.?\s*(?:RRN|UTR|Ref|txn|UPI|avl|bal|not|sms|call)\b)""", I
+    )
 
     private val NOT_A_NAME = Regex("""\b(a/?c|account|bank|your|you)\b""", I)
     private val LABEL_ONLY = Regex("""^(upi|vpa|ref|refno|xx\w*)$""", I)
@@ -108,6 +119,8 @@ object SmsUpiParser {
         VPA.find(text)?.groupValues?.get(1)?.let { return it.lowercase() }
         val raw = when (direction) {
             Direction.DEBIT -> TO_PARTY.find(text)?.groupValues?.get(1)
+                ?: TO_PARTY_LOOKAHEAD.find(text)?.groupValues?.get(1)  // "to Radiance CINEMA.RRN"
+                ?: DUAL_PARTY_DEBIT.find(text)?.groupValues?.get(1)     // "; TAMILAGA UNAVU credited"
             Direction.CREDIT -> FROM_PARTY.find(text)?.groupValues?.get(1)
         }
         return cleanParty(raw)

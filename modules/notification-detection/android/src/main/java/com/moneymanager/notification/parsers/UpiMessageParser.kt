@@ -50,6 +50,11 @@ object UpiMessageParser {
     private val FROM_PARTY = Regex("""\bfrom\s+(.+?)$END""", I)
     private val SENT_YOU = Regex("""(?:^|[.!]\s+)([A-Za-z][\w '&-]{1,40}?)\s+(?:has\s+)?(?:sent|paid)\s+you\b""", I)
 
+    // ICICI dual-party format: "debited for Rs 625; TAMILAGA UNAVU credited"
+    private val DUAL_PARTY_DEBIT = Regex(
+        """[;.;]\s+([A-Za-z][A-Za-z0-9 .&'\-]{2,40}?)\s+credited""", I
+    )
+
     private val REFERENCE = Regex(
         """\b(?:UPI\s*)?(?:Ref(?:erence)?|Txn|Transaction|UTR)\.?\s*(?:ID|No\.?|Number)?\s*[:#-]?\s*([A-Za-z0-9]*[0-9][A-Za-z0-9]*)""",
         I
@@ -77,6 +82,7 @@ object UpiMessageParser {
 
         val party = when (direction) {
             Direction.DEBIT -> TO_PARTY.find(body)?.groupValues?.get(1)
+                ?: DUAL_PARTY_DEBIT.find(body)?.groupValues?.get(1)  // "; TAMILAGA UNAVU credited"
             Direction.CREDIT -> FROM_PARTY.find(body)?.groupValues?.get(1)
                 ?: SENT_YOU.find(body)?.groupValues?.get(1)
         }?.let(::cleanParty) ?: titleAsParty(title)

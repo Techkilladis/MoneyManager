@@ -34,6 +34,7 @@ import {
   IconTile,
   ListRow,
   ScreenHeader,
+  SectionTitle,
   SegmentedControl,
   Sheet,
   Switch,
@@ -301,9 +302,7 @@ Reference: ${result.transactionReference ?? '—'}`
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {capture ? <View style={{ marginTop: space.md }}><CaptureStatusCard status={capture} onChanged={checkCapture} /></View> : null}
 
-        <Text variant="overline" style={styles.groupLabel}>
-          Organize
-        </Text>
+        <SectionTitle title="Organize" style={{ marginTop: space.lg }} />
         <Card padded={false} style={styles.group}>
           <ListRow
             title="Budgets"
@@ -351,9 +350,7 @@ Reference: ${result.transactionReference ?? '—'}`
           />
         </Card>
 
-        <Text variant="overline" style={styles.groupLabel}>
-          Appearance
-        </Text>
+        <SectionTitle title="Appearance" />
         <Card style={styles.group}>
           <Text variant="bodyStrong">Theme</Text>
           <Text variant="caption" style={{ marginTop: 2, marginBottom: space.sm }}>
@@ -362,9 +359,7 @@ Reference: ${result.transactionReference ?? '—'}`
           <SegmentedControl options={THEMES} value={preference} onChange={setPreference} />
         </Card>
 
-        <Text variant="overline" style={styles.groupLabel}>
-          Privacy & security
-        </Text>
+        <SectionTitle title="Privacy & security" />
         <Card padded={false} style={styles.group}>
           <ListRow
             title="App lock"
@@ -392,9 +387,7 @@ Reference: ${result.transactionReference ?? '—'}`
           ) : null}
         </Card>
 
-        <Text variant="overline" style={styles.groupLabel}>
-          Notifications
-        </Text>
+        <SectionTitle title="Notifications" />
         <Card padded={false} style={styles.group}>
           {!notificationsOn && data ? (
             <>
@@ -429,9 +422,7 @@ Reference: ${result.transactionReference ?? '—'}`
 
         {Platform.OS === 'android' ? (
           <>
-            <Text variant="overline" style={styles.groupLabel}>
-              Auto-capture
-            </Text>
+            <SectionTitle title="Auto-capture" />
             <Card padded={false} style={styles.group}>
               <ListRow
                 title="Auto-capture mode"
@@ -455,9 +446,7 @@ Reference: ${result.transactionReference ?? '—'}`
           </>
         ) : null}
 
-        <Text variant="overline" style={[styles.groupLabel, { marginTop: space.lg }]}>
-          Backup & data
-        </Text>
+        <SectionTitle title="Backup & data" />
         <Card padded={false} style={styles.group}>
           <ListRow
             title={busy === 'backup' ? 'Preparing backup…' : 'Back up now'}
@@ -494,9 +483,7 @@ Reference: ${result.transactionReference ?? '—'}`
 
         {Platform.OS === 'android' ? (
           <>
-            <Text variant="overline" style={styles.groupLabel}>
-              Home screen widget
-            </Text>
+            <SectionTitle title="Home screen widget" />
             <Card style={styles.group}>
               <Text variant="bodyStrong">{capture?.health?.widgetCount ? 'Widget added' : 'Add the widget'}</Text>
               <Text variant="caption" style={{ marginTop: 2 }}>
@@ -510,9 +497,7 @@ Reference: ${result.transactionReference ?? '—'}`
 
         {__DEV__ ? (
           <>
-            <Text variant="overline" style={styles.groupLabel}>
-              Developer
-            </Text>
+            <SectionTitle title="Developer" />
             <Card padded={false} style={styles.group}>
               <ListRow
                 title="Load sample data"
@@ -582,9 +567,10 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: space.lg,
     paddingBottom: space.xxxl,
   },
-  groupLabel: {
+  sectionTitle: {
     marginTop: space.xxl,
     marginBottom: space.sm,
+    paddingHorizontal: space.xs,
   },
   group: {
     overflow: 'hidden',
