@@ -123,8 +123,11 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
         run: |
-          echo "EAS authenticated via EXPO_TOKEN"
-          eas account:whoami --non-interactive
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EAS_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
+          echo "EAS authenticated via EXPO_TOKEN environment variable"
 
       # Publish OTA update to production channel
       - name: Publish OTA update
@@ -196,8 +199,11 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
         run: |
-          echo "EAS authenticated via EXPO_TOKEN"
-          eas account:whoami --non-interactive
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EAS_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
+          echo "EAS authenticated via EXPO_TOKEN environment variable"
 
       # Daily native build cap check
       - name: Check daily build cap
