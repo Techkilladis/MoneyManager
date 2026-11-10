@@ -132,7 +132,13 @@ jobs:
       # Publish OTA update to production channel
       - name: Publish OTA update
         id: ota
+        env:
+          EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
         run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EAS_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
           RESULT=$(npx eas-cli@latest update --auto --channel production --non-interactive 2>&1)
           echo "$RESULT"
           GROUP_ID=$(echo "$RESULT" | grep -oP 'group[":\s]+\K[a-f0-9]+' | head -1 || echo "unknown")
@@ -231,7 +237,13 @@ jobs:
       - name: Build Android APK (if cap not reached)
         id: eas-build
         if: steps.cap-check.outputs.skipped == 'false'
+        env:
+          EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
         run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EAS_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
           echo "Building native APK with EAS..."
           BUILD_OUTPUT=$(npx eas-cli@latest build --platform android --profile preview --non-interactive 2>&1)
           echo "$BUILD_OUTPUT"
