@@ -1,0 +1,304 @@
+name: CI/CD Pipeline - PR Merge to Build & Update
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  contents: write       # For creating GitHub Releases
+  pull-requests: write  # For posting PR comments
+
+jobs:
+  # STEP 1: Detect what changed in the merged PR
+  detect-changes:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      has-native-changes: ${{ steps.changed.outputs.native_any }}
+      js-version: ${{ steps.version.outputs.js }}
+      native-version: ${{ steps.version.outputs.native }}
+      pr-title: ${{ steps.pr-info.outputs.title }}
+      pr-body: ${{ steps.pr-info.outputs.body }}
+      pr-user: ${{ steps.pr-info.outputs.user }}
+      merge-commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get base commit (before PR)
+        id: base
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+
+      - name: Get merge commit
+        id: commit
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      # Auto-detect: native vs JS-only changes
+      - name: Check for native module changes
+        id: changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          MERGE="HEAD"
+          NATIVE_FILES=$(git diff --name-only "$BASE" "$MERGE" -- modules/notification-detection/ android/ ios/ app.json eas.json plugins/ 2>/dev/null || true)
+          if [ -n "$NATIVE_FILES" ]; then
+            echo "native_any=true" >> $GITHUB_OUTPUT
+            echo "Native changes detected:"
+            echo "$NATIVE_FILES"
+          else
+            echo "native_any=false" >> $GITHUB_OUTPUT
+            echo "No native changes detected."
+          fi
+
+      # Version bump detection
+      - name: Extract versions
+        id: version
+        run: |
+          JS_VERSION=$(node -p "require('./package.json').version")
+          echo "js=$JS_VERSION" >> $GITHUB_OUTPUT
+          NATIVE_VERSION=$(node -p "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json','utf8'));
+            (app.android?.versionCode || 1).toString();
+          ")
+          echo "native=$NATIVE_VERSION" >> $GITHUB_OUTPUT
+
+      # PR metadata
+      - name: PR info
+        id: pr-info
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          BODY="${{ github.event.pull_request.body }}"
+          echo "title=${TITLE//[^a-zA-Z0-9 \-\.]/}" >> $GITHUB_OUTPUT
+          echo "body=$(echo '${BODY:0:500}' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          echo "user=${{ github.actor }}" >> $GITHUB_OUTPUT
+
+      - name: Log detection result
+        run: |
+          echo "=== CI/CD Detection Result ==="
+          echo "Native changes: ${{ steps.changed.outputs.native_any }}"
+          echo "JS version: ${{ steps.version.outputs.js }}"
+          echo "Native version: ${{ steps.version.outputs.native }}"
+          echo "Merge commit: ${{ steps.commit.outputs.sha }}"
+
+  # STEP 2A: OTA Update (JS-only changes)
+  ota-update:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-native-changes == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Authenticate with EAS
+      - name: EAS login
+        run: echo "EAS_ACCESS_TOKEN=${{ secrets.EAS_ACCESS_TOKEN }}" | npx eas-cli@latest auth
+
+      # Publish OTA update to production channel
+      - name: Publish OTA update
+        id: ota
+        run: |
+          RESULT=$(npx eas-cli@latest update --auto --channel production --non-interactive 2>&1)
+          echo "$RESULT"
+          GROUP_ID=$(echo "$RESULT" | grep -oP 'group[":\s]+\K[a-f0-9]+' | head -1 || echo "unknown")
+          echo "group_id=$GROUP_ID" >> $GITHUB_OUTPUT
+
+      # Post OTA success comment on merged PR
+      - name: Post OTA update comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const groupId = '${{ steps.ota.outputs.group_id }}';
+            const version = '${{ needs.detect-changes.outputs.js-version }}';
+            const user = '${{ needs.detect-changes.outputs.pr-user }}';
+
+            const comment = [
+              `## OTA Update Published \u2728`,
+              ``,
+              `An Over-the-Air update has been published to the **production** channel.`,
+              ``,
+              `\`>\` **Version**: v${version}  \u2022  **Group**: \`${groupId}\``,
+              `\`>\` **Triggered by**: @${user}`,
+              ``,
+              `Your friends will see "Update available - restart now?" on next app launch.`,
+              ``,
+              `---`,
+              `_Automated by CI/CD pipeline_`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });
+
+  # STEP 2B: Native Rebuild (native module changes)
+  native-build:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-native-changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Authenticate with EAS
+      - name: EAS login
+        run: echo "EAS_ACCESS_TOKEN=${{ secrets.EAS_ACCESS_TOKEN }}" | npx eas-cli@latest auth
+
+      # Daily native build cap check
+      - name: Check daily build cap
+        id: cap-check
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          CACHE_FILE="/tmp/eas-native-build-cap"
+          if [ -f "$CACHE_FILE" ]; then
+            LAST_BUILD=$(cat "$CACHE_FILE")
+            if [ "$LAST_BUILD" = "$TODAY" ]; then
+              echo "skipped=true" >> $GITHUB_OUTPUT
+              echo "::warning::Native build skipped: already built today ($TODAY)"
+            else
+              echo "$TODAY" > "$CACHE_FILE"
+              echo "skipped=false" >> $GITHUB_OUTPUT
+              echo "Native build allowed for today ($TODAY)"
+            fi
+          else
+            echo "$TODAY" > "$CACHE_FILE"
+            echo "skipped=false" >> $GITHUB_OUTPUT
+            echo "First native build today ($TODAY)"
+          fi
+
+      # Build APK if cap not reached
+      - name: Build Android APK (if cap not reached)
+        id: eas-build
+        if: steps.cap-check.outputs.skipped == 'false'
+        run: |
+          echo "Building native APK with EAS..."
+          BUILD_OUTPUT=$(npx eas-cli@latest build --platform android --profile preview --non-interactive 2>&1)
+          echo "$BUILD_OUTPUT"
+          BUILD_ID=$(echo "$BUILD_OUTPUT" | tail -5)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+
+      # Upload APK as artifact
+      - name: Download and upload APK artifact
+        if: steps.cap-check.outputs.skipped == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-android
+          path: |
+            **/*.apk
+            **/*.aab
+          retention-days: 30
+
+      # Create GitHub Release with APK
+      - name: Create GitHub Release
+        if: steps.cap-check.outputs.skipped == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: native-v${{ needs.detect-changes.outputs.native-version }}-${{ github.sha }}
+          name: "Native Release v${{ needs.detect-changes.outputs.native-version }}"
+          body: |
+            ## Native APK Release
+
+            > **Triggered by**: @${{ needs.detect-changes.outputs.pr-user }}
+            > **Merge commit**: ${{ github.sha }}
+            > **PR**: #${{ github.event.pull_request.number }}
+
+            This release contains a full native Android build with updated native modules.
+
+            ### How to update
+            1. Download the APK below
+            2. Tap to install (you may need to allow "Install from unknown sources")
+            3. Your data is preserved - this is an upgrade, not a fresh install
+
+            ---
+            _Automated by CI/CD pipeline_
+          files: |
+            **/*.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+      # Post native build comment on PR
+      - name: Post native build comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const user = '${{ needs.detect-changes.outputs.pr-user }}';
+            const version = '${{ needs.detect-changes.outputs.native-version }}';
+            const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/native-v${{ needs.detect-changes.outputs.native-version }}-${{ github.sha }}`;
+
+            let comment;
+            if ('${{ steps.cap-check.outputs.skipped }}' === 'false') {
+              comment = [
+                `## Native APK Published \ud83e\udd16`,
+                ``,
+                `A full native Android build has completed and the APK is attached to a GitHub Release.`,
+                ``,
+                `\`>\` **Version**: v${version}  \u2022  **Triggered by**: @${user}`,
+                ``,
+                `[Download APK](${releaseUrl})`,
+                ``,
+                `Share this link with your friends - they can tap the APK to update directly.`,
+                ``,
+                `---`,
+                `_Automated by CI/CD pipeline_`
+              ].join('\n');
+            } else {
+              comment = [
+                `## Native Build Skipped (Daily Cap Reached) \u23f3`,
+                ``,
+                `A native rebuild was requested but **already completed today**.`,
+                ``,
+                `\`>\` **Version**: v${version}  \u2022  **Triggered by**: @${user}`,
+                ``,
+                `Your friends will receive the APK update from today's build.`,
+                `If a new native change is needed tomorrow, a fresh build will trigger automatically.`,
+                ``,
+                `---`,
+                `_Automated by CI/CD pipeline_`
+              ].join('\n');
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });
