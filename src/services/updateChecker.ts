@@ -12,7 +12,7 @@ import { openDatabase } from '../database/db';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloaded' | 'error' | 'up-to-date';
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'up-to-date';
 
 export interface UpdateInfo {
   /** Whether an update is available */
@@ -30,8 +30,8 @@ export interface UpdateInfo {
 // ── Constants ──────────────────────────────────────────────────────────
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const STORAGE_KEY_UPDATE_PREFERENCE = 'updatePreference';
 const STORAGE_KEY_LATEST_NATIVE_VERSION = 'latestNativeVersion';
+const STORAGE_KEY_LAST_APPLIED_UPDATE_HASH = 'lastAppliedUpdateHash';
 
 export type UpdatePreference = 'auto' | 'manual';
 
@@ -66,6 +66,7 @@ let pendingUpdateInfo: UpdateInfo | null = null;
 
 /**
  * Check for available OTA updates via expo-updates.
+ * Uses the new SDK 52 API: checkForUpdateAsync returns an UpdateCheckResult object.
  */
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
   // Rate limit checks to once per hour
@@ -78,9 +79,10 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
   try {
     currentStatus = 'checking';
 
-    const updateAvailable = await Updates.checkForUpdateAsync();
+    const result = await Updates.checkForUpdateAsync();
 
-    if (updateAvailable) {
+    // SDK 52+: checkForUpdateAsync returns an object with isAvailable, not a boolean.
+    if (result.isAvailable) {
       const version = ApplicationInfo.nativeApplicationVersion || '1.0.0';
       const autoApply = false; // Default to manual prompt for transparency
 
@@ -98,7 +100,12 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
       return info;
     }
 
-    // No OTA update available
+    // No OTA update available — check if this is a rollback scenario
+    if (result.isRollBackToEmbedded) {
+      console.log('[updateChecker] Rollback to embedded detected, clearing stale state.');
+      await storageSet(STORAGE_KEY_LAST_APPLIED_UPDATE_HASH, '');
+    }
+
     currentStatus = 'up-to-date';
     return null;
   } catch (error) {
@@ -109,14 +116,50 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
 }
 
 /**
+ * Fetch (download) the pending OTA update.
+ * Must be called after checkForUpdates() reports available and before reloadAsync().
+ */
+export async function fetchUpdate(): Promise<{ success: boolean; error?: string }> {
+  try {
+    currentStatus = 'downloading';
+
+    const fetchResult = await Updates.fetchUpdateAsync();
+
+    if (fetchResult.isNew) {
+      // Store the update ID so we know this update was applied.
+      // The update ID is a unique identifier per OTA update release.
+      const updateId = fetchResult.manifest?.id ?? null;
+      if (updateId) {
+        await storageSet(STORAGE_KEY_LAST_APPLIED_UPDATE_HASH, updateId);
+      }
+
+      currentStatus = 'downloaded';
+      return { success: true };
+    }
+
+    // Update was fetched but is not new (same as current) — treat as up-to-date
+    currentStatus = 'up-to-date';
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown fetch error';
+    console.warn('Update fetch failed:', error);
+    currentStatus = 'error';
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
  * Request the user to restart and apply the pending update.
  * Called when user taps "Restart now" in the update prompt.
+ * The update must have been fetched first via fetchUpdate().
  */
 export async function requestRestart(): Promise<void> {
   try {
     await Updates.reloadAsync();
   } catch (error) {
     console.warn('Failed to reload:', error);
+    currentStatus = 'error';
+    throw error;
   }
 }
 
@@ -155,4 +198,12 @@ export async function setLatestNativeVersion(version: string): Promise<void> {
  */
 export async function getLatestNativeVersion(): Promise<string | null> {
   return await storageGet(STORAGE_KEY_LATEST_NATIVE_VERSION);
+}
+
+/**
+ * Get the hash of the last applied update. Used to detect if we just reloaded
+ * from an update and should skip the next check to avoid a prompt loop.
+ */
+export async function getLastAppliedUpdateHash(): Promise<string | null> {
+  return await storageGet(STORAGE_KEY_LAST_APPLIED_UPDATE_HASH);
 }
