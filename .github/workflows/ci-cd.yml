@@ -76,10 +76,14 @@ jobs:
       - name: PR info
         id: pr-info
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
-          BODY="${{ github.event.pull_request.body }}"
+          # Use jq to safely read from GITHUB_EVENT_PATH (avoids shell injection from backticks in PR body)
+          TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "${{ github.event.pull_request.title }}")
+          BODY=$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "")
+          # Sanitize title: keep only alphanumeric, spaces, dashes, dots
           echo "title=${TITLE//[^a-zA-Z0-9 \-\.]/}" >> $GITHUB_OUTPUT
-          echo "body=$(echo '${BODY:0:500}' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          # Sanitize body: replace newlines with spaces, limit length
+          SAFE_BODY=$(printf '%s' "${BODY:0:500}" | tr '\n\r' '  ')
+          echo "body=$SAFE_BODY" >> $GITHUB_OUTPUT
           echo "user=${{ github.actor }}" >> $GITHUB_OUTPUT
 
       - name: Log detection result
