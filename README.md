@@ -92,4 +92,5 @@ See `docs/project-status.md` for current phase and progress.
 ## Documentation
 - [Product Specification](docs/product-spec.md)
 - [Architecture](docs/architecture.md)
-- [Project Status](docs/project-status.md)
+- [Project Status](docs/project-status.md)  
+"<!-- CI/CD Test: This commit triggers the OTA update workflow -->" 
