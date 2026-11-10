@@ -111,11 +111,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
       # Authenticate with EAS via EXPO_TOKEN environment variable
       - name: EAS login
         env:
           EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
-        run: echo "Authenticated as $(eas account:whoami --non-interactive 2>&1 || echo 'token set')"
+        run: |
+          echo "EAS authenticated via EXPO_TOKEN"
+          eas account:whoami --non-interactive
 
       # Publish OTA update to production channel
       - name: Publish OTA update
@@ -179,11 +184,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
       # Authenticate with EAS via EXPO_TOKEN environment variable
       - name: EAS login
         env:
           EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
-        run: echo "Authenticated as $(eas account:whoami --non-interactive 2>&1 || echo 'token set')"
+        run: |
+          echo "EAS authenticated via EXPO_TOKEN"
+          eas account:whoami --non-interactive
 
       # Daily native build cap check
       - name: Check daily build cap
