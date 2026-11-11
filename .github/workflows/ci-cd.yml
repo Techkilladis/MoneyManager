@@ -18,8 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has-native-changes: ${{ steps.changed.outputs.native_any }}
-      js-version: ${{ steps.version.outputs.js }}
-      native-version: ${{ steps.version.outputs.native }}
+      version: ${{ steps.version.outputs.version }}
+      version-code: ${{ steps.version.outputs.version_code }}
+      tag: ${{ steps.version.outputs.tag }}
+      js-version: ${{ steps.version.outputs['js-version'] }}
+      native-version: ${{ steps.version.outputs['native-version'] }}
       pr-title: ${{ steps.pr-info.outputs.title }}
       pr-body: ${{ steps.pr-info.outputs.body }}
       pr-user: ${{ steps.pr-info.outputs.user }}
@@ -31,11 +34,10 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Get base commit (before PR)
-        id: base
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          echo "base=$BASE" >> $GITHUB_OUTPUT
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Get merge commit
         id: commit
@@ -47,9 +49,8 @@ jobs:
       - name: Check for native module changes
         id: changed
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          MERGE="HEAD"
-          NATIVE_FILES=$(git diff --name-only "$BASE" "$MERGE" -- modules/notification-detection/ android/ ios/ app.json eas.json plugins/ 2>/dev/null || true)
+          BASE_COMMIT="HEAD^1"
+          NATIVE_FILES=$(git diff --name-only "$BASE_COMMIT" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ package.json 2>/dev/null || true)
           if [ -n "$NATIVE_FILES" ]; then
             echo "native_any=true" >> $GITHUB_OUTPUT
             echo "Native changes detected:"
@@ -59,18 +60,29 @@ jobs:
             echo "No native changes detected."
           fi
 
-      # Version bump detection
-      - name: Extract versions
+      # Version bump and manifest commit (for native changes) or version extraction (for JS changes)
+      - name: Process versioning
         id: version
         run: |
-          JS_VERSION=$(node -p "require('./package.json').version")
-          echo "js=$JS_VERSION" >> $GITHUB_OUTPUT
-          NATIVE_VERSION=$(node -p "
-            const fs = require('fs');
-            const app = JSON.parse(fs.readFileSync('app.json','utf8'));
-            (app.android?.versionCode || 1).toString();
-          ")
-          echo "native=$NATIVE_VERSION" >> $GITHUB_OUTPUT
+          if [ "${{ steps.changed.outputs.native_any }}" = "true" ]; then
+            echo "Native changes detected. Bumping version manifests..."
+            node scripts/bump-version.js
+            VERSION=$(node -p "require('./package.json').version")
+            TAG="v$VERSION"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add app.json package.json
+            if [ -f package-lock.json ]; then
+              git add package-lock.json
+            fi
+            git commit -m "chore(release): bump version to $VERSION [skip ci]"
+            git tag "$TAG"
+            git push origin HEAD:main
+            git push origin "$TAG"
+          else
+            echo "No native changes detected. Extracting current version..."
+            node scripts/bump-version.js --current
+          fi
 
       # PR metadata
       - name: PR info
@@ -90,8 +102,9 @@ jobs:
         run: |
           echo "=== CI/CD Detection Result ==="
           echo "Native changes: ${{ steps.changed.outputs.native_any }}"
-          echo "JS version: ${{ steps.version.outputs.js }}"
-          echo "Native version: ${{ steps.version.outputs.native }}"
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Version code: ${{ steps.version.outputs.version_code }}"
+          echo "Tag: ${{ steps.version.outputs.tag }}"
           echo "Merge commit: ${{ steps.commit.outputs.sha }}"
 
   # STEP 2A: OTA Update (JS-only changes)
@@ -135,7 +148,7 @@ jobs:
 
       # Lint before publishing
       - name: Lint codebase
-        run: npx eslint . --max-warnings=0 || true
+        run: npx eslint . --max-warnings=0
 
       # Ensure production channel is mapped to a branch
       - name: Ensure production channel exists
@@ -199,7 +212,7 @@ jobs:
           script: |
             const prNumber = context.payload.pull_request.number;
             const groupId = '${{ steps.ota.outputs.group_id }}';
-            const version = '${{ needs.detect-changes.outputs.js-version }}';
+            const version = '${{ needs.detect-changes.outputs.version }}';
             const user = '${{ needs.detect-changes.outputs.pr-user }}';
 
             const comment = [
@@ -313,14 +326,15 @@ jobs:
         if: steps.cap-check.outputs.skipped == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: native-v${{ needs.detect-changes.outputs.native-version }}-${{ github.sha }}
-          name: "Native Release v${{ needs.detect-changes.outputs.native-version }}"
+          tag_name: ${{ needs.detect-changes.outputs.tag }}
+          name: "Release ${{ needs.detect-changes.outputs.tag }}"
           body: |
             ## Native APK Release
 
             > **Triggered by**: @${{ needs.detect-changes.outputs.pr-user }}
             > **Merge commit**: ${{ github.sha }}
             > **PR**: #${{ github.event.pull_request.number }}
+            > **Version Code**: ${{ needs.detect-changes.outputs.version-code }}
 
             This release contains a full native Android build with updated native modules.
 
@@ -344,8 +358,9 @@ jobs:
           script: |
             const prNumber = context.payload.pull_request.number;
             const user = '${{ needs.detect-changes.outputs.pr-user }}';
-            const version = '${{ needs.detect-changes.outputs.native-version }}';
-            const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/native-v${{ needs.detect-changes.outputs.native-version }}-${{ github.sha }}`;
+            const version = '${{ needs.detect-changes.outputs.version }}';
+            const tag = '${{ needs.detect-changes.outputs.tag }}';
+            const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`;
 
             let comment;
             if ('${{ steps.cap-check.outputs.skipped }}' === 'false') {
@@ -354,7 +369,7 @@ jobs:
                 ``,
                 `A full native Android build has completed and the APK is attached to a GitHub Release.`,
                 ``,
-                `\`>\` **Version**: v${version}  \u2022  **Triggered by**: @${user}`,
+                `\`>\` **Version**: ${tag}  \u2022  **Triggered by**: @${user}`,
                 ``,
                 `[Download APK](${releaseUrl})`,
                 ``,
@@ -369,7 +384,7 @@ jobs:
                 ``,
                 `A native rebuild was requested but **already completed today**.`,
                 ``,
-                `\`>\` **Version**: v${version}  \u2022  **Triggered by**: @${user}`,
+                `\`>\` **Version**: ${tag}  \u2022  **Triggered by**: @${user}`,
                 ``,
                 `Your friends will receive the APK update from today's build.`,
                 `If a new native change is needed tomorrow, a fresh build will trigger automatically.`,
