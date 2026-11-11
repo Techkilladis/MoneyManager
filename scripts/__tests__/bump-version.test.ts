@@ -164,6 +164,20 @@ describe('scripts/bump-version', () => {
       expect(updatedAppJson.expo.android.versionCode).toBe(1);
     });
 
+    it('safely handles non-positive or non-integer versionCode in app.json', () => {
+      const packageJsonContent = { name: 'test-app', version: '1.0.0' };
+      const appJsonContent = { expo: { name: 'Test App', version: '1.0.0', android: { versionCode: 0 } } };
+
+      fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify(packageJsonContent, null, 2) + '\n');
+      fs.writeFileSync(path.join(tempDir, 'app.json'), JSON.stringify(appJsonContent, null, 2) + '\n');
+
+      const manifests = readManifests(tempDir);
+      expect(manifests.currentVersionCode).toBeUndefined();
+
+      const result = bumpVersion({ dir: tempDir });
+      expect(result.versionCode).toBe(1);
+    });
+
     it('throws when package.json or app.json is missing', () => {
       expect(() => readManifests(tempDir)).toThrow(/Missing required manifest/);
     });
@@ -230,8 +244,12 @@ describe('scripts/bump-version', () => {
       const outputContent = fs.readFileSync(outputFile, 'utf8');
       expect(outputContent).toContain('version=1.0.1\n');
       expect(outputContent).toContain('version_code=2\n');
-      expect(outputContent).toContain('version-code=2\n');
       expect(outputContent).toContain('tag=v1.0.1\n');
+      expect(outputContent).toContain('js-version=1.0.1\n');
+      expect(outputContent).toContain('native-version=2\n');
+      expect(outputContent).not.toContain('version-code=');
+      expect(outputContent).not.toContain('js=');
+      expect(outputContent).not.toContain('native=');
     });
   });
 
@@ -247,8 +265,12 @@ describe('scripts/bump-version', () => {
       fs.writeFileSync(path.join(tempDir, 'app.json'), JSON.stringify(appJsonContent, null, 2) + '\n');
 
       const stdout = execSync(
-        `node "${scriptPath}" --dir "${tempDir}" --github-output "${outputFile}"`,
-        { encoding: 'utf8' }
+        `node "${scriptPath}"`,
+        {
+          cwd: tempDir,
+          env: { ...process.env, GITHUB_OUTPUT: outputFile },
+          encoding: 'utf8',
+        }
       );
 
       expect(stdout).toContain('Version bumped: 1.0.0 -> 1.0.1');
@@ -258,6 +280,7 @@ describe('scripts/bump-version', () => {
 
       const outputContent = fs.readFileSync(outputFile, 'utf8');
       expect(outputContent).toContain('version=1.0.1\n');
+      expect(outputContent).toContain('version_code=2\n');
     });
 
     it('supports --dry-run in CLI', () => {
@@ -268,8 +291,8 @@ describe('scripts/bump-version', () => {
       fs.writeFileSync(path.join(tempDir, 'app.json'), JSON.stringify(appJsonContent, null, 2) + '\n');
 
       const stdout = execSync(
-        `node "${scriptPath}" --dir "${tempDir}" --dry-run`,
-        { encoding: 'utf8' }
+        `node "${scriptPath}" --dry-run`,
+        { cwd: tempDir, encoding: 'utf8' }
       );
 
       expect(stdout).toContain('[DRY RUN]');
@@ -286,8 +309,12 @@ describe('scripts/bump-version', () => {
       fs.writeFileSync(path.join(tempDir, 'app.json'), JSON.stringify(appJsonContent, null, 2) + '\n');
 
       const stdout = execSync(
-        `node "${scriptPath}" --dir "${tempDir}" --current --github-output "${outputFile}"`,
-        { encoding: 'utf8' }
+        `node "${scriptPath}" --current`,
+        {
+          cwd: tempDir,
+          env: { ...process.env, GITHUB_OUTPUT: outputFile },
+          encoding: 'utf8',
+        }
       );
 
       expect(stdout).toContain('Current version: 1.0.0');

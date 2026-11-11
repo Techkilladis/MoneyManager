@@ -124,8 +124,6 @@ function readManifests(projectDir = process.cwd()) {
   const currentVersionCode =
     rawVersionCode !== undefined && Number.isInteger(Number(rawVersionCode)) && Number(rawVersionCode) > 0
       ? Number(rawVersionCode)
-      : rawVersionCode !== undefined
-      ? Number(rawVersionCode)
       : undefined;
 
   return {
@@ -148,8 +146,6 @@ function readManifests(projectDir = process.cwd()) {
  * @param {boolean} [options.dryRun]
  * @param {boolean} [options.readOnly]
  * @param {string} [options.githubOutput]
- * @param {string} [options.explicitVersion]
- * @param {number} [options.explicitVersionCode]
  * @returns {{
  *   previousVersion: string,
  *   previousVersionCode: number | undefined,
@@ -183,11 +179,8 @@ function bumpVersion(options = {}) {
     newVersion = currentVersion;
     newVersionCode = currentVersionCode !== undefined ? currentVersionCode : 1;
   } else {
-    newVersion = options.explicitVersion || incrementPatch(currentVersion);
-    newVersionCode =
-      options.explicitVersionCode !== undefined
-        ? Number(options.explicitVersionCode)
-        : incrementVersionCode(currentVersionCode);
+    newVersion = incrementPatch(currentVersion);
+    newVersionCode = incrementVersionCode(currentVersionCode);
   }
 
   const tag = `v${newVersion}`;
@@ -223,12 +216,9 @@ function bumpVersion(options = {}) {
     const lines = [
       `version=${newVersion}`,
       `version_code=${newVersionCode}`,
-      `version-code=${newVersionCode}`,
       `tag=${tag}`,
       `js-version=${newVersion}`,
       `native-version=${newVersionCode}`,
-      `js=${newVersion}`,
-      `native=${newVersionCode}`,
       '',
     ].join('\n');
     fs.appendFileSync(githubOutput, lines, 'utf8');
@@ -246,52 +236,13 @@ function bumpVersion(options = {}) {
 // CLI handler
 function runCli() {
   const args = process.argv.slice(2);
-  let dir = process.cwd();
-  let dryRun = false;
-  let readOnly = false;
-  let githubOutput = process.env.GITHUB_OUTPUT;
-  let explicitVersion;
-  let explicitVersionCode;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--help' || arg === '-h') {
-      console.log(`
-Usage: node scripts/bump-version.js [options]
-
-Options:
-  --dir <path>             Path to project root (default: current directory)
-  --dry-run                Calculate version bump without writing files
-  --current, --read-only   Extract current version/versionCode without bumping
-  --github-output <path>   Append output keys to GitHub Actions output file
-  --version <version>      Manually specify target version
-  --version-code <code>    Manually specify target Android versionCode
-  -h, --help               Show help
-      `);
-      process.exit(0);
-    } else if (arg === '--dry-run') {
-      dryRun = true;
-    } else if (arg === '--current' || arg === '--read-only') {
-      readOnly = true;
-    } else if (arg === '--dir') {
-      dir = args[++i];
-    } else if (arg === '--github-output') {
-      githubOutput = args[++i];
-    } else if (arg === '--version') {
-      explicitVersion = args[++i];
-    } else if (arg === '--version-code') {
-      explicitVersionCode = Number(args[++i]);
-    }
-  }
+  const dryRun = args.includes('--dry-run');
+  const readOnly = args.includes('--current') || args.includes('--read-only');
 
   try {
     const result = bumpVersion({
-      dir,
       dryRun,
       readOnly,
-      githubOutput,
-      explicitVersion,
-      explicitVersionCode,
     });
 
     if (readOnly) {

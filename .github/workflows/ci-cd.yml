@@ -39,12 +39,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Get base commit (before PR)
-        id: base
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          echo "base=$BASE" >> $GITHUB_OUTPUT
-
       - name: Get merge commit
         id: commit
         run: |
@@ -55,9 +49,8 @@ jobs:
       - name: Check for native module changes
         id: changed
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          MERGE_BASE=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
-          NATIVE_FILES=$(git diff --name-only "$MERGE_BASE" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ 2>/dev/null || true)
+          BASE_COMMIT="HEAD^1"
+          NATIVE_FILES=$(git diff --name-only "$BASE_COMMIT" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ package.json 2>/dev/null || true)
           if [ -n "$NATIVE_FILES" ]; then
             echo "native_any=true" >> $GITHUB_OUTPUT
             echo "Native changes detected:"
@@ -84,7 +77,7 @@ jobs:
             fi
             git commit -m "chore(release): bump version to $VERSION [skip ci]"
             git tag "$TAG"
-            git push origin main
+            git push origin HEAD:main
             git push origin "$TAG"
           else
             echo "No native changes detected. Extracting current version..."
