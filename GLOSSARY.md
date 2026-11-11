@@ -1,53 +1,63 @@
-# Glossary — Automated CI/CD Pipeline
+# Automated CI/CD Pipeline
+
+The pipeline and in-app update mechanism that manages Over-the-Air updates and native Android releases.
 
 ## Core Concepts
 
-**CI/CD Pipeline** — The automated workflow that converts a merged GitHub Pull Request into either an Over-the-Air (OTA) update or a full native Android build, depending on whether only JavaScript/TypeScript code changed or native module code was modified.
+**CI/CD Pipeline**:
+The automated GitHub Actions workflow triggered on pull request merge to build either an Over-the-Air update or a native APK.
+_Avoid_: Build script, deployment runner
 
-**Pull Request (PR)** — A GitHub feature where proposed changes are reviewed before merging. The CI/CD pipeline is triggered when a PR is **merged** into the `main` branch, not on every push or commit.
+**Pull Request (PR)**:
+A GitHub pull request whose merge into the main branch initiates the build and release workflow.
+_Avoid_: Patch, commit trigger
 
-**Main Branch** — The default protection branch (`main`) that holds production-ready code. Only merged PRs trigger builds; direct pushes to `main` do not.
+**Main Branch**:
+The production-ready trunk branch where merged code lives.
+_Avoid_: Master, develop branch
+
+**Auto-Detect**:
+The workflow step inspecting changed files between merge base and head to route to an OTA update or a native rebuild.
+_Avoid_: Change listener, manual build selector
 
 ## Build Types
 
-**OTA Update (Over-the-Air)** — A lightweight update that only applies to JavaScript and asset changes. Published via Expo Updates to the production channel. No download or installation required; the app receives the update on next launch and prompts the user to restart.
+**OTA Update**:
+A lightweight JavaScript and asset update published to EAS Update without modifying binary code.
+_Avoid_: Hot reload, live patch
 
-**Native Rebuild (Full Build)** — A complete Android APK build triggered when the native module (`modules/notification-detection/`) is modified. Produces an APK file attached to a GitHub Release. Users install by tapping the APK from the notification link.
+**Native Rebuild**:
+A complete Android APK compiled by EAS when native modules or configuration change.
+_Avoid_: App store build, binary release
 
-**Auto-Detect** — The CI workflow's logic that inspects which files changed in the merged PR. If only `*.ts`, `*.tsx`, `*.js`, `*.jsx`, `*.json` (non-native) files changed → OTA. If any file under `modules/notification-detection/` or native Android files (`*.kt`, `*.java`, `*.xml` in native directories) changed → Native Rebuild.
-
-## Channels and Versions
-
-**Production Channel** — The EAS channel where OTA updates are published. Friends receive updates directly on this channel via the `expo-updates` runtime configured with `runtimeVersion.policy: "appVersion"`.
-
-**Preview Channel** — An EAS channel in `eas.json` reserved for development builds and internal testing. Not used for friend-facing updates in this pipeline.
-
-**Development Build** — An EAS build profile with `developmentClient: true`, used locally during development (`expo run:android`). Not part of the CI/CD pipeline to friends.
+**Automated Version Bumping**:
+The CI step that increments `android.versionCode` and semantic version in project manifests upon a native rebuild.
+_Avoid_: Manual versioning, tag bumping
 
 ## Distribution
 
-**GitHub Release** — A tagged release on GitHub that contains the APK artifact from a native rebuild. Auto-created by the CI workflow with a tag like `native-v1.0.1`. The notification to friends includes a deep link to this release page where they can download and install the APK.
+**GitHub Release**:
+A tagged release on GitHub hosting the compiled APK file as a downloadable asset.
+_Avoid_: Release page link, artifact upload
 
-**APK (Android Package Kit)** — The installable Android application package produced by a native rebuild. Friends receive a notification with a link to the GitHub Release containing the APK, then manually install it like any Android app update.
+**Direct APK Download**:
+A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immediate file download in the browser.
+_Avoid_: Release page redirection, manual asset picker
 
-**Update Notification** — A runtime check performed when the app launches. For OTA updates: displays "Update available — restart now?" dialog (unless auto-update setting is enabled). For native rebuilds: displays a notification with a deep link to the GitHub Release APK download.
+**APK**:
+The Android Package Kit binary installed on device for native upgrades.
+_Avoid_: Installer bundle, setup file
 
-## Authentication and Secrets
+## In-App Update Experience
 
-**EAS API Key** — A dedicated authentication token created specifically for the CI/CD workflow. Stored as a GitHub repository secret (`EAS_ACCESS_TOKEN`). Can be revoked independently without affecting the user's personal EAS account access.
+**Two-Stage OTA Prompt**:
+A user flow that first requests confirmation to download (showing a buffering screen), then prompts to restart now or restart later.
+_Avoid_: Silent auto-restart, single-prompt reload
 
-**GitHub Secret** — Encrypted environment variables stored in the repository settings (Settings → Secrets and variables → Actions). Used to store sensitive values like `EAS_ACCESS_TOKEN` that the CI workflow needs for authentication.
+**Native Update Prompt**:
+A modal informing the user that a newer APK release is available, with actions to download immediately in the browser or defer.
+_Avoid_: Store redirect prompt, forced update screen
 
-## Quota Management
-
-**Daily Native Build Cap** — A safeguard that limits native APK rebuilds to one per calendar day, even if multiple PRs merge on the same day requiring native builds. Protects the EAS Free plan quota (50 builds/month).
-
-**EAS Build Quota** — The monthly limit on EAS cloud builds. Free tier provides 50 builds/month. OTA updates do not consume this quota. Native rebuilds consume one build each.
-
-## User Control
-
-**Update Preference Setting** — A user-configurable setting (stored in app preferences) that controls update behavior:
-- **Auto-background-update**: App silently downloads and applies OTA updates without prompting.
-- **Manual prompt**: App displays "Update available — restart now?" dialog before applying updates.
-
-**EAS Project** — The Expo Application Services project identified by `794dc62b-...` under owner `zenova1109`. Contains all build configuration, channel definitions, and OTA update metadata.
+**Update Precedence**:
+The rule that native binary updates supersede pending OTA updates, because native binaries already contain all prior JavaScript changes.
+_Avoid_: Sequential patch stacking, blind OTA applying
