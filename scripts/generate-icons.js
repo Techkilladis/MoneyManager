@@ -107,6 +107,7 @@ function write(name, png, size) {
       out.data[o + 2] = a ? Math.round(b / a) : 0; out.data[o + 3] = Math.round(a / c);
     }
   }
+  // eslint-disable-next-line no-undef
   fs.writeFileSync(path.join(__dirname, '..', 'assets', name), PNG.sync.write(out));
   console.log('wrote', name);
 }
