@@ -9,4 +9,3 @@ export { CategoryAvatar, UncategorizedAvatar, MemberAvatar } from './Avatars';
 export { Sheet } from './Sheet';
 export { ToastProvider, useToast } from './Toast';
 export { BottomBar, EmptyState, ErrorView, KeyFigure, LoadingView, ScreenHeader, StatusChip } from './Layout';
-export { UpdatePrompt } from '@/components/UpdatePrompt';

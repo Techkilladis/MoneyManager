@@ -18,7 +18,7 @@ import { openDatabase } from '@/database/db';
 import { radius, space } from '@/design/tokens';
 import { makeStyles, ThemeProvider, useTheme } from '@/design/theme';
 import { AppLockGate } from '@/components/AppLockGate';
-import { ErrorView, Icon, LoadingView, Text, ToastProvider, UpdatePrompt } from '@/components/ui';
+import { ErrorView, Icon, LoadingView, Text, ToastProvider } from '@/components/ui';
 
 // While the app is open, pull new UPI captures periodically so a payment
 // made in another app shows up without a restart.
@@ -189,7 +189,6 @@ function Root() {
           <Stack.Screen name="recap" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
       </AppLockGate>
-      <UpdatePrompt />
     </ToastProvider>
   );
 }
