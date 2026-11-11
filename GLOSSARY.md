@@ -1,63 +1,53 @@
-# Automated CI/CD Pipeline
+# Glossary
 
-The pipeline and in-app update mechanism that manages Over-the-Air updates and native Android releases.
+### `APK`
 
-## Core Concepts
+The Android Package Kit binary installed on device for native application upgrades. Related terms: `[Native Rebuild]`, `[Direct APK Download]`.
 
-**CI/CD Pipeline**:
-The automated GitHub Actions workflow triggered on pull request merge to build either an Over-the-Air update or a native APK.
-_Avoid_: Build script, deployment runner
+### `Auto-Detect`
 
-**Pull Request (PR)**:
-A GitHub pull request whose merge into the main branch initiates the build and release workflow.
-_Avoid_: Patch, commit trigger
+The workflow step inspecting changed files between merge base and head to route to an OTA update or a native rebuild. Related terms: `[CI/CD Pipeline]`, `[OTA Update]`, `[Native Rebuild]`.
 
-**Main Branch**:
-The production-ready trunk branch where merged code lives.
-_Avoid_: Master, develop branch
+### `Automated Version Bumping`
 
-**Auto-Detect**:
-The workflow step inspecting changed files between merge base and head to route to an OTA update or a native rebuild.
-_Avoid_: Change listener, manual build selector
+The CI step that automatically increments `android.versionCode` and semantic version in project manifests upon a native rebuild. Related terms: `[Native Rebuild]`, `[GitHub Release]`.
 
-## Build Types
+### `CI/CD Pipeline`
 
-**OTA Update**:
-A lightweight JavaScript and asset update published to EAS Update without modifying binary code.
-_Avoid_: Hot reload, live patch
+The automated GitHub Actions workflow triggered on pull request merge to build either an Over-the-Air update or a native APK. Related terms: `[Pull Request (PR)]`, `[Auto-Detect]`, `[OTA Update]`, `[Native Rebuild]`.
 
-**Native Rebuild**:
-A complete Android APK compiled by EAS when native modules or configuration change.
-_Avoid_: App store build, binary release
+### `Direct APK Download`
 
-**Automated Version Bumping**:
-The CI step that increments `android.versionCode` and semantic version in project manifests upon a native rebuild.
-_Avoid_: Manual versioning, tag bumping
+A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immediate file download in the browser. Related terms: `[APK]`, `[GitHub Release]`, `[Native Update Prompt]`.
 
-## Distribution
+### `GitHub Release`
 
-**GitHub Release**:
-A tagged release on GitHub hosting the compiled APK file as a downloadable asset.
-_Avoid_: Release page link, artifact upload
+A tagged release on GitHub hosting the compiled APK file as a downloadable asset. Related terms: `[Direct APK Download]`, `[APK]`.
 
-**Direct APK Download**:
-A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immediate file download in the browser.
-_Avoid_: Release page redirection, manual asset picker
+### `Main Branch`
 
-**APK**:
-The Android Package Kit binary installed on device for native upgrades.
-_Avoid_: Installer bundle, setup file
+The production-ready trunk branch where merged code lives. Related terms: `[Pull Request (PR)]`, `[CI/CD Pipeline]`.
 
-## In-App Update Experience
+### `Native Rebuild`
 
-**Two-Stage OTA Prompt**:
-A user flow that first requests confirmation to download (showing a buffering screen), then prompts to restart now or restart later.
-_Avoid_: Silent auto-restart, single-prompt reload
+A complete Android APK compiled by EAS when native modules or configuration change. Related terms: `[APK]`, `[Automated Version Bumping]`, `[Update Precedence]`.
 
-**Native Update Prompt**:
-A modal informing the user that a newer APK release is available, with actions to download immediately in the browser or defer.
-_Avoid_: Store redirect prompt, forced update screen
+### `Native Update Prompt`
 
-**Update Precedence**:
-The rule that native binary updates supersede pending OTA updates, because native binaries already contain all prior JavaScript changes.
-_Avoid_: Sequential patch stacking, blind OTA applying
+A modal informing the user that a newer APK release is available, with actions to download immediately in the browser or defer. Related terms: `[Direct APK Download]`, `[Update Precedence]`.
+
+### `OTA Update`
+
+A lightweight JavaScript and asset update published to EAS Update without modifying binary code. Related terms: `[Two-Stage OTA Prompt]`, `[Update Precedence]`.
+
+### `Pull Request (PR)`
+
+A GitHub pull request whose merge into the main branch initiates the build and release workflow. Related terms: `[Main Branch]`, `[CI/CD Pipeline]`.
+
+### `Two-Stage OTA Prompt`
+
+A user flow that first requests confirmation to download (showing a buffering screen), then prompts to restart now or restart later. Related terms: `[OTA Update]`.
+
+### `Update Precedence`
+
+The rule that native binary updates supersede pending OTA updates, because native binaries already contain all prior JavaScript changes. Related terms: `[Native Rebuild]`, `[OTA Update]`.

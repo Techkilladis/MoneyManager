@@ -1,7 +1,7 @@
-# ADR-002: Automated CI/CD Pipeline and In-App Update Distribution
+# 002. Automated CI/CD Pipeline and In-App Update Distribution
 
-## Status
-Accepted
+**Status:** accepted  
+**Date:** 2026-11-11  
 
 ## Context
 Money Manager is a personal finance app distributed to close friends. The app uses Expo SDK 52 with EAS, contains custom native Android code (`modules/notification-detection/`), and uses `expo-updates` for OTA delivery. Changes merged to `main` must automatically publish either an OTA update or a native Android APK on GitHub Releases. When users launch the app, they must be cleanly guided through updating, whether via OTA or via downloading the new APK.

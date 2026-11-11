@@ -1,3 +1,4 @@
+import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 
@@ -206,7 +207,11 @@ async function fetchLatestGitHubRelease(
 export async function checkForUpdates(
   options?: CheckForUpdatesOptions
 ): Promise<UpdateCheckResult> {
-  const installedVersion = options?.installedVersion ?? Constants.expoConfig?.version ?? '1.0.0';
+  const installedVersion =
+    options?.installedVersion ??
+    Application.nativeApplicationVersion ??
+    Constants.expoConfig?.version ??
+    '1.0.0';
   const githubEndpoint = options?.githubEndpoint ?? GITHUB_RELEASES_LATEST_URL;
   const fetchFn = options?.fetchFn ?? globalThis.fetch;
   const timeoutMs = options?.timeoutMs ?? 5000;
@@ -228,19 +233,38 @@ export async function checkForUpdates(
           releaseNotes: release.body,
         };
       }
+      // A newer native release exists, but APK asset is not yet available (e.g. EAS build in progress).
+      // Precedence must still be enforced: suppress OTA updates and return none.
+      return { type: 'none' };
     }
   }
 
-  // 2. Check for runtime Over-the-Air (OTA) update
+  // 2. Check for runtime Over-the-Air (OTA) update with timeout protection
   const updates = options?.updatesModule ?? Updates;
   if (updates.isEnabled) {
     try {
-      const otaResult = await updates.checkForUpdateAsync();
-      if (otaResult.isAvailable) {
-        return {
-          type: 'ota',
-          manifest: otaResult.manifest,
-        };
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error('OTA update check timed out'));
+        }, timeoutMs);
+      });
+
+      try {
+        const otaResult = await Promise.race([
+          updates.checkForUpdateAsync(),
+          timeoutPromise,
+        ]);
+        if (otaResult.isAvailable) {
+          return {
+            type: 'ota',
+            manifest: otaResult.manifest,
+          };
+        }
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
       }
     } catch {
       // Platform update check failed silently
@@ -251,24 +275,8 @@ export async function checkForUpdates(
   return { type: 'none' };
 }
 
-/**
- * Fetches the pending OTA update bundle.
- */
-export async function fetchOtaUpdate(): Promise<Updates.UpdateFetchResult> {
-  return Updates.fetchUpdateAsync();
-}
-
-/**
- * Reloads the app to apply a newly fetched OTA update.
- */
-export async function reloadApp(): Promise<void> {
-  return Updates.reloadAsync();
-}
-
 export const updateService = {
   checkForUpdates,
-  fetchOtaUpdate,
-  reloadApp,
   compareSemVer,
   isNewerVersion,
   findApkAsset,

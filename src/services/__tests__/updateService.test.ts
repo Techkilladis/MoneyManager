@@ -1,12 +1,10 @@
-import * as Updates from 'expo-updates';
+import * as Application from 'expo-application';
 import {
   checkForUpdates,
   compareSemVer,
-  fetchOtaUpdate,
   findApkAsset,
   GITHUB_RELEASES_LATEST_URL,
   isNewerVersion,
-  reloadApp,
   updateService,
 } from '../updateService';
 
@@ -376,6 +374,38 @@ describe('updateService - SemVer Comparison', () => {
       expect(checkForUpdateAsync).not.toHaveBeenCalled();
     });
 
+    it('suppresses OTA update and returns none when a newer native release exists without an APK asset', async () => {
+      const releaseWithoutApk = {
+        tag_name: 'v2.0.0',
+        name: 'Release 2.0.0 (Building)',
+        body: 'Build in progress',
+        draft: false,
+        assets: [],
+      };
+
+      const fetchFn = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => releaseWithoutApk,
+      });
+
+      const checkForUpdateAsync = jest.fn().mockResolvedValue({
+        isAvailable: true,
+        manifest: { id: 'pending-ota-update' },
+      });
+
+      const result = await checkForUpdates({
+        installedVersion: '1.0.0',
+        fetchFn: fetchFn as unknown as typeof fetch,
+        updatesModule: {
+          isEnabled: true,
+          checkForUpdateAsync,
+        },
+      });
+
+      expect(result).toEqual({ type: 'none' });
+      expect(checkForUpdateAsync).not.toHaveBeenCalled();
+    });
+
     it('falls back to OTA update when GitHub release version is not newer', async () => {
       const currentRelease = {
         tag_name: 'v1.0.0',
@@ -497,6 +527,70 @@ describe('updateService - SemVer Comparison', () => {
       expect(result).toEqual({ type: 'none' });
     });
 
+    it('handles OTA update check timeout cleanly without throwing', async () => {
+      const fetchFn = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+      });
+
+      const checkForUpdateAsync = jest.fn().mockImplementation(
+        () => new Promise(() => {})
+      );
+
+      const result = await checkForUpdates({
+        installedVersion: '1.0.0',
+        fetchFn: fetchFn as unknown as typeof fetch,
+        timeoutMs: 50,
+        updatesModule: {
+          isEnabled: true,
+          checkForUpdateAsync,
+        },
+      });
+
+      expect(result).toEqual({ type: 'none' });
+    });
+
+    it('uses Application.nativeApplicationVersion as default installed version when available', async () => {
+      const appSpy = jest.spyOn(Application, 'nativeApplicationVersion', 'get').mockReturnValue('2.0.0');
+
+      const mockRelease = {
+        tag_name: 'v2.1.0',
+        name: 'Release 2.1.0',
+        body: 'Notes',
+        draft: false,
+        assets: [
+          {
+            name: 'MoneyManager-2.1.0.apk',
+            browser_download_url: 'https://github.com/Techkilladis/MoneyManager/releases/download/v2.1.0/MoneyManager-2.1.0.apk',
+          },
+        ],
+      };
+
+      const fetchFn = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRelease,
+      });
+
+      const result = await checkForUpdates({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        updatesModule: {
+          isEnabled: false,
+          checkForUpdateAsync: jest.fn(),
+        },
+      });
+
+      expect(result).toEqual({
+        type: 'native',
+        latestVersion: '2.1.0',
+        currentVersion: '2.0.0',
+        downloadUrl: 'https://github.com/Techkilladis/MoneyManager/releases/download/v2.1.0/MoneyManager-2.1.0.apk',
+        releaseName: 'Release 2.1.0',
+        releaseNotes: 'Notes',
+      });
+
+      appSpy.mockRestore();
+    });
+
     it('handles missing or undefined installedVersion gracefully using fallback', async () => {
       const mockRelease = {
         tag_name: 'v2.0.0',
@@ -529,26 +623,8 @@ describe('updateService - SemVer Comparison', () => {
   });
 
   describe('updateService helpers', () => {
-    it('fetchOtaUpdate delegates to Updates.fetchUpdateAsync', async () => {
-      const mockResult = { isNew: true, manifest: { id: 'test' } };
-      jest.mocked(Updates.fetchUpdateAsync).mockResolvedValueOnce(mockResult as unknown as Updates.UpdateFetchResult);
-
-      const result = await fetchOtaUpdate();
-      expect(Updates.fetchUpdateAsync).toHaveBeenCalled();
-      expect(result).toBe(mockResult);
-    });
-
-    it('reloadApp delegates to Updates.reloadAsync', async () => {
-      jest.mocked(Updates.reloadAsync).mockResolvedValueOnce(undefined);
-
-      await reloadApp();
-      expect(Updates.reloadAsync).toHaveBeenCalled();
-    });
-
     it('exposes methods via the updateService namespace object', () => {
       expect(updateService.checkForUpdates).toBe(checkForUpdates);
-      expect(updateService.fetchOtaUpdate).toBe(fetchOtaUpdate);
-      expect(updateService.reloadApp).toBe(reloadApp);
       expect(updateService.compareSemVer).toBe(compareSemVer);
       expect(updateService.isNewerVersion).toBe(isNewerVersion);
       expect(updateService.findApkAsset).toBe(findApkAsset);

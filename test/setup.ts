@@ -41,6 +41,13 @@ jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn(async () => ({ canceled: true, assets: null })),
 }));
 
+jest.mock('expo-application', () => ({
+  __esModule: true,
+  get nativeApplicationVersion() {
+    return '1.0.0';
+  },
+}));
+
 // Our Android-only native module is simply absent in tests, as on other platforms.
 jest.mock('expo-modules-core', () => {
   const actual = jest.requireActual('expo-modules-core');
