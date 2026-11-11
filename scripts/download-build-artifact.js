@@ -205,7 +205,7 @@ function formatReleaseComment(options) {
  * @param {string} url
  * @param {string} destinationPath
  * @param {{ fetchFn?: typeof fetch }} [options]
- * @returns {Promise<string>}
+ * @returns {Promise<{ path: string, size: number, valid: boolean }>}
  */
 async function downloadArtifact(url, destinationPath, options = {}) {
   const fetchFn = options.fetchFn || globalThis.fetch;
@@ -231,8 +231,7 @@ async function downloadArtifact(url, destinationPath, options = {}) {
   const arrayBuffer = await response.arrayBuffer();
   fs.writeFileSync(resolvedDest, Buffer.from(arrayBuffer));
 
-  verifyApkFile(resolvedDest);
-  return resolvedDest;
+  return verifyApkFile(resolvedDest);
 }
 
 /**
@@ -260,8 +259,9 @@ async function main() {
   let outputFile = null;
   let verifyOnly = null;
   let tag = process.env.RELEASE_TAG || '';
-  let owner = process.env.GITHUB_REPOSITORY_OWNER || 'Techkilladis';
+  let owner = 'Techkilladis';
   let repo = 'MoneyManager';
+
   if (process.env.GITHUB_REPOSITORY) {
     const parts = process.env.GITHUB_REPOSITORY.split('/');
     if (parts.length === 2) {
@@ -279,10 +279,6 @@ async function main() {
       verifyOnly = args[++i];
     } else if (args[i] === '--tag' && args[i + 1]) {
       tag = args[++i];
-    } else if (args[i] === '--owner' && args[i + 1]) {
-      owner = args[++i];
-    } else if (args[i] === '--repo' && args[i + 1]) {
-      repo = args[++i];
     }
   }
 
@@ -311,9 +307,7 @@ async function main() {
   const targetOutput = outputFile || path.join(process.cwd(), defaultFileName);
 
   console.log(`Downloading APK artifact to ${targetOutput}...`);
-  await downloadArtifact(buildInfo.buildUrl, targetOutput);
-
-  const verified = verifyApkFile(targetOutput);
+  const verified = await downloadArtifact(buildInfo.buildUrl, targetOutput);
   const apkFileName = path.basename(verified.path);
   const directDownloadUrl = getDirectDownloadUrl(owner, repo, tag, apkFileName);
 

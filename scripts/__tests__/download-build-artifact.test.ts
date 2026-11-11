@@ -246,13 +246,15 @@ describe('download-build-artifact', () => {
         arrayBuffer: async () => Buffer.from(fakeData),
       });
 
-      const downloadedPath = await downloadArtifact(
+      const downloadedResult = await downloadArtifact(
         'https://fake-cdn.exp.host/app.apk',
         destPath,
         { fetchFn: mockFetch as any }
       );
 
-      expect(downloadedPath).toBe(destPath);
+      expect(downloadedResult.path).toBe(destPath);
+      expect(downloadedResult.valid).toBe(true);
+      expect(downloadedResult.size).toBeGreaterThan(0);
       expect(fs.existsSync(destPath)).toBe(true);
       expect(fs.readFileSync(destPath, 'utf8')).toBe(fakeData);
     });

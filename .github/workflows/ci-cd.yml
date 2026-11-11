@@ -283,8 +283,7 @@ jobs:
           fi
           echo "Executing EAS Android cloud build (production profile)..."
           set -o pipefail
-          BUILD_OUTPUT=$(npx eas-cli@latest build --platform android --profile production --non-interactive --wait --json)
-          echo "$BUILD_OUTPUT" > eas-build-output.json
+          npx eas-cli@latest build --platform android --profile production --non-interactive --wait --json > eas-build-output.json
 
       # Parse build artifact URL, download the .apk, and set step outputs
       - name: Download build artifact APK
@@ -356,8 +355,22 @@ jobs:
             const commitSha = '${{ needs.detect-changes.outputs.merge-commit }}';
             const apkFileName = '${{ steps.download-apk.outputs.apk_filename }}' || `MoneyManager-${tag}.apk`;
             const fileSizeBytes = parseInt('${{ steps.download-apk.outputs.apk_size }}' || '0', 10);
-            const directDownloadUrl = '${{ steps.download-apk.outputs.direct_download_url }}' || `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${apkFileName}`;
+            let directDownloadUrl = '${{ steps.download-apk.outputs.direct_download_url }}' || `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${apkFileName}`;
             const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`;
+
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tag,
+              });
+              const apkAsset = release.data.assets.find(a => a.name.toLowerCase().endsWith('.apk'));
+              if (apkAsset && apkAsset.browser_download_url) {
+                directDownloadUrl = apkAsset.browser_download_url;
+              }
+            } catch (err) {
+              console.log('Using deterministic release asset URL: ' + err.message);
+            }
 
             const { formatReleaseComment } = require('./scripts/download-build-artifact');
             const comment = formatReleaseComment({
