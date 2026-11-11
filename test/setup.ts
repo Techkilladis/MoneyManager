@@ -48,6 +48,19 @@ jest.mock('expo-application', () => ({
   },
 }));
 
+jest.mock('expo-linking', () => ({
+  openURL: jest.fn(async () => true),
+  canOpenURL: jest.fn(async () => true),
+  createURL: jest.fn((path: string) => `moneymanager://${path}`),
+}));
+
+jest.mock('expo-updates', () => ({
+  isEnabled: true,
+  checkForUpdateAsync: jest.fn(async () => ({ isAvailable: false })),
+  fetchUpdateAsync: jest.fn(async () => ({ isNew: true })),
+  reloadAsync: jest.fn(async () => undefined),
+}));
+
 // Our Android-only native module is simply absent in tests, as on other platforms.
 jest.mock('expo-modules-core', () => {
   const actual = jest.requireActual('expo-modules-core');
