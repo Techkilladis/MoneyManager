@@ -271,32 +271,9 @@ jobs:
           fi
           echo "EAS authenticated via EXPO_TOKEN environment variable"
 
-      # Daily native build cap check
-      - name: Check daily build cap
-        id: cap-check
-        run: |
-          TODAY=$(date -u +%Y-%m-%d)
-          CACHE_FILE="/tmp/eas-native-build-cap"
-          if [ -f "$CACHE_FILE" ]; then
-            LAST_BUILD=$(cat "$CACHE_FILE")
-            if [ "$LAST_BUILD" = "$TODAY" ]; then
-              echo "skipped=true" >> $GITHUB_OUTPUT
-              echo "::warning::Native build skipped: already built today ($TODAY)"
-            else
-              echo "$TODAY" > "$CACHE_FILE"
-              echo "skipped=false" >> $GITHUB_OUTPUT
-              echo "Native build allowed for today ($TODAY)"
-            fi
-          else
-            echo "$TODAY" > "$CACHE_FILE"
-            echo "skipped=false" >> $GITHUB_OUTPUT
-            echo "First native build today ($TODAY)"
-          fi
-
-      # Build APK if cap not reached
-      - name: Build Android APK (if cap not reached)
+      # Execute EAS Android cloud build with wait and json flags on production profile
+      - name: Build Android APK
         id: eas-build
-        if: steps.cap-check.outputs.skipped == 'false'
         env:
           EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
         run: |
@@ -304,26 +281,41 @@ jobs:
             echo "::error::EAS_ACCESS_TOKEN secret is not set"
             exit 1
           fi
-          echo "Building native APK with EAS..."
-          BUILD_OUTPUT=$(npx eas-cli@latest build --platform android --profile preview --non-interactive 2>&1)
-          echo "$BUILD_OUTPUT"
-          BUILD_ID=$(echo "$BUILD_OUTPUT" | tail -5)
-          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Executing EAS Android cloud build (production profile)..."
+          set -o pipefail
+          BUILD_OUTPUT=$(npx eas-cli@latest build --platform android --profile production --non-interactive --wait --json)
+          echo "$BUILD_OUTPUT" > eas-build-output.json
 
-      # Upload APK as artifact
-      - name: Download and upload APK artifact
-        if: steps.cap-check.outputs.skipped == 'false'
+      # Parse build artifact URL, download the .apk, and set step outputs
+      - name: Download build artifact APK
+        id: download-apk
+        env:
+          RELEASE_TAG: ${{ needs.detect-changes.outputs.tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node scripts/download-build-artifact.js \
+            --input eas-build-output.json \
+            --tag "${{ needs.detect-changes.outputs.tag }}" \
+            --output "${{ github.workspace }}/MoneyManager-${{ needs.detect-changes.outputs.tag }}.apk"
+
+      # Verify downloaded .apk exists and is non-empty before publication
+      - name: Verify APK artifact exists
+        id: verify-apk
+        run: |
+          node scripts/download-build-artifact.js \
+            --verify "${{ steps.download-apk.outputs.apk_path }}"
+
+      # Upload APK as runner artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-android
-          path: |
-            **/*.apk
-            **/*.aab
+          path: ${{ steps.download-apk.outputs.apk_path }}
           retention-days: 30
 
-      # Create GitHub Release with APK
+      # Create GitHub Release with direct APK attachment
       - name: Create GitHub Release
-        if: steps.cap-check.outputs.skipped == 'false'
+        id: create-release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.detect-changes.outputs.tag }}
@@ -332,7 +324,7 @@ jobs:
             ## Native APK Release
 
             > **Triggered by**: @${{ needs.detect-changes.outputs.pr-user }}
-            > **Merge commit**: ${{ github.sha }}
+            > **Merge commit**: ${{ needs.detect-changes.outputs.merge-commit }}
             > **PR**: #${{ github.event.pull_request.number }}
             > **Version Code**: ${{ needs.detect-changes.outputs.version-code }}
 
@@ -346,11 +338,11 @@ jobs:
             ---
             _Automated by CI/CD pipeline_
           files: |
-            **/*.apk
+            ${{ steps.download-apk.outputs.apk_path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
 
-      # Post native build comment on PR
+      # Post native build comment with direct APK download link on merged PR
       - name: Post native build comment
         uses: actions/github-script@v7
         with:
@@ -360,39 +352,24 @@ jobs:
             const user = '${{ needs.detect-changes.outputs.pr-user }}';
             const version = '${{ needs.detect-changes.outputs.version }}';
             const tag = '${{ needs.detect-changes.outputs.tag }}';
+            const versionCode = '${{ needs.detect-changes.outputs.version-code }}';
+            const commitSha = '${{ needs.detect-changes.outputs.merge-commit }}';
+            const apkFileName = '${{ steps.download-apk.outputs.apk_filename }}' || `MoneyManager-${tag}.apk`;
+            const fileSizeBytes = parseInt('${{ steps.download-apk.outputs.apk_size }}' || '0', 10);
+            const directDownloadUrl = '${{ steps.download-apk.outputs.direct_download_url }}' || `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${apkFileName}`;
             const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`;
 
-            let comment;
-            if ('${{ steps.cap-check.outputs.skipped }}' === 'false') {
-              comment = [
-                `## Native APK Published \ud83e\udd16`,
-                ``,
-                `A full native Android build has completed and the APK is attached to a GitHub Release.`,
-                ``,
-                `\`>\` **Version**: ${tag}  \u2022  **Triggered by**: @${user}`,
-                ``,
-                `[Download APK](${releaseUrl})`,
-                ``,
-                `Share this link with your friends - they can tap the APK to update directly.`,
-                ``,
-                `---`,
-                `_Automated by CI/CD pipeline_`
-              ].join('\n');
-            } else {
-              comment = [
-                `## Native Build Skipped (Daily Cap Reached) \u23f3`,
-                ``,
-                `A native rebuild was requested but **already completed today**.`,
-                ``,
-                `\`>\` **Version**: ${tag}  \u2022  **Triggered by**: @${user}`,
-                ``,
-                `Your friends will receive the APK update from today's build.`,
-                `If a new native change is needed tomorrow, a fresh build will trigger automatically.`,
-                ``,
-                `---`,
-                `_Automated by CI/CD pipeline_`
-              ].join('\n');
-            }
+            const { formatReleaseComment } = require('./scripts/download-build-artifact');
+            const comment = formatReleaseComment({
+              tag,
+              versionCode,
+              user,
+              commitSha,
+              directDownloadUrl,
+              releaseUrl,
+              apkFileName,
+              fileSizeBytes,
+            });
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -400,3 +377,4 @@ jobs:
               issue_number: prNumber,
               body: comment
             });
+
