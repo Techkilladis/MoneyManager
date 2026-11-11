@@ -1,70 +1,63 @@
-# ADR-002: Automated CI/CD Pipeline for Money Manager
+# 002. Automated CI/CD Pipeline and In-App Update Distribution
 
-## Status
-Accepted
+**Status:** accepted  
+**Date:** 2026-11-11  
 
 ## Context
-The Money Manager app is a personal project distributed to ~10 friends. Currently, every code change requires manual steps: running `eas build`, downloading the APK, and installing it on each friend's device. This is tedious and doesn't scale. The app uses Expo SDK 52 with EAS, has a custom native Android module (`modules/notification-detection/`), and is configured with `expo-updates` for OTA capability.
+Money Manager is a personal finance app distributed to close friends. The app uses Expo SDK 52 with EAS, contains custom native Android code (`modules/notification-detection/`), and uses `expo-updates` for OTA delivery. Changes merged to `main` must automatically publish either an OTA update or a native Android APK on GitHub Releases. When users launch the app, they must be cleanly guided through updating, whether via OTA or via downloading the new APK.
 
 ## Decision
-We implement a **GitHub Actions-based CI/CD pipeline** that triggers on PR merge to `main`. The pipeline auto-detects whether changes are JS-only or include native code, then routes to the appropriate build path:
+We implement an end-to-end automated pipeline and in-app update management workflow:
 
 ```
 PR Merged to main
     │
-    ├── GitHub Actions workflow triggered
+    ├── Auto-detect changed files
     │       │
-    │       ├── Auto-detect changed files
-    │       │       │
-    │       │       ├── JS/TS/Assets only → OTA Update (expo-updates)
-    │       │       │                       → eas update --channel production
-    │       │       │                       → Friends get "Update available" prompt
-    │       │       │
-    │       │       └── Native module changed → Full Native Build
-    │       │                               → eas build --platform android --profile preview
-    │       │                               → Upload APK to GitHub Release
-    │       │                               → Notify friends via PR comment
+    │       ├── JS/TS/Assets only (OTA)
+    │       │       ├── eas update --channel production
+    │       │       └── Users receive Two-Stage OTA Prompt in-app
     │       │
-    │       └── Daily Native Build Cap
-    │               → Only 1 native build per calendar day
-    │               → Protects EAS Free plan quota (50/month)
+    │       └── Native module / config modified (Native Rebuild)
+    │               ├── Increment android.versionCode (+1) & bump patch version in app.json / package.json
+    │               ├── Commit version bump back to main with [skip ci]
+    │               ├── eas build --platform android --profile production --wait --json
+    │               ├── Download APK artifact from EAS CDN to GitHub runner
+    │               ├── Create GitHub Release tagged v{version} with direct .apk attachment
+    │               └── Users receive Native Update Prompt in-app
 ```
 
 ### Key Design Choices
 
-1. **PR Merge Trigger, Not Push**: Builds only trigger on merge to `main`, not on every push. This protects EAS build quota and ensures only reviewed code is distributed.
+1. **Automated Version Bumping in CI**:
+   When native changes are merged, CI automatically increments `android.versionCode` by 1 and bumps the semantic patch version in `app.json` and `package.json`, then commits back to `main` with `[skip ci]`. This guarantees Android treats the new APK as an upgrade without requiring manual developer intervention.
 
-2. **Production Channel for OTA**: Updates go directly to the production channel (not preview), since friends receive production builds. The app's `runtimeVersion.policy: "appVersion"` ensures compatibility.
+2. **Wait for EAS Build & Direct APK Attachment**:
+   CI triggers `eas build --platform android --profile production --non-interactive --wait --json`. It parses the resulting artifact URL, curls the `.apk` file into the runner workspace, and attaches it directly to the GitHub Release tagged `v{version}`.
 
-3. **Dedicated EAS API Key**: CI uses a dedicated EAS API token stored as a GitHub secret (`EAS_ACCESS_TOKEN`), revocable independently of the user's personal account.
+3. **In-App Update Precedence (Native over OTA)**:
+   On cold startup, the app first queries `https://api.github.com/repos/Techkilladis/MoneyManager/releases/latest`. If a newer native version is available with an attached `.apk`, the **Native Update Prompt** is displayed, suppressing older OTA prompts. Because the new APK already bundles all prior JavaScript changes, installing the APK supersedes older OTA updates.
 
-4. **Auto-Created GitHub Releases**: Native rebuilds auto-create a GitHub Release (e.g., `native-v1.0.1`) with the APK attached. Friends receive a deep link in the PR comment/notification.
+4. **Direct Browser APK Download**:
+   When the user taps "Download" on the Native Update prompt, the app delegates to the browser via `Linking.openURL(asset.browser_download_url)`. Chrome immediately starts downloading the APK in the background. Once downloaded, the user taps the file to install the in-place upgrade.
 
-5. **Daily Native Build Cap**: At most 1 native rebuild per calendar day. If multiple PRs merge on the same day requiring native builds, only the first triggers a build. Subsequent merges that day get OTA-only (or wait until next day).
+5. **Two-Stage OTA Update Experience**:
+   When only JavaScript updates are available, the app shows:
+   - *Stage 1*: Modal asking the user if they want to update now or later.
+   - *Downloading State*: Buffering/progress indicator stating *"Downloading update... Please do not close the app"* with dismiss actions disabled.
+   - *Stage 2*: Once `Updates.fetchUpdateAsync()` succeeds, modal transitions to *"Update ready"*, offering *"Restart now"* (invoking `Updates.reloadAsync()`) or *"Restart later"*.
 
-6. **User Update Preference**: A setting in the app lets users choose between:
-   - Auto-background update (silent)
-   - Manual prompt ("Update available — restart now?")
-   Default is manual prompt for transparency and trust.
-
-7. **Public Repository**: The repo is public so anyone can see the code. This enables free GitHub Actions minutes and full transparency.
+6. **Startup Check Resilience**:
+   Update checks occur on app launch with silent error handling. Offline states or GitHub API rate limits do not disrupt app functionality or surface intrusive error banners.
 
 ## Consequences
 
 ### Positive
-- **Zero manual effort**: Friends never need to build, download, or install manually.
-- **Instant updates**: OTA updates are applied on next app launch.
-- **Quota protection**: Daily cap prevents accidental EAS quota exhaustion.
-- **Transparency**: Users control update behavior via setting.
-- **Audit trail**: Every release is tracked as a GitHub Release with APK attached.
+- **Fully Hands-Off**: No manual version bumps, no manual artifact downloads, and no manual release uploads required.
+- **Accurate Precedence**: Users never download stale OTA updates when a native rebuild has already occurred.
+- **Immediate Downloads**: Direct APK asset link prevents confusing GitHub release web page navigation.
+- **Controlled Restarts**: Two-stage OTA prompt ensures users aren't abruptly kicked out of the app during downloads.
 
 ### Negative
-- **Native rebuilds still consume quota**: 1 native build/day = max 30/month, within the 50/month Free tier limit.
-- **GitHub Actions minutes**: Public repo gets free minutes, but heavy use could deplete them faster than EAS builds.
-- **No iOS support yet**: The native module is Android-only; iOS would require separate implementation.
-- **APK installation friction**: Native rebuilds still require manual APK install by friends (though the link makes it one-click).
-
-## Related Decisions
-- [ADR-001](./001-native-pending-event-persistence.md): Native event persistence design
-- `app.json`: EAS project configuration (`794dc62b-...`)
-- `eas.json`: Build profiles and channel definitions
+- **EAS Build Time in Actions**: Waiting for EAS Android cloud builds (`--wait`) takes ~5–10 minutes on GitHub Actions runners, consuming free GitHub Actions build minutes.
+- **Manual APK Installation**: Android security sandboxing requires users to manually tap the completed browser download to trigger package installation.

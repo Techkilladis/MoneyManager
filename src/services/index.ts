@@ -20,6 +20,7 @@ import * as recurringService from './recurring';
 import * as alertsService from './alerts';
 import * as recapService from './recap';
 import * as backupService from './backup';
+import * as updateService from './updateService';
 import { Transaction, TransactionKind } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
@@ -815,10 +816,11 @@ export const services = {
   alerts: alertsService,
   recap: recapService,
   backup: backupService,
+  update: updateService,
 };
 
 // Export individual services for direct imports
 export { budgetService };
 export { analyticsService };
 export { ledgerService };
-export { splitService, recurringService, alertsService, recapService, backupService };
+export { splitService, recurringService, alertsService, recapService, backupService, updateService };

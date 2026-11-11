@@ -44,7 +44,7 @@ Docs: https://docs.expo.dev/eas/index.md
 
 ### Issue tracker
 
-Issues are tracked as markdown files under `.scratch/<feature>/` in this repository. See `docs/agents/issue-tracker.md`.
+Issues are tracked using **GitHub Issues** on `Techkilladis/MoneyManager`. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 

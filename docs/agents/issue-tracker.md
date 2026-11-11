@@ -1,35 +1,44 @@
-# Issue Tracker: Local Markdown
+# Issue Tracker: GitHub Issues
 
-Issues are tracked as markdown files under `.scratch/<feature>/` in this repository.
+Issues are tracked natively using GitHub Issues on `Techkilladis/MoneyManager`.
 
-## Convention
+## CLI Usage
 
-Each issue is a file at `.scratch/<feature>/<number>-<title>.md` where:
+The GitHub CLI (`gh`) is used to read, create, and manage issues:
 
-- `<feature>` is a category folder (e.g. `sms-detection`, `budgets`, `onboarding`)
-- `<number>` is an incrementing integer
-- `<title>` is a kebab-case summary
+```bash
+# List open issues ready for an agent
+gh issue list --label "ready-for-agent"
 
-## File template
+# View a specific issue
+gh issue view <issue-number>
+
+# Create an issue
+gh issue create --title "<Title>" --body "<Body>" --label "ready-for-agent"
+
+# Close an issue
+gh issue close <issue-number>
+```
+
+## Issue Format
 
 ```markdown
-# <Title>
+## What to build
 
-**Status:** backlog | draft | in-progress | done
-**Blocking:** [list dependent ticket numbers, or "none"]
+[The end-to-end behaviour this ticket makes work, from the user's perspective]
 
-## Description
-
-[What needs to be done]
-
-## Acceptance Criteria
+## Acceptance criteria
 
 - [ ] Criterion 1
 - [ ] Criterion 2
+
+## Blocked by
+
+- #<number> (or "None (can start immediately)")
 ```
 
-## Workflow
+## Triage Labels
 
-- Skills like `to-tickets` create `.scratch/` files when generating work items.
-- Skills like `triage` read and update the `Status` field.
-- Skills like `to-spec` may reference ticket numbers from these files.
+- `ready-for-agent`: The issue is fully specified and ready to be worked on by an AI agent or developer.
+- `enhancement`: Feature work or improvements.
+- `bug`: Defects or unintended behavior.
