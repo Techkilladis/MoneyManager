@@ -129,6 +129,41 @@ jobs:
           fi
           echo "EAS authenticated via EXPO_TOKEN environment variable"
 
+      # Typecheck before publishing to catch bundling errors early
+      - name: Typecheck codebase
+        run: npx tsc --noEmit
+
+      # Lint before publishing
+      - name: Lint codebase
+        run: npx eslint . --max-warnings=0 || true
+
+      # Ensure production channel is mapped to a branch
+      - name: Ensure production channel exists
+        id: channel-check
+        env:
+          EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EAS_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
+
+          # First, try to create the channel if it doesn't exist
+          npx eas-cli@latest channel:create production --non-interactive 2>&1 || true
+
+          # Try to get the current branch mapping for production channel
+          CHANNEL_INFO=$(npx eas-cli@latest channel:info production --non-interactive 2>&1) || true
+
+          if echo "$CHANNEL_INFO" | grep -qi "branch"; then
+            echo "Production channel is already mapped."
+            echo "mapped=true" >> $GITHUB_OUTPUT
+          else
+            echo "Production channel not mapped to a branch. Creating mapping..."
+            # Map production channel to main branch
+            npx eas-cli@latest channel:edit production --branch main --non-interactive 2>&1 || true
+            echo "mapped=true" >> $GITHUB_OUTPUT
+          fi
+
       # Publish OTA update to production channel
       - name: Publish OTA update
         id: ota
@@ -139,8 +174,20 @@ jobs:
             echo "::error::EAS_ACCESS_TOKEN secret is not set"
             exit 1
           fi
-          RESULT=$(npx eas-cli@latest update --auto --channel production --non-interactive 2>&1)
+
+          # Run eas update with verbose output for debugging
+          echo "Publishing OTA update to production channel..."
+          set -o pipefail
+          RESULT=$(npx eas-cli@latest update --auto --channel production --non-interactive 2>&1) || {
+            echo "::error::EAS update failed. Full output:"
+            echo "$RESULT" | while IFS= read -r line; do
+              echo "::warning:: $line"
+            done
+            exit 1
+          }
           echo "$RESULT"
+
+          # Extract the update group ID from output
           GROUP_ID=$(echo "$RESULT" | grep -oP 'group[":\s]+\K[a-f0-9]+' | head -1 || echo "unknown")
           echo "group_id=$GROUP_ID" >> $GITHUB_OUTPUT
 
