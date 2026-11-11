@@ -81,7 +81,7 @@ export default function HomeScreen() {
       <Pressable
         onPress={async () => {
           try {
-            Alert.alert('OTA Reload', 'Triggering OTA reload...');
+            Alert.alert('OTA Test Active', 'Running latest OTA update bundle! Reloading...');
             await Updates.reloadAsync();
           } catch (error) {
             Alert.alert('OTA Reload Failed', String(error));
@@ -89,15 +89,15 @@ export default function HomeScreen() {
         }}
         style={({ pressed }) => [
           styles.otaTestButton,
-          { backgroundColor: colors.brand },
+          { backgroundColor: colors.positive },
           pressed && { opacity: 0.8 },
         ]}
         accessibilityRole="button"
         accessibilityLabel="Test OTA reload"
       >
-        <Icon name="refresh" size={16} color={colors.background} />
+        <Icon name="sparkles" size={16} color={colors.background} />
         <Text style={styles.otaTestText} color={colors.background} variant="labelStrong">
-          Test OTA
+          OTA Live ✨
         </Text>
       </Pressable>
 

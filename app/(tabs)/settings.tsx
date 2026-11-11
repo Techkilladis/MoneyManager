@@ -522,7 +522,7 @@ Reference: ${result.transactionReference ?? '—'}`
 
         <View style={styles.footer}>
           <Text variant="caption" align="center">
-            Money Manager {version}
+            Money Manager {version} • OTA Test Active ✨
           </Text>
           <Text variant="caption" align="center" style={{ marginTop: 2 }}>
             Your data stays on this device unless you export or back it up.
