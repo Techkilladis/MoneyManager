@@ -1,6 +1,5 @@
 import React, { useCallback } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, View } from 'react-native';
-import * as Updates from 'expo-updates';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
@@ -77,30 +76,6 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* OTA Test Button */}
-      <Pressable
-        onPress={async () => {
-          try {
-            Alert.alert('OTA Test Active', 'Running latest OTA update bundle! Reloading...');
-            await Updates.reloadAsync();
-          } catch (error) {
-            Alert.alert('OTA Reload Failed', String(error));
-          }
-        }}
-        style={({ pressed }) => [
-          styles.otaTestButton,
-          { backgroundColor: colors.positive },
-          pressed && { opacity: 0.8 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Test OTA reload"
-      >
-        <Icon name="sparkles" size={16} color={colors.background} />
-        <Text style={styles.otaTestText} color={colors.background} variant="labelStrong">
-          OTA Live ✨
-        </Text>
-      </Pressable>
-
       <ScreenHeader
         large
         eyebrow={greeting()}
@@ -536,24 +511,5 @@ const useStyles = makeStyles((colors) => ({
   catAmount: {
     minWidth: 80,
     textAlign: 'right',
-  },
-  otaTestButton: {
-    position: 'absolute',
-    bottom: space.lg,
-    right: space.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  otaTestText: {
-    marginLeft: 4,
   },
 }));

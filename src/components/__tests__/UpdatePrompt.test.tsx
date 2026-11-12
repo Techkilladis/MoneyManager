@@ -189,6 +189,7 @@ describe('UpdatePrompt - Two-Stage OTA Update Flow (Seam 2)', () => {
       testRenderer = renderer.create(
         <UpdatePrompt
           checkDelayMs={0}
+          minDownloadDurationMs={0}
           checkForUpdatesFn={checkForUpdatesFn}
           fetchUpdateFn={fetchUpdateFn}
         />
@@ -252,6 +253,7 @@ describe('UpdatePrompt - Two-Stage OTA Update Flow (Seam 2)', () => {
       testRenderer = renderer.create(
         <UpdatePrompt
           checkDelayMs={0}
+          minDownloadDurationMs={0}
           checkForUpdatesFn={checkForUpdatesFn}
           fetchUpdateFn={fetchUpdateFn}
           reloadFn={reloadFn}
@@ -286,6 +288,7 @@ describe('UpdatePrompt - Two-Stage OTA Update Flow (Seam 2)', () => {
       testRenderer = renderer.create(
         <UpdatePrompt
           checkDelayMs={0}
+          minDownloadDurationMs={0}
           checkForUpdatesFn={checkForUpdatesFn}
           fetchUpdateFn={fetchUpdateFn}
           reloadFn={reloadFn}
@@ -332,6 +335,7 @@ describe('UpdatePrompt - Two-Stage OTA Update Flow (Seam 2)', () => {
       testRenderer = renderer.create(
         <UpdatePrompt
           checkDelayMs={0}
+          minDownloadDurationMs={0}
           checkForUpdatesFn={checkForUpdatesFn}
           fetchUpdateFn={fetchUpdateFn}
           reloadFn={reloadFn}
@@ -418,6 +422,7 @@ describe('UpdatePrompt - No-Op & Error Resilience (Seam 3)', () => {
       testRenderer = renderer.create(
         <UpdatePrompt
           checkDelayMs={0}
+          minDownloadDurationMs={0}
           checkForUpdatesFn={checkForUpdatesFn}
           fetchUpdateFn={fetchUpdateFn}
         />
@@ -432,6 +437,96 @@ describe('UpdatePrompt - No-Op & Error Resilience (Seam 3)', () => {
     });
 
     // Should return to idle / hidden
+    expect(root.children.length).toBe(0);
+  });
+
+  it('enforces minDownloadDurationMs buffering duration before transitioning to Stage 2', async () => {
+    const otaDescriptor: UpdateCheckResult = {
+      type: 'ota',
+      manifest: { id: 'update-delay-test', createdAt: '2026-11-12' } as never,
+    };
+    const checkForUpdatesFn = jest.fn(async () => otaDescriptor);
+    // Instant download
+    const fetchUpdateFn = jest.fn(async () => ({ isNew: true, manifest: {} } as Updates.UpdateFetchResult));
+
+    let testRenderer: renderer.ReactTestRenderer | undefined;
+    await act(async () => {
+      testRenderer = renderer.create(
+        <UpdatePrompt
+          checkDelayMs={0}
+          minDownloadDurationMs={80}
+          checkForUpdatesFn={checkForUpdatesFn}
+          fetchUpdateFn={fetchUpdateFn}
+        />
+      );
+    });
+
+    const root = testRenderer!.root;
+    const updateNowButton = root.findAll((n) => n.props?.title === 'Update now')[0];
+
+    // Trigger update
+    act(() => {
+      void updateNowButton.props.onPress();
+    });
+
+    // Check immediately: still downloading
+    const textNodesImmediate = root.findAllByType(RNText);
+    const textImmediate = textNodesImmediate.map((n) => n.props.children).flat().join(' ');
+    expect(textImmediate).toContain('Downloading update...');
+
+    // Wait past the minDownloadDurationMs threshold
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 120));
+    });
+
+    // Now transitioned to Stage 2
+    const textNodesAfter = root.findAllByType(RNText);
+    const textAfter = textNodesAfter.map((n) => n.props.children).flat().join(' ');
+    expect(textAfter).toContain('Update ready');
+  });
+
+  it('enforces minDownloadDurationMs buffering duration even when OTA download fails', async () => {
+    const otaDescriptor: UpdateCheckResult = {
+      type: 'ota',
+      manifest: { id: 'update-fail-delay', createdAt: '2026-11-12' } as never,
+    };
+    const checkForUpdatesFn = jest.fn(async () => otaDescriptor);
+    // Immediate failure
+    const fetchUpdateFn = jest.fn(async () => {
+      throw new Error('Immediate download failure');
+    });
+
+    let testRenderer: renderer.ReactTestRenderer | undefined;
+    await act(async () => {
+      testRenderer = renderer.create(
+        <UpdatePrompt
+          checkDelayMs={0}
+          minDownloadDurationMs={80}
+          checkForUpdatesFn={checkForUpdatesFn}
+          fetchUpdateFn={fetchUpdateFn}
+        />
+      );
+    });
+
+    const root = testRenderer!.root;
+    const updateNowButton = root.findAll((n) => n.props?.title === 'Update now')[0];
+
+    // Trigger update
+    act(() => {
+      void updateNowButton.props.onPress();
+    });
+
+    // Modal is still showing downloading spinner during the window
+    const textNodesImmediate = root.findAllByType(RNText);
+    const textImmediate = textNodesImmediate.map((n) => n.props.children).flat().join(' ');
+    expect(textImmediate).toContain('Downloading update...');
+
+    // Wait past the minDownloadDurationMs threshold
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 120));
+    });
+
+    // Now dismissed to idle
     expect(root.children.length).toBe(0);
   });
 });

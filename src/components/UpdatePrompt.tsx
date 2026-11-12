@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as Updates from 'expo-updates';
@@ -21,6 +21,12 @@ export interface UpdatePromptProps {
   reloadFn?: () => Promise<void>;
   /** Custom URL opener for downloading APK (defaults to Linking.openURL). */
   openUrlFn?: (url: string) => Promise<unknown>;
+  /**
+   * Minimum duration in milliseconds to keep the buffering/downloading spinner visible.
+   * Guarantees clear visual confirmation to users when small bundles finish instantly.
+   * Defaults to 3000 ms.
+   */
+  minDownloadDurationMs?: number;
 }
 
 type PromptState =
@@ -57,10 +63,19 @@ export function UpdatePrompt({
   fetchUpdateFn = () => Updates.fetchUpdateAsync(),
   reloadFn = () => Updates.reloadAsync(),
   openUrlFn = (url: string) => Linking.openURL(url),
+  minDownloadDurationMs = 3000,
 }: UpdatePromptProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [promptState, setPromptState] = useState<PromptState>({ type: 'idle' });
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -112,18 +127,26 @@ export function UpdatePrompt({
 
   const handleStartOtaUpdate = useCallback(async () => {
     setPromptState({ type: 'ota-downloading' });
+    const minDelayPromise =
+      minDownloadDurationMs > 0
+        ? new Promise<void>((resolve) => setTimeout(resolve, minDownloadDurationMs))
+        : Promise.resolve();
+
     try {
-      const result = await fetchUpdateFn();
+      const [result] = await Promise.all([fetchUpdateFn(), minDelayPromise]);
+      if (!isMountedRef.current) return;
       if (result && result.isNew) {
         setPromptState({ type: 'ota-ready' });
       } else {
         setPromptState({ type: 'idle' });
       }
     } catch {
-      // Fetch failed — dismiss modal silently
+      // If fetch failed, ensure we still wait the minimum delay before dismissing
+      await minDelayPromise.catch(() => undefined);
+      if (!isMountedRef.current) return;
       setPromptState({ type: 'idle' });
     }
-  }, [fetchUpdateFn]);
+  }, [fetchUpdateFn, minDownloadDurationMs]);
 
   const handleRestartNow = useCallback(async () => {
     try {
