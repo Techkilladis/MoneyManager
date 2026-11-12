@@ -40,6 +40,10 @@ A modal informing the user that a newer APK release is available, with actions t
 
 A lightweight JavaScript and asset update published to EAS Update without modifying binary code. Related terms: `[Two-Stage OTA Prompt]`, `[Update Precedence]`.
 
+### `Paced Buffering`
+
+A deliberate minimum display duration (3 seconds) enforced during the OTA download state to provide clear visual feedback and reassurance when small bundles finish downloading almost instantaneously. Related terms: `[Two-Stage OTA Prompt]`, `[OTA Update]`.
+
 ### `Pull Request (PR)`
 
 A GitHub pull request whose merge into the main branch initiates the build and release workflow. Related terms: `[Main Branch]`, `[CI/CD Pipeline]`.

@@ -41,11 +41,11 @@ PR Merged to main
 4. **Direct Browser APK Download**:
    When the user taps "Download" on the Native Update prompt, the app delegates to the browser via `Linking.openURL(asset.browser_download_url)`. Chrome immediately starts downloading the APK in the background. Once downloaded, the user taps the file to install the in-place upgrade.
 
-5. **Two-Stage OTA Update Experience**:
+5. **Two-Stage OTA Update Experience & Paced Buffering**:
    When only JavaScript updates are available, the app shows:
    - *Stage 1*: Modal asking the user if they want to update now or later.
-   - *Downloading State*: Buffering/progress indicator stating *"Downloading update... Please do not close the app"* with dismiss actions disabled.
-   - *Stage 2*: Once `Updates.fetchUpdateAsync()` succeeds, modal transitions to *"Update ready"*, offering *"Restart now"* (invoking `Updates.reloadAsync()`) or *"Restart later"*.
+   - *Downloading State (Paced Buffering)*: Buffering/progress indicator stating *"Downloading update... Please do not close the app"* with dismiss actions disabled. To prevent user confusion when lightweight bundles (e.g. ~2 KB) complete near-instantaneously, a deliberate minimum buffer duration of 3 seconds is enforced before transitioning.
+   - *Stage 2*: Once `Updates.fetchUpdateAsync()` succeeds and the minimum duration has elapsed, modal transitions to *"Update ready"*, offering *"Restart now"* (invoking `Updates.reloadAsync()`) or *"Restart later"*.
 
 6. **Startup Check Resilience**:
    Update checks occur on app launch with silent error handling. Offline states or GitHub API rate limits do not disrupt app functionality or surface intrusive error banners.
