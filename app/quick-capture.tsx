@@ -9,13 +9,14 @@ import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, Scrol
 import { router, useLocalSearchParams } from 'expo-router';
 import { font, fontFamily, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { Category, Member } from '@/database/schema';
+import { Account, AccountType, Category, Member } from '@/database/schema';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
-import { categoryService, classificationService, memberService, transactionService } from '@/services';
+import { accountService, categoryService, classificationService, memberService, transactionService } from '@/services';
 import { notificationDetectionService } from '@/services/notificationDetection';
 import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { FormattedTransaction } from '@/domain/transaction';
+import { accountIcon, formatAccountLabel, formatAccountType } from '@/domain/account';
 import {
   amountToInput,
   formatDayLabel,
@@ -35,8 +36,11 @@ import {
   EmptyState,
   Icon,
   IconName,
+  IconTile,
+  ListRow,
   LoadingView,
   ScreenHeader,
+  SegmentedControl,
   Sheet,
   Text,
   TextField,
@@ -186,6 +190,23 @@ export default function QuickCaptureScreen() {
 
 // ---------------------------------------------------------------- card
 
+const SWATCHES = [
+  '#0A84FF', // blue
+  '#30B0C7', // teal
+  '#34C759', // green
+  '#FF9F0A', // orange
+  '#FF375F', // red/pink
+  '#AF52DE', // purple
+  '#64D2FF', // sky
+  '#8E8E93', // slate
+];
+
+const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
+  { value: 'SAVINGS', label: 'Savings' },
+  { value: 'CURRENT', label: 'Current' },
+  { value: 'CREDIT_CARD', label: 'Credit Card' },
+];
+
 interface Suggestion {
   categoryId: string | null;
   memberId: string | null;
@@ -210,6 +231,17 @@ function ReviewCard({
   const [missing, setMissing] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [discoveryVisible, setDiscoveryVisible] = useState(false);
+  const [discoveryDraft, setDiscoveryDraft] = useState<{
+    name: string;
+    bankName: string;
+    mask: string;
+    type: AccountType;
+    color: string;
+  } | null>(null);
+  const [savingAccount, setSavingAccount] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
 
   const [amount, setAmount] = useState('');
@@ -221,7 +253,7 @@ function ReviewCard({
   const [busy, setBusy] = useState<'confirm' | 'dismiss' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'category' | 'member' | 'note' | null>(null);
+  const [sheet, setSheet] = useState<'category' | 'member' | 'account' | 'note' | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   const [celebrate] = useState(() => new Animated.Value(0));
@@ -240,11 +272,17 @@ function ReviewCard({
   }, []);
 
   useEffect(() => {
-    Promise.all([transactionService.getFormattedTransaction(id), categoryService.getAll(), memberService.getAll()])
-      .then(async ([data, cats, mems]) => {
+    Promise.all([
+      transactionService.getFormattedTransaction(id),
+      categoryService.getAll(),
+      memberService.getAll(),
+      accountService.getAll(),
+    ])
+      .then(async ([data, cats, mems, accs]) => {
         if (!mountedRef.current) return;
         setCategories(cats);
         setMembers(mems);
+        setAccounts(accs);
         if (!data) {
           setMissing(true);
           return;
@@ -255,6 +293,21 @@ function ReviewCard({
         setNote(data.note ?? '');
         setCategoryId(data.category?.id ?? null);
         setMemberId(data.member?.id ?? null);
+        setAccountId(data.account?.id ?? data.accountId ?? null);
+
+        // Discovery check: if transaction has an unconfigured account, trigger discovery sheet
+        if (!data.account && data.pendingAccount && data.pendingAccount.mask) {
+          const bank = data.pendingAccount.bankName ?? '';
+          const mask = data.pendingAccount.mask;
+          setDiscoveryDraft({
+            name: bank ? `${bank}` : `Account ••${mask}`,
+            bankName: bank,
+            mask,
+            type: 'SAVINGS',
+            color: SWATCHES[0],
+          });
+          setDiscoveryVisible(true);
+        }
 
         try {
           const { suggestion: s } = await classificationService.getSuggestion({ merchant: data.merchant, amountPaise: data.amountPaise });
@@ -271,6 +324,32 @@ function ReviewCard({
         if (mountedRef.current) setMissing(true);
       });
   }, [id]);
+
+  const saveDiscoveredAccount = async () => {
+    if (!discoveryDraft) return;
+    setSavingAccount(true);
+    try {
+      const created = await accountService.create({
+        name: discoveryDraft.name.trim() || discoveryDraft.bankName || 'Account',
+        bankName: discoveryDraft.bankName.trim() || undefined,
+        mask: discoveryDraft.mask.trim() || undefined,
+        type: discoveryDraft.type,
+        color: discoveryDraft.color,
+        icon: accountIcon(discoveryDraft.type),
+      });
+      await transactionService.assignAccountToPending(discoveryDraft.bankName, discoveryDraft.mask, created.id);
+      const refreshed = await accountService.getAll();
+      if (!mountedRef.current) return;
+      setAccounts(refreshed);
+      setAccountId(created.id);
+      setDiscoveryVisible(false);
+      toast.show(`${created.name} added`);
+    } catch (err) {
+      toast.show('Could not save account', 'error');
+    } finally {
+      if (mountedRef.current) setSavingAccount(false);
+    }
+  };
 
   const finish = (message: string) => {
     haptic.success();
@@ -305,7 +384,8 @@ function ReviewCard({
       tx.kind === 'INCOME' ? undefined : memberId ?? undefined,
       amountPaise,
       merchant.trim(),
-      note.trim() || undefined
+      note.trim() || undefined,
+      accountId ?? undefined
     );
     if (!mountedRef.current) return;
     setBusy(null);
@@ -376,6 +456,7 @@ function ReviewCard({
 
   const [whole, fraction] = splitINR(amountPaise);
   const member = members.find((m) => m.id === memberId);
+  const account = accounts.find((a) => a.id === accountId);
 
   return (
     <View style={styles.screen}>
@@ -469,6 +550,13 @@ function ReviewCard({
           />
 
           <Card padded={false} style={styles.details}>
+            <DetailRow
+              icon="landmark"
+              label="Account"
+              value={account ? formatAccountLabel(account) : 'Cash'}
+              onPress={() => setSheet('account')}
+            />
+            <Divider />
             {members.length > 0 && !income ? (
               <>
                 <DetailRow icon="user" label="For" value={member?.name ?? 'Not set'} muted={!member} onPress={() => setSheet('member')} />
@@ -559,6 +647,121 @@ function ReviewCard({
         footer={<Button title="Done" size="lg" fullWidth onPress={() => setSheet(null)} />}
       >
         <TextField value={note} onChangeText={setNote} placeholder="What was it for?" maxLength={200} multiline autoFocus />
+      </Sheet>
+
+      <Sheet
+        visible={sheet === 'account'}
+        onClose={() => setSheet(null)}
+        title="Account"
+        footer={
+          <Button
+            title="Manage accounts"
+            variant="ghost"
+            fullWidth
+            onPress={() => {
+              setSheet(null);
+              router.push('/accounts');
+            }}
+          />
+        }
+      >
+        <Card padded={false}>
+          {accounts.map((acc, i) => (
+            <View key={acc.id}>
+              {i > 0 ? <Divider /> : null}
+              <ListRow
+                title={acc.name}
+                subtitle={
+                  acc.type === 'CASH'
+                    ? 'Physical Cash'
+                    : `${formatAccountType(acc.type)}${acc.bankName ? ` • ${acc.bankName}` : ''}${acc.mask ? ` ••${acc.mask}` : ''}`
+                }
+                left={<IconTile icon={accountIcon(acc.type)} color={acc.color ?? colors.brand} />}
+                right={acc.id === accountId ? <Icon name="check" size={20} color={colors.brand} /> : null}
+                onPress={() => {
+                  setAccountId(acc.id);
+                  setSheet(null);
+                }}
+              />
+            </View>
+          ))}
+        </Card>
+      </Sheet>
+
+      <Sheet
+        visible={discoveryVisible}
+        onClose={() => setDiscoveryVisible(false)}
+        title="New Account Discovered"
+      >
+        {discoveryDraft && (
+          <View style={styles.discoveryForm}>
+            <Text variant="caption" style={styles.discoveryIntro}>
+              We detected a new account from your SMS notification. Set it up once to automatically assign this and future transactions.
+            </Text>
+
+            <View style={{ marginBottom: space.sm }}>
+              <Text variant="caption" style={{ marginBottom: space.xs }}>
+                Account Type
+              </Text>
+              <SegmentedControl
+                options={ACCOUNT_TYPES}
+                value={discoveryDraft.type}
+                onChange={(type) => setDiscoveryDraft((d) => (d ? { ...d, type } : null))}
+              />
+            </View>
+
+            <TextField
+              label="Account Name"
+              placeholder="e.g. ICICI Salary, Indian Bank Savings"
+              value={discoveryDraft.name}
+              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, name: text } : null))}
+            />
+
+            <TextField
+              label="Bank Name"
+              placeholder="e.g. ICICI Bank, Indian Bank"
+              value={discoveryDraft.bankName}
+              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, bankName: text } : null))}
+            />
+
+            <TextField
+              label="Account / Card Mask (last digits)"
+              placeholder="e.g. 172 or 1224"
+              value={discoveryDraft.mask}
+              keyboardType="numeric"
+              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, mask: text.replace(/\D/g, '') } : null))}
+            />
+
+            <View style={styles.colorSection}>
+              <Text variant="caption" style={{ marginBottom: space.xs }}>
+                Color
+              </Text>
+              <View style={styles.swatchRow}>
+                {SWATCHES.map((swatch) => {
+                  const selected = discoveryDraft.color === swatch;
+                  return (
+                    <Pressable
+                      key={swatch}
+                      onPress={() => setDiscoveryDraft((d) => (d ? { ...d, color: swatch } : null))}
+                      style={[
+                        styles.swatch,
+                        { backgroundColor: swatch },
+                        selected && styles.swatchSelected,
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+
+            <Button
+              title="Save account"
+              loading={savingAccount}
+              onPress={saveDiscoveredAccount}
+              style={{ marginTop: space.md }}
+            />
+          </View>
+        )}
       </Sheet>
 
       {success ? (
@@ -709,5 +912,31 @@ const useStyles = makeStyles((colors, scheme) => ({
     backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  discoveryForm: {
+    paddingBottom: space.lg,
+  },
+  discoveryIntro: {
+    color: colors.textSecondary,
+    marginBottom: space.md,
+  },
+  colorSection: {
+    marginTop: space.xs,
+    marginBottom: space.sm,
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    gap: space.sm,
+    flexWrap: 'wrap',
+  },
+  swatch: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  swatchSelected: {
+    borderColor: colors.text,
   },
 }));

@@ -45,6 +45,10 @@ export interface FormattedTransaction {
     type: AccountType;
     color: string | null;
   } | null;
+  pendingAccount?: {
+    bankName?: string;
+    mask?: string;
+  } | null;
 }
 
 // Home screen data - separated confirmed vs pending

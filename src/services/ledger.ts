@@ -52,7 +52,29 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
   const { date, time } = formatDate(tx.transactionTimestamp);
   const category = tx.categoryId ? lookup.categories.get(tx.categoryId) : undefined;
   const member = tx.memberId ? lookup.members.get(tx.memberId) : undefined;
-  const account = tx.accountId ? lookup.accounts.get(tx.accountId) : undefined;
+  let account = tx.accountId ? lookup.accounts.get(tx.accountId) : undefined;
+  let pendingAccount: { bankName?: string; mask?: string } | null = null;
+
+  if (!account && tx.parserMetadata) {
+    try {
+      const meta = JSON.parse(tx.parserMetadata);
+      if (meta && meta.pendingAccount && !meta.pendingAccount.resolved) {
+        const pBank = meta.pendingAccount.bankName?.toLowerCase();
+        const pMask = meta.pendingAccount.mask;
+        const matched = Array.from(lookup.accounts.values()).find(
+          (a) => a.mask === pMask && (!pBank || !a.bankName || a.bankName.toLowerCase() === pBank)
+        );
+        if (matched) {
+          account = matched;
+        } else {
+          pendingAccount = meta.pendingAccount;
+        }
+      }
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
+
   return {
     id: tx.id,
     amount: formatCurrency(tx.amountPaise, tx.currency),
@@ -74,7 +96,8 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
           color: account.color,
         }
       : null,
-    accountId: tx.accountId ?? null,
+    accountId: account?.id ?? tx.accountId ?? null,
+    pendingAccount,
     note: tx.note,
     status: tx.status,
     sourceApp: tx.sourceApp,
