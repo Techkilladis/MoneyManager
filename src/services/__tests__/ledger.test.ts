@@ -2,6 +2,7 @@ import { addTx, d, freshDatabase } from '../../../test/db';
 import {
   getCategoryShares,
   getDailyTotals,
+  getHistoryPage,
   getHistoryTotals,
   getHomeSummary,
   getSpendingSeries,
@@ -151,5 +152,22 @@ describe('series and breakdowns', () => {
     expect(savingsRate(0, 100)).toBeNull();
     expect(savingsRate(1000, 250)).toBe(0.75);
     expect(savingsRate(1000, 1500)).toBe(-0.5);
+  });
+
+  it('filters history transactions by accountId', async () => {
+    await addTx({ amountPaise: 1500, at: d(2026, 10, 5), accountId: 'account-icici' });
+    await addTx({ amountPaise: 2500, at: d(2026, 10, 6), accountId: 'account-indian' });
+    await addTx({ amountPaise: 3500, at: d(2026, 10, 7), accountId: 'account-cash' });
+
+    const iciciItems = await getHistoryPage({ accountId: 'account-icici' });
+    expect(iciciItems.length).toBe(1);
+    expect(iciciItems[0].amountPaise).toBe(1500);
+
+    const indianItems = await getHistoryPage({ accountId: 'account-indian' });
+    expect(indianItems.length).toBe(1);
+    expect(indianItems[0].amountPaise).toBe(2500);
+
+    const allItems = await getHistoryPage({});
+    expect(allItems.length).toBe(3);
   });
 });

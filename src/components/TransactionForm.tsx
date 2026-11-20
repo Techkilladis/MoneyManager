@@ -7,8 +7,10 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View 
 import { router, useFocusEffect } from 'expo-router';
 import { font, fontFamily, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { Category, Member, TransactionKind } from '@/database/schema';
-import { categoryService, classificationService, ledgerService, memberService } from '@/services';
+import { Account, Category, Member, TransactionKind } from '@/database/schema';
+import { accountService, categoryService, classificationService, ledgerService, memberService } from '@/services';
+import { getSetting, setSetting } from '@/services/settings';
+import { accountIcon, formatAccountLabel, formatAccountType } from '@/domain/account';
 import { formatDayLabel, formatTime, parseAmount, sanitizeAmountInput } from '@/utils/format';
 import { DateTimeSheet } from './DateTimeSheet';
 import { CategoryChips, CategoryGrid } from './Pickers';
@@ -20,6 +22,7 @@ import {
   Divider,
   Icon,
   IconName,
+  IconTile,
   ListRow,
   MemberAvatar,
   ScreenHeader,
@@ -34,6 +37,7 @@ export interface TransactionFormValues {
   merchant: string;
   categoryId: string | null;
   memberId: string | null;
+  accountId?: string | null;
   note: string | null;
   transactionTimestamp: number;
   kind: TransactionKind;
@@ -76,6 +80,7 @@ export function TransactionForm({
   const [merchant, setMerchant] = useState(initial?.merchant ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(initial?.categoryId ?? null);
   const [memberId, setMemberId] = useState<string | null>(initial?.memberId ?? null);
+  const [accountId, setAccountId] = useState<string | null>(initial?.accountId ?? null);
   const [note, setNote] = useState(initial?.note ?? '');
   const [date, setDate] = useState(() => new Date(initial?.transactionTimestamp ?? Date.now()));
   const [kind, setKind] = useState<TransactionKind>(initial?.kind ?? 'EXPENSE');
@@ -83,15 +88,17 @@ export function TransactionForm({
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [recentMerchants, setRecentMerchants] = useState<string[]>([]);
   const [suggestedId, setSuggestedId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'date' | 'category' | 'member' | 'note' | null>(null);
+  const [sheet, setSheet] = useState<'date' | 'category' | 'member' | 'account' | 'note' | null>(null);
   const [merchantFocused, setMerchantFocused] = useState(false);
   const [errors, setErrors] = useState<{ amount?: string; merchant?: string; form?: string }>({});
   const [saving, setSaving] = useState(false);
 
   const categoryTouched = useRef(initial?.categoryId != null);
   const memberDefaulted = useRef(false);
+  const accountDefaulted = useRef(initial?.accountId !== undefined);
   const [suggestionApplied, setSuggestionApplied] = useState(false);
   const mountedRef = useRef(true);
   const amountRef = useRef<TextInput>(null);
@@ -104,12 +111,34 @@ export function TransactionForm({
   }, []);
 
   const loadOptions = useCallback(() => {
-    Promise.all([categoryService.getAll(), memberService.getAll(), ledgerService.getRecentMerchants(10)])
-      .then(([cats, mems, recents]) => {
+    Promise.all([
+      categoryService.getAll(),
+      memberService.getAll(),
+      accountService.getAll(),
+      ledgerService.getRecentMerchants(10),
+    ])
+      .then(async ([cats, mems, accs, recents]) => {
         if (!mountedRef.current) return;
         setCategories(cats);
         setMembers(mems);
+        setAccounts(accs);
         setRecentMerchants(recents);
+
+        if (!accountDefaulted.current) {
+          accountDefaulted.current = true;
+          try {
+            const lastUsed = await getSetting('lastUsedAccountId');
+            if (lastUsed && accs.some((a) => a.id === lastUsed)) {
+              setAccountId(lastUsed);
+            } else if (accs.length > 0) {
+              const cash = accs.find((a) => a.id === 'account-cash');
+              setAccountId(cash ? cash.id : accs[0].id);
+            }
+          } catch {
+            // Ignore settings read failure
+          }
+        }
+
         if (smartDefaults) {
           const self = mems.find((m) => m.name === 'Self');
           if (self && !memberDefaulted.current) {
@@ -171,11 +200,15 @@ export function TransactionForm({
 
     setSaving(true);
     try {
+      if (accountId) {
+        setSetting('lastUsedAccountId', accountId).catch(() => undefined);
+      }
       await onSubmit({
         amountPaise,
         merchant: merchant.trim(),
         categoryId,
         memberId: income ? null : memberId,
+        accountId,
         note: note.trim() || null,
         transactionTimestamp: date.getTime(),
         kind,
@@ -202,6 +235,7 @@ export function TransactionForm({
 
   const visibleCategories = categories.filter((c) => c.kind === kind);
   const member = members.find((m) => m.id === memberId);
+  const account = accounts.find((a) => a.id === accountId);
 
   const query = merchant.trim().toLowerCase();
   const merchantSuggestions = recentMerchants
@@ -304,6 +338,13 @@ export function TransactionForm({
 
           {/* Optional details, folded away */}
           <Card padded={false} style={styles.details}>
+            <DetailRow
+              icon="landmark"
+              label="Account"
+              value={account ? formatAccountLabel(account) : 'Cash'}
+              onPress={() => setSheet('account')}
+            />
+            <Divider />
             <DetailRow icon="calendar" label="When" value={`${formatDayLabel(date.getTime())}, ${formatTime(date.getTime())}`} onPress={() => setSheet('date')} />
             {!income && members.length > 0 ? (
               <>
@@ -343,6 +384,45 @@ export function TransactionForm({
             router.push('/categories');
           }}
         />
+      </Sheet>
+
+      <Sheet
+        visible={sheet === 'account'}
+        onClose={() => setSheet(null)}
+        title="Account"
+        footer={
+          <Button
+            title="Manage accounts"
+            variant="ghost"
+            fullWidth
+            onPress={() => {
+              setSheet(null);
+              router.push('/accounts');
+            }}
+          />
+        }
+      >
+        <Card padded={false}>
+          {accounts.map((acc, i) => (
+            <View key={acc.id}>
+              {i > 0 ? <Divider /> : null}
+              <ListRow
+                title={acc.name}
+                subtitle={
+                  acc.type === 'CASH'
+                    ? 'Physical Cash'
+                    : `${formatAccountType(acc.type)}${acc.bankName ? ` • ${acc.bankName}` : ''}${acc.mask ? ` ••${acc.mask}` : ''}`
+                }
+                left={<IconTile icon={accountIcon(acc.type)} color={acc.color ?? colors.brand} />}
+                right={acc.id === accountId ? <Icon name="check" size={20} color={colors.brand} /> : null}
+                onPress={() => {
+                  setAccountId(acc.id);
+                  setSheet(null);
+                }}
+              />
+            </View>
+          ))}
+        </Card>
       </Sheet>
 
       <Sheet visible={sheet === 'member'} onClose={() => setSheet(null)} title="Who was it for?">

@@ -8,6 +8,7 @@ import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { CADENCE_LABEL, nextDueDate } from '@/services/recurring';
 import { SplitShare } from '@/services/splits';
+import { accountIcon, formatAccountLabel } from '@/domain/account';
 import { formatDayLabel, formatFullDate, formatINR, formatSourceApp, formatTime, splitINR } from '@/utils/format';
 import { haptic } from '@/utils/haptics';
 import { requestMoney } from '@/utils/requestMoney';
@@ -199,6 +200,17 @@ export default function TransactionDetailScreen() {
               </Text>
             </View>
           </DetailRow>
+          {tx.account ? (
+            <>
+              <Divider />
+              <DetailRow label="Account">
+                <View style={styles.inline}>
+                  <IconTile icon={accountIcon(tx.account.type)} color={tx.account.color ?? colors.brand} size={28} />
+                  <Text variant="body">{formatAccountLabel(tx.account)}</Text>
+                </View>
+              </DetailRow>
+            </>
+          ) : null}
           {!income ? (
             <>
               <Divider />

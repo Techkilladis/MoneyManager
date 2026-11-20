@@ -395,11 +395,13 @@ export const transactionService = {
     transactionTimestamp: number;
     categoryId: string | null;
     memberId: string | null;
+    accountId?: string | null;
     note: string | null;
     kind?: TransactionKind;
   }) {
     const tx = await transactionRepository.create({
       ...input,
+      accountId: input.accountId ?? null,
       kind: input.kind ?? 'EXPENSE',
       currency: 'INR',
       status: 'CONFIRMED',
@@ -423,6 +425,7 @@ export const transactionService = {
       transactionTimestamp: number;
       categoryId: string | null;
       memberId: string | null;
+      accountId?: string | null;
       note: string | null;
       kind?: TransactionKind;
     }
@@ -436,6 +439,7 @@ export const transactionService = {
       merchant: input.merchant,
       categoryId: input.categoryId,
       memberId: input.memberId,
+      accountId: input.accountId,
       note: input.note,
       kind,
     });
@@ -525,7 +529,8 @@ export const transactionService = {
     memberId?: string,
     amountPaise?: number,
     merchant?: string,
-    note?: string
+    note?: string,
+    accountId?: string
   ): Promise<{ success: boolean; transaction?: any; error?: string }> {
     try {
       // First check if already confirmed (idempotency)
@@ -550,6 +555,7 @@ export const transactionService = {
         amountPaise: amountPaise !== undefined ? amountPaise : undefined,
         merchant: merchant !== undefined ? merchant : undefined,
         note: note !== undefined ? note : undefined,
+        accountId: accountId !== undefined ? accountId : undefined,
       });
 
       // If this has a sourceEventId, consume the native pending event

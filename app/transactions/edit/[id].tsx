@@ -40,6 +40,7 @@ export default function EditTransactionScreen() {
         merchant: tx.merchant,
         categoryId: tx.category?.id ?? null,
         memberId: tx.member?.id ?? null,
+        accountId: tx.accountId ?? null,
         note: tx.note,
         transactionTimestamp: tx.timestamp,
         kind: tx.kind,

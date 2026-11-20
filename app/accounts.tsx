@@ -42,31 +42,7 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: 'CASH', label: 'Cash' },
 ];
 
-function accountIcon(type: AccountType): IconName {
-  switch (type) {
-    case 'CREDIT_CARD':
-      return 'creditCard';
-    case 'CASH':
-      return 'wallet';
-    case 'SAVINGS':
-    case 'CURRENT':
-    default:
-      return 'landmark';
-  }
-}
-
-function formatAccountType(type: AccountType): string {
-  switch (type) {
-    case 'SAVINGS':
-      return 'Savings Account';
-    case 'CURRENT':
-      return 'Current Account';
-    case 'CREDIT_CARD':
-      return 'Credit Card';
-    case 'CASH':
-      return 'Cash';
-  }
-}
+import { accountIcon, formatAccountType } from '@/domain/account';
 
 export default function AccountsScreen() {
   const { colors } = useTheme();

@@ -3,10 +3,11 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, 
 import { router } from 'expo-router';
 import { radius, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { categoryService, ledgerService, memberService } from '@/services';
+import { accountService, categoryService, ledgerService, memberService } from '@/services';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { useScreenData } from '@/hooks/useScreenData';
 import { FormattedTransaction } from '@/domain/transaction';
+import { formatAccountLabel } from '@/domain/account';
 import { formatDayLabel, formatINR, pluralize, startOfDay } from '@/utils/format';
 import { TransactionRow } from '@/components/TransactionRow';
 import {
@@ -71,6 +72,7 @@ export default function HistoryScreen() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -81,23 +83,25 @@ export default function HistoryScreen() {
       search: search || undefined,
       categoryId,
       memberId,
+      accountId,
     }),
-    [period, kind, search, categoryId, memberId]
+    [period, kind, search, categoryId, memberId, accountId]
   );
   const filterKey = JSON.stringify(filters);
 
   const fetcher = useCallback(async () => {
-    const [items, totals, daily, pending, categories, members] = await Promise.all([
+    const [items, totals, daily, pending, categories, members, accounts] = await Promise.all([
       ledgerService.getHistoryPage(filters, PAGE, 0),
       ledgerService.getHistoryTotals(filters),
       ledgerService.getDailyTotals(filters),
       transactionRepository.getPending(),
       categoryService.getAll(),
       memberService.getAll(),
+      accountService.getAll(),
     ]);
     // A fresh key per load: after edits/deletes, offsets shift, so older
     // extra pages must not be appended to a newly loaded first page.
-    return { key: `${filterKey}:${Date.now()}`, items, totals, daily, pendingCount: pending.length, categories, members };
+    return { key: `${filterKey}:${Date.now()}`, items, totals, daily, pendingCount: pending.length, categories, members, accounts };
   }, [filters, filterKey]);
 
   const { data, error, refreshing, refresh, reload } = useScreenData(fetcher);
@@ -154,7 +158,8 @@ export default function HistoryScreen() {
 
   const activeCategory = data.categories.find((c) => c.id === categoryId);
   const activeMember = data.members.find((m) => m.id === memberId);
-  const filterCount = (categoryId ? 1 : 0) + (memberId ? 1 : 0);
+  const activeAccount = data.accounts.find((a) => a.id === accountId);
+  const filterCount = (categoryId ? 1 : 0) + (memberId ? 1 : 0) + (accountId ? 1 : 0);
   const hasQuery = !!search || filterCount > 0;
 
   const header = (
@@ -186,7 +191,16 @@ export default function HistoryScreen() {
             />
           ) : null}
           {activeMember ? <Chip label={activeMember.name} selected color={activeMember.color} trailingIcon="x" onPress={() => setMemberId(null)} /> : null}
-          <Pressable onPress={() => { setCategoryId(null); setMemberId(null); }} hitSlop={8}>
+          {accountId ? (
+            <Chip
+              label={activeAccount ? formatAccountLabel(activeAccount) : 'Account'}
+              selected
+              color={activeAccount?.color ?? colors.brand}
+              trailingIcon="x"
+              onPress={() => setAccountId(null)}
+            />
+          ) : null}
+          <Pressable onPress={() => { setCategoryId(null); setMemberId(null); setAccountId(null); }} hitSlop={8}>
             <Text variant="labelStrong" color={colors.brand}>
               Clear
             </Text>
@@ -350,6 +364,21 @@ export default function HistoryScreen() {
           <Chip label="Everyone" selected={!memberId} onPress={() => setMemberId(null)} />
           {data.members.map((m) => (
             <Chip key={m.id} label={m.name} color={m.color} selected={memberId === m.id} onPress={() => setMemberId(memberId === m.id ? null : m.id)} />
+          ))}
+        </View>
+        <Text variant="label" style={styles.sheetLabel}>
+          Account
+        </Text>
+        <View style={styles.wrap}>
+          <Chip label="All accounts" selected={!accountId} onPress={() => setAccountId(null)} />
+          {data.accounts.map((acc) => (
+            <Chip
+              key={acc.id}
+              label={formatAccountLabel(acc)}
+              color={acc.color}
+              selected={accountId === acc.id}
+              onPress={() => setAccountId(accountId === acc.id ? null : acc.id)}
+            />
           ))}
         </View>
       </Sheet>
