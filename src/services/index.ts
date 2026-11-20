@@ -4,6 +4,7 @@ import { CreateTransactionInput, transactionRepository } from '../database/repos
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
+import { accountRepository, CreateAccountInput, UpdateAccountInput } from '../database/repositories/accountRepository';
 import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
@@ -21,7 +22,8 @@ import * as alertsService from './alerts';
 import * as recapService from './recap';
 import * as backupService from './backup';
 import * as updateService from './updateService';
-import { Transaction, TransactionKind } from '../database/schema';
+import { accountBackfillService } from './accountBackfill';
+import { Transaction, TransactionKind, Account } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
 export interface TransactionSnapshot {
@@ -30,13 +32,49 @@ export interface TransactionSnapshot {
 }
 
 /** A native SMS capture as a pending app transaction; the native event id is the idempotency key. */
-function captureInput(event: PendingUpiEvent): CreateTransactionInput {
+export async function captureInput(event: PendingUpiEvent): Promise<CreateTransactionInput> {
+  let matchedAccountId: string | null = null;
+  let pendingAccount: { bankName?: string; mask?: string } | null = null;
+
+  if (event.accountMask) {
+    let matched: Account | null = null;
+    if (event.bankName) {
+      matched = await accountRepository.findByBankAndMask(event.bankName, event.accountMask);
+    }
+    if (!matched) {
+      const allAccs = await accountRepository.getAll();
+      const byMask = allAccs.filter((a) => a.mask === event.accountMask);
+      if (byMask.length === 1) {
+        matched = byMask[0];
+      }
+    }
+
+    if (matched) {
+      matchedAccountId = matched.id;
+    } else {
+      pendingAccount = {
+        bankName: event.bankName || undefined,
+        mask: event.accountMask,
+      };
+    }
+  }
+
+  const parserMeta: Record<string, any> = {
+    parserName: event.parserName,
+    parserVersion: event.parserVersion,
+    confidence: event.confidence,
+  };
+  if (pendingAccount) {
+    parserMeta.pendingAccount = pendingAccount;
+  }
+
   return {
     amountPaise: Number(event.amountPaise),
     merchant: event.merchant || 'Unknown Merchant',
     transactionTimestamp: event.transactionTimestamp,
     categoryId: null,
     memberId: null,
+    accountId: matchedAccountId,
     note: null,
     status: 'PENDING',
     sourceApp: event.sourceApp,
@@ -48,11 +86,7 @@ function captureInput(event: PendingUpiEvent): CreateTransactionInput {
     is_pending_capture: 1,
     is_dismissed: 0,
     dismissed_at: null,
-    parserMetadata: JSON.stringify({
-      parserName: event.parserName,
-      parserVersion: event.parserVersion,
-      confidence: event.confidence,
-    }),
+    parserMetadata: JSON.stringify(parserMeta),
   };
 }
 
@@ -84,6 +118,12 @@ export const transactionService = {
 
     // Recovery: Handle CONFIRMED transactions that weren't consumed from native
     await this.recoverUnconsumedEvents();
+
+    // Historical account backfill: scans confirmed transactions with rawNotification
+    // to link them to existing accounts or flag unconfigured accounts
+    await accountBackfillService.runAutoBackfill().catch((err) => {
+      console.warn('[Sync] Account backfill failed/skipped:', err);
+    });
   },
 
   // Sync native pending UPI events (moneymanager_notifications.db) into the
@@ -101,7 +141,8 @@ export const transactionService = {
       let created = 0;
       for (const event of initialEvents) {
         try {
-          const result = await transactionRepository.createWithIdempotency(captureInput(event));
+          const input = await captureInput(event);
+          const result = await transactionRepository.createWithIdempotency(input);
           if (result.isNew) created++;
         } catch (error) {
           console.warn(`[Sync] Skipped native event ${event.id}:`, error);
@@ -119,7 +160,8 @@ export const transactionService = {
           const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
           for (const event of inboxEvents) {
             try {
-              const result = await transactionRepository.createWithIdempotency(captureInput(event));
+              const input = await captureInput(event);
+              const result = await transactionRepository.createWithIdempotency(input);
               if (result.isNew) created++;
             } catch (error) {
               console.warn(`[Sync] Skipped native event ${event.id}:`, error);
@@ -256,7 +298,8 @@ export const transactionService = {
     const event = await notificationDetectionService.getPendingUpiEvent(sourceEventId);
     if (!event || event.status !== 'PENDING') return null;
     try {
-      return (await transactionRepository.createWithIdempotency(captureInput(event))).transaction;
+      const input = await captureInput(event);
+      return (await transactionRepository.createWithIdempotency(input)).transaction;
     } catch (error) {
       // A background sync can insert the same event first (unique sourceEventId).
       console.warn('[Capture] Create raced with sync:', error);
@@ -286,10 +329,34 @@ export const transactionService = {
   async getFormattedTransaction(id: string): Promise<FormattedTransaction | null> {
     const tx = await transactionRepository.getById(id);
     if (!tx) return null;
-    const [category, member] = await Promise.all([
+    let [category, member, account] = await Promise.all([
       tx.categoryId ? categoryRepository.getById(tx.categoryId) : Promise.resolve(null),
       tx.memberId ? memberRepository.getById(tx.memberId) : Promise.resolve(null),
+      tx.accountId ? accountRepository.getById(tx.accountId) : Promise.resolve(null),
     ]);
+
+    let pendingAccount: { bankName?: string; mask?: string } | null = null;
+    if (!account && tx.parserMetadata) {
+      try {
+        const meta = JSON.parse(tx.parserMetadata);
+        if (meta && meta.pendingAccount && !meta.pendingAccount.resolved) {
+          if (meta.pendingAccount.mask) {
+            const allAccs = await accountRepository.getAll();
+            const pBank = meta.pendingAccount.bankName?.toLowerCase();
+            const matched = allAccs.find(
+              (a) => a.mask === meta.pendingAccount.mask && (!pBank || !a.bankName || a.bankName.toLowerCase() === pBank)
+            );
+            if (matched) {
+              account = matched;
+            } else {
+              pendingAccount = meta.pendingAccount;
+            }
+          }
+        }
+      } catch {
+        // Ignore JSON error
+      }
+    }
 
     const { date, time } = formatDate(tx.transactionTimestamp);
 
@@ -313,6 +380,18 @@ export const transactionService = {
         name: member.name,
         color: member.color,
       } : null,
+      account: account
+        ? {
+            id: account.id,
+            name: account.name,
+            bankName: account.bankName,
+            mask: account.mask,
+            type: account.type,
+            color: account.color,
+          }
+        : null,
+      accountId: account?.id ?? tx.accountId ?? null,
+      pendingAccount,
       note: tx.note,
       status: tx.status,
       sourceApp: tx.sourceApp,
@@ -324,6 +403,44 @@ export const transactionService = {
       kind: tx.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
       sharedPaise: tx.sharedPaise ?? 0,
     };
+  },
+
+  /**
+   * Batch links pending transactions to an account if their pendingAccount matches
+   * the provided bankName and mask (or mask).
+   */
+  async assignAccountToPending(bankName: string | undefined, mask: string, accountId: string): Promise<number> {
+    const db = await openDatabase();
+    const pendingRows = await db.getAllAsync<{ id: string; parserMetadata: string | null; accountId: string | null }>(
+      "SELECT id, parserMetadata, accountId FROM transactions WHERE is_pending_capture = 1 AND status = 'PENDING'"
+    );
+    let updatedCount = 0;
+    const normBank = bankName?.trim().toLowerCase();
+
+    for (const row of pendingRows) {
+      if (!row.parserMetadata) continue;
+      try {
+        const meta = JSON.parse(row.parserMetadata);
+        if (meta?.pendingAccount && meta.pendingAccount.mask === mask) {
+          const rowBank = meta.pendingAccount.bankName?.trim().toLowerCase();
+          if (!normBank || !rowBank || rowBank === normBank) {
+            meta.pendingAccount.resolved = true;
+            await db.runAsync(
+              'UPDATE transactions SET accountId = ?, parserMetadata = ? WHERE id = ?',
+              [accountId, JSON.stringify(meta), row.id]
+            );
+            updatedCount++;
+          }
+        }
+      } catch {
+        // Ignore JSON error
+      }
+    }
+
+    if (updatedCount > 0) {
+      dataEvents.emit();
+    }
+    return updatedCount;
   },
 
   // Get all transactions with category and member data
@@ -394,11 +511,13 @@ export const transactionService = {
     transactionTimestamp: number;
     categoryId: string | null;
     memberId: string | null;
+    accountId?: string | null;
     note: string | null;
     kind?: TransactionKind;
   }) {
     const tx = await transactionRepository.create({
       ...input,
+      accountId: input.accountId ?? null,
       kind: input.kind ?? 'EXPENSE',
       currency: 'INR',
       status: 'CONFIRMED',
@@ -422,6 +541,7 @@ export const transactionService = {
       transactionTimestamp: number;
       categoryId: string | null;
       memberId: string | null;
+      accountId?: string | null;
       note: string | null;
       kind?: TransactionKind;
     }
@@ -435,6 +555,7 @@ export const transactionService = {
       merchant: input.merchant,
       categoryId: input.categoryId,
       memberId: input.memberId,
+      accountId: input.accountId,
       note: input.note,
       kind,
     });
@@ -524,7 +645,8 @@ export const transactionService = {
     memberId?: string,
     amountPaise?: number,
     merchant?: string,
-    note?: string
+    note?: string,
+    accountId?: string
   ): Promise<{ success: boolean; transaction?: any; error?: string }> {
     try {
       // First check if already confirmed (idempotency)
@@ -549,6 +671,7 @@ export const transactionService = {
         amountPaise: amountPaise !== undefined ? amountPaise : undefined,
         merchant: merchant !== undefined ? merchant : undefined,
         note: note !== undefined ? note : undefined,
+        accountId: accountId !== undefined ? accountId : undefined,
       });
 
       // If this has a sourceEventId, consume the native pending event
@@ -751,6 +874,38 @@ export const memberService = {
   },
 };
 
+export const accountService = {
+  async getAll(): Promise<Account[]> {
+    return accountRepository.getAll();
+  },
+
+  async getById(id: string): Promise<Account | null> {
+    return accountRepository.getById(id);
+  },
+
+  async findByBankAndMask(bankName: string, mask: string): Promise<Account | null> {
+    return accountRepository.findByBankAndMask(bankName, mask);
+  },
+
+  async create(input: CreateAccountInput): Promise<Account> {
+    const account = await accountRepository.create(input);
+    dataEvents.emit();
+    return account;
+  },
+
+  async update(id: string, input: UpdateAccountInput): Promise<Account | null> {
+    const updated = await accountRepository.update(id, input);
+    dataEvents.emit();
+    return updated;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const deleted = await accountRepository.delete(id);
+    if (deleted) dataEvents.emit();
+    return deleted;
+  },
+};
+
 export const merchantService = {
   async getOrCreateByNormalizedKey(normalizedKey: string, canonicalName: string) {
     return merchantRepository.getOrCreateByNormalizedKey(normalizedKey, canonicalName);
@@ -805,6 +960,7 @@ export const services = {
   transaction: transactionService,
   category: categoryService,
   member: memberService,
+  account: accountService,
   notification: notificationDetectionService,
   classification: classificationService,
   merchant: merchantService,
@@ -817,10 +973,12 @@ export const services = {
   recap: recapService,
   backup: backupService,
   update: updateService,
+  accountBackfill: accountBackfillService,
 };
 
 // Export individual services for direct imports
 export { budgetService };
 export { analyticsService };
 export { ledgerService };
+export { accountBackfillService };
 export { splitService, recurringService, alertsService, recapService, backupService, updateService };

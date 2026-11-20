@@ -33,6 +33,10 @@ export interface SettingsShape {
   captureStepsOpened: string[];
   /** Whether UPI notifications create pending events silently ('auto') or open quick-capture instantly ('instant'). */
   captureMode: 'instant' | 'auto';
+  /** The last account ID selected when manually creating a transaction. */
+  lastUsedAccountId: string | null;
+  /** Whether the historical confirmed transaction account backfill has completed. */
+  hasRunAccountBackfill: boolean;
 }
 
 const DEFAULTS: SettingsShape = {
@@ -52,6 +56,8 @@ const DEFAULTS: SettingsShape = {
   overallBudgetPaise: 0,
   captureStepsOpened: [],
   captureMode: 'instant', // default: open quick-capture instantly on UPI notification
+  lastUsedAccountId: null,
+  hasRunAccountBackfill: false,
 };
 
 type Key = keyof SettingsShape;

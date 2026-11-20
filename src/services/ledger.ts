@@ -7,10 +7,11 @@
  * "Income" is the same filter on INCOME rows.
  */
 import { openDatabase } from '../database/db';
-import { Category, Member, Transaction } from '../database/schema';
+import { Category, Member, Transaction, Account, AccountType } from '../database/schema';
 import { mapTransactionRow } from '../database/db';
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
+import { accountRepository } from '../database/repositories/accountRepository';
 import { FormattedTransaction, formatDate } from '../domain/transaction';
 import { formatCurrency } from '../database/db';
 import { notificationDetectionService } from './notificationDetection';
@@ -28,13 +29,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ------------------------------------------------------------ formatting
 
-type Lookup = { categories: Map<string, Category>; members: Map<string, Member> };
+type Lookup = {
+  categories: Map<string, Category>;
+  members: Map<string, Member>;
+  accounts: Map<string, Account>;
+};
 
 async function loadLookup(): Promise<Lookup> {
-  const [cats, mems] = await Promise.all([categoryRepository.getAll(), memberRepository.getAll()]);
+  const [cats, mems, accs] = await Promise.all([
+    categoryRepository.getAll(),
+    memberRepository.getAll(),
+    accountRepository.getAll(),
+  ]);
   return {
     categories: new Map(cats.map((c) => [c.id, c])),
     members: new Map(mems.map((m) => [m.id, m])),
+    accounts: new Map(accs.map((a) => [a.id, a])),
   };
 }
 
@@ -42,6 +52,29 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
   const { date, time } = formatDate(tx.transactionTimestamp);
   const category = tx.categoryId ? lookup.categories.get(tx.categoryId) : undefined;
   const member = tx.memberId ? lookup.members.get(tx.memberId) : undefined;
+  let account = tx.accountId ? lookup.accounts.get(tx.accountId) : undefined;
+  let pendingAccount: { bankName?: string; mask?: string } | null = null;
+
+  if (!account && tx.parserMetadata) {
+    try {
+      const meta = JSON.parse(tx.parserMetadata);
+      if (meta && meta.pendingAccount && !meta.pendingAccount.resolved) {
+        const pBank = meta.pendingAccount.bankName?.toLowerCase();
+        const pMask = meta.pendingAccount.mask;
+        const matched = Array.from(lookup.accounts.values()).find(
+          (a) => a.mask === pMask && (!pBank || !a.bankName || a.bankName.toLowerCase() === pBank)
+        );
+        if (matched) {
+          account = matched;
+        } else {
+          pendingAccount = meta.pendingAccount;
+        }
+      }
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
+
   return {
     id: tx.id,
     amount: formatCurrency(tx.amountPaise, tx.currency),
@@ -53,6 +86,18 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
     timestamp: tx.transactionTimestamp,
     category: category ? { id: category.id, name: category.name, icon: category.icon, color: category.color } : null,
     member: member ? { id: member.id, name: member.name, color: member.color } : null,
+    account: account
+      ? {
+          id: account.id,
+          name: account.name,
+          bankName: account.bankName,
+          mask: account.mask,
+          type: account.type,
+          color: account.color,
+        }
+      : null,
+    accountId: account?.id ?? tx.accountId ?? null,
+    pendingAccount,
     note: tx.note,
     status: tx.status,
     sourceApp: tx.sourceApp,
@@ -179,6 +224,90 @@ export async function getCategoryShares(
   });
 }
 
+export async function getCategorySharesByAccount(
+  start: number,
+  end: number,
+  accountId: string,
+  kind: 'EXPENSE' | 'INCOME' = 'EXPENSE'
+): Promise<CategoryShare[]> {
+  const db = await openDatabase();
+  const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
+  const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
+
+  const accountClause =
+    accountId === 'account-cash' ? '(accountId = ? OR accountId IS NULL)' : 'accountId = ?';
+
+  const rows = await db.getAllAsync<{ categoryId: string | null; total: number; count: number }>(
+    `SELECT categoryId, SUM(${amount}) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${where} AND ${accountClause} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+     GROUP BY categoryId HAVING total > 0 ORDER BY total DESC`,
+    [accountId, start, end]
+  );
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  const lookup = await loadLookup();
+  return rows.map((r) => {
+    const cat = r.categoryId ? lookup.categories.get(r.categoryId) : undefined;
+    return {
+      categoryId: r.categoryId,
+      name: cat?.name ?? 'Uncategorized',
+      icon: cat?.icon ?? null,
+      color: cat?.color ?? '#9CA3AF',
+      totalPaise: r.total,
+      count: r.count,
+      share: total > 0 ? r.total / total : 0,
+    };
+  });
+}
+
+export interface AccountSpendingTotal {
+  accountId: string;
+  name: string;
+  bankName: string | null;
+  mask: string | null;
+  type: AccountType;
+  color: string;
+  icon: string | null;
+  totalPaise: number;
+  count: number;
+  share: number;
+}
+
+export async function getAccountTotals(
+  start: number,
+  end: number,
+  kind: 'EXPENSE' | 'INCOME' = 'EXPENSE'
+): Promise<AccountSpendingTotal[]> {
+  const db = await openDatabase();
+  const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
+  const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
+
+  const rows = await db.getAllAsync<{ accId: string; total: number; count: number }>(
+    `SELECT COALESCE(accountId, 'account-cash') AS accId, SUM(${amount}) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+     GROUP BY accId HAVING total > 0 ORDER BY total DESC`,
+    [start, end]
+  );
+
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+  const lookup = await loadLookup();
+
+  return rows.map((r) => {
+    const acc = lookup.accounts.get(r.accId);
+    return {
+      accountId: r.accId,
+      name: acc?.name ?? (r.accId === 'account-cash' ? 'Cash' : 'Unknown Account'),
+      bankName: acc?.bankName ?? null,
+      mask: acc?.mask ?? null,
+      type: acc?.type ?? 'CASH',
+      color: acc?.color ?? '#34C759',
+      icon: acc?.icon ?? 'banknote',
+      totalPaise: r.total,
+      count: r.count,
+      share: grandTotal > 0 ? r.total / grandTotal : 0,
+    };
+  });
+}
+
 export async function getHomeSummary(): Promise<HomeSummary> {
   const db = await openDatabase();
   const now = new Date();
@@ -250,6 +379,7 @@ export interface HistoryFilters {
   search?: string;
   categoryId?: string | null; // 'none' = uncategorized
   memberId?: string | null;
+  accountId?: string | null; // 'none' = unassigned
   start?: number;
   end?: number;
 }
@@ -260,6 +390,14 @@ function historyWhere(f: HistoryFilters): { sql: string; params: (string | numbe
   if (f.kind) {
     parts.push('kind = ?');
     params.push(f.kind);
+  }
+  if (f.accountId) {
+    if (f.accountId === 'none') {
+      parts.push('accountId IS NULL');
+    } else {
+      parts.push('accountId = ?');
+      params.push(f.accountId);
+    }
   }
   if (f.search && f.search.trim()) {
     parts.push('(merchant LIKE ? OR note LIKE ?)');
@@ -288,8 +426,8 @@ function historyWhere(f: HistoryFilters): { sql: string; params: (string | numbe
 
 export async function getHistoryPage(
   filters: HistoryFilters,
-  limit: number,
-  offset: number
+  limit = 50,
+  offset = 0
 ): Promise<FormattedTransaction[]> {
   const db = await openDatabase();
   const { sql, params } = historyWhere(filters);

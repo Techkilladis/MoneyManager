@@ -233,7 +233,9 @@ class MoneyManagerNotificationDetectionModule : Module() {
                         "amountPaise" to it.amountPaise,
                         "merchant" to it.counterparty,
                         "transactionReference" to it.reference,
-                        "direction" to it.direction.name
+                        "direction" to it.direction.name,
+                        "accountMask" to it.accountMask,
+                        "bankName" to it.bankName
                     )
                 }
             )
@@ -255,7 +257,9 @@ class MoneyManagerNotificationDetectionModule : Module() {
             "status" to event.status.name,
             "createdAt" to event.createdAt,
             "dedupeKey" to event.dedupeKey,
-            "direction" to event.direction
+            "direction" to event.direction,
+            "accountMask" to event.accountMask,
+            "bankName" to event.bankName
         )
     }
 }

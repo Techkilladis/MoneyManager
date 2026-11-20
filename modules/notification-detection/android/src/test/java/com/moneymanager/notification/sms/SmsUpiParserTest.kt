@@ -92,9 +92,17 @@ class SmsUpiParserTest {
     }
 
     @Test
-    fun rejectsCardAndNonUpiBankMessages() {
-        assertNull(parse("Rs 1,499 spent on HDFC Bank Credit Card XX1234 at AMAZON on 12-10-24"))
-        assertNull(parse("Rs 2,000 withdrawn from ATM on 12-10-24. Avl Bal Rs 8,000"))
+    fun parsesCreditCardTransactions() {
+        val r = parse("Rs 1,499 spent on HDFC Bank Credit Card XX1234 at AMAZON on 12-10-24", "AX-HDFCBK")
+        assertNotNull(r)
+        assertEquals(149900L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("1234", r.accountMask)
+        assertEquals("HDFC Bank", r.bankName)
+        assertEquals("AMAZON", r.counterparty)
+
+        // Without account identifier and non-UPI, still rejected
+        assertNull(parse("Rs 2,000 withdrawn from ATM on 12-10-24. Avl Bal Rs 8,000", "AX-HDFCBK"))
     }
 
     @Test
@@ -249,5 +257,84 @@ class SmsUpiParserTest {
         assertEquals(Direction.CREDIT, r.direction)
         assertNotNull(r.counterparty) // "P N Megaraja" after stripping "Mr"
         assertEquals("605208731014", r.reference)
+    }
+
+    @Test
+    fun iciciDebitWithAccountAndBank() {
+        val r = parse(
+            "ICICI Bank Acct XX172 debited for Rs 50.00 on 11-Nov-26; Suresh kumar ho credited. UPI:006862128238. Call 18002662 for dispute. SMS BLOCK 172 to 9215676766.",
+            "ICICIB"
+        )
+        assertNotNull(r)
+        assertEquals(5000L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("Suresh kumar ho", r.counterparty)
+        assertEquals("006862128238", r.reference)
+        assertEquals("172", r.accountMask)
+        assertEquals("ICICI Bank", r.bankName)
+    }
+
+    @Test
+    fun iciciAchCreditNonUpi() {
+        val r = parse(
+            "ICICI Bank Account XX172 credited:Rs. 4,647.00 on 29-Oct-26. Info ACH*NA*CMP00000001607969535. Available Balance is Rs. 23,796.48.",
+            "ICICIB"
+        )
+        assertNotNull(r)
+        assertEquals(464700L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        assertEquals("172", r.accountMask)
+        assertEquals("ICICI Bank", r.bankName)
+    }
+
+    @Test
+    fun indianBankDebitWithAccountAndBank() {
+        val r = parse(
+            "Sent Rs.70.00 from A/c *1224 on 20-11-26 to Velan Fruit And Juice Shop.RRN 007195419979.Avl Bal Rs.5417.47.Not you?SMS BLOCK to 9289592895-Indian Bank",
+            "INDBNK"
+        )
+        assertNotNull(r)
+        assertEquals(7000L, r!!.amountPaise)
+        assertEquals(Direction.DEBIT, r.direction)
+        assertEquals("Velan Fruit And Juice Shop", r.counterparty)
+        assertEquals("007195419979", r.reference)
+        assertEquals("1224", r.accountMask)
+        assertEquals("Indian Bank", r.bankName)
+    }
+
+    @Test
+    fun indianBankCreditWithAccountAndBank() {
+        val r = parse(
+            "Your A/c *1224 is credited with Rs.30.00 on 30-09-26 by RAKESH  VEERAKUMAR. RRN 663936493031. Available balance is Rs. 2373.47 - Indian Bank",
+            "INDBNK"
+        )
+        assertNotNull(r)
+        assertEquals(3000L, r!!.amountPaise)
+        assertEquals(Direction.CREDIT, r.direction)
+        assertEquals("RAKESH VEERAKUMAR", r.counterparty)
+        assertEquals("663936493031", r.reference)
+        assertEquals("1224", r.accountMask)
+        assertEquals("Indian Bank", r.bankName)
+    }
+
+    @Test
+    fun rejectsLoanAndPromotionalSpam() {
+        val r1 = parse(
+            "Congratulations! You are pre-approved for a personal loan of Rs 10,00,000 at 10.5% interest. Apply now!",
+            "AX-HDFCBK"
+        )
+        assertNull(r1)
+
+        val r2 = parse(
+            "Dear customer, get Rs 50,000 instant loan approved on your A/c XX172. Apply now!",
+            "ICICIB"
+        )
+        assertNull(r2)
+
+        val r3 = parse(
+            "Claim your cashback of up to Rs. 500 on your Indian Bank A/c *1224. Click here to claim offer.",
+            "INDBNK"
+        )
+        assertNull(r3)
     }
 }

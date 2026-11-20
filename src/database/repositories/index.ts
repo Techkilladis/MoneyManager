@@ -5,3 +5,4 @@ export * from './memberRepository';
 export * from './merchantRepository';
 export * from './merchantMemoryRepository';
 export * from './budgetRepository';
+export * from './accountRepository';

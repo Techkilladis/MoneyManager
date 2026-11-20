@@ -636,6 +636,12 @@ const glyphs = {
   laptop: (
     <Path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" />
   ),
+  creditCard: (
+    <>
+      <Rect width="20" height="14" x="2" y="5" rx="2" />
+      <Line x1="2" x2="22" y1="10" y2="10" />
+    </>
+  ),
   landmark: (
     <>
       <Path d="M3 22h18" />

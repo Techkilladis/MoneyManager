@@ -6,6 +6,7 @@ import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import {
   alertsService,
+  accountService,
   backupService,
   budgetService,
   categoryService,
@@ -48,10 +49,11 @@ type Prefs = Pick<
 >;
 
 async function fetchSettings() {
-  const [budgets, categories, members, recurring, owed, prefs, permission, lock] = await Promise.all([
+  const [budgets, categories, members, accounts, recurring, owed, prefs, permission, lock] = await Promise.all([
     budgetService.getMonthlyBudgets(),
     categoryService.getAll(),
     memberService.getAll(),
+    accountService.getAll(),
     recurringService.listRecurring(),
     splitService.getTotalOwed(),
     getSettings([
@@ -72,6 +74,7 @@ async function fetchSettings() {
       budgets: budgets.length + (prefs.overallBudgetPaise > 0 ? 1 : 0),
       categories: categories.length,
       members: members.length,
+      accounts: accounts.length,
       recurring: recurring.length,
     },
     owed,
@@ -330,6 +333,15 @@ Reference: ${result.transactionReference ?? '—'}`
             value={data ? String(data.counts.members) : undefined}
             chevron
             onPress={() => router.push('/members')}
+          />
+          <Divider />
+          <ListRow
+            title="Accounts"
+            subtitle="Bank accounts, cards, and cash"
+            left={<IconTile icon="wallet" />}
+            value={data ? String(data.counts.accounts) : undefined}
+            chevron
+            onPress={() => router.push('/accounts')}
           />
           <Divider />
           <ListRow

@@ -17,7 +17,8 @@ function TransactionRowBase({ tx, onPress, showDate = false }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const when = showDate ? `${formatDayLabel(tx.timestamp)} · ${formatTime(tx.timestamp)}` : formatTime(tx.timestamp);
-  const meta = [tx.category?.name ?? 'Uncategorized', tx.member?.name, when].filter(Boolean).join(' · ');
+  const accountLabel = tx.account ? (tx.account.type === 'CASH' ? 'Cash' : tx.account.mask ? `${tx.account.name} (••${tx.account.mask})` : tx.account.name) : null;
+  const meta = [tx.category?.name ?? 'Uncategorized', accountLabel, tx.member?.name, when].filter(Boolean).join(' · ');
   const source = tx.sourceType === 'UPI_NOTIFICATION' ? formatSourceApp(tx.sourceApp) : null;
   const income = tx.kind === 'INCOME';
   const shared = !income && tx.sharedPaise > 0;

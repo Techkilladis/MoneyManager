@@ -1,4 +1,5 @@
 // Domain Types
+import { AccountType } from '../database/schema';
 export * from '../database/schema';
 
 // Re-export formatCurrency from db
@@ -35,6 +36,19 @@ export interface FormattedTransaction {
   dismissed_at: number | null;   // NEW: Timestamp when dismissed
   kind: 'EXPENSE' | 'INCOME';     // v6
   sharedPaise: number;           // v6: owed back by others (splits)
+  accountId?: string | null;     // v7
+  account?: {
+    id: string;
+    name: string;
+    bankName: string | null;
+    mask: string | null;
+    type: AccountType;
+    color: string | null;
+  } | null;
+  pendingAccount?: {
+    bankName?: string;
+    mask?: string;
+  } | null;
 }
 
 // Home screen data - separated confirmed vs pending

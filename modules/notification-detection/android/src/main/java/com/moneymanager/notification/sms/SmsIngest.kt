@@ -42,7 +42,9 @@ object SmsIngest {
                 parserName = "BankSmsParser",
                 parserVersion = SmsUpiParser.VERSION,
                 confidence = minOf(confidence, 1.0),
-                direction = direction
+                direction = direction,
+                accountMask = result.accountMask,
+                bankName = result.bankName
             )
             val event = store.createEvent(parsed, notificationId = key.take(16), dedupeKey = key)
             CaptureHealth.recordCapture(context)

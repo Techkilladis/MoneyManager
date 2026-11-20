@@ -67,8 +67,9 @@ class PendingEventStore private constructor(context: Context) {
                 """INSERT INTO pending_upi_events 
                    (id, amountPaise, merchant, sourceApp, transactionTimestamp, 
                     transactionReference, parserName, parserVersion, confidence,
-                    notificationId, status, dedupeKey, createdAt, updatedAt, direction)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    notificationId, status, dedupeKey, createdAt, updatedAt, direction,
+                    accountMask, bankName)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 arrayOf(
                     id,
                     parsed.amountPaise,
@@ -84,7 +85,9 @@ class PendingEventStore private constructor(context: Context) {
                     dedupeKey,
                     now,
                     now,
-                    parsed.direction
+                    parsed.direction,
+                    parsed.accountMask,
+                    parsed.bankName
                 )
             )
         }
@@ -103,7 +106,9 @@ class PendingEventStore private constructor(context: Context) {
             status = PendingUpiEvent.Status.PENDING,
             createdAt = now,
             dedupeKey = dedupeKey,
-            direction = parsed.direction
+            direction = parsed.direction,
+            accountMask = parsed.accountMask,
+            bankName = parsed.bankName
         )
     }
 
@@ -331,7 +336,9 @@ class PendingEventStore private constructor(context: Context) {
             status = status,
             createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("createdAt")),
             dedupeKey = cursor.getString(cursor.getColumnIndexOrThrow("dedupeKey")) ?: "",
-            direction = cursor.getColumnIndex("direction").let { if (it >= 0) cursor.getString(it) ?: "DEBIT" else "DEBIT" }
+            direction = cursor.getColumnIndex("direction").let { if (it >= 0) cursor.getString(it) ?: "DEBIT" else "DEBIT" },
+            accountMask = cursor.getColumnIndex("accountMask").let { if (it >= 0) cursor.getString(it) else null },
+            bankName = cursor.getColumnIndex("bankName").let { if (it >= 0) cursor.getString(it) else null }
         )
     }
 
@@ -339,7 +346,7 @@ class PendingEventStore private constructor(context: Context) {
         context,
         "moneymanager_notifications.db",
         null,
-        2
+        3
     ) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("""
@@ -358,7 +365,9 @@ class PendingEventStore private constructor(context: Context) {
                     dedupeKey TEXT NOT NULL,
                     createdAt INTEGER NOT NULL,
                     updatedAt INTEGER NOT NULL,
-                    direction TEXT NOT NULL DEFAULT 'DEBIT'
+                    direction TEXT NOT NULL DEFAULT 'DEBIT',
+                    accountMask TEXT,
+                    bankName TEXT
                 )
             """)
             
@@ -372,6 +381,11 @@ class PendingEventStore private constructor(context: Context) {
             if (oldVersion < 2) {
                 // v2: money-in events (CREDIT) are captured alongside payments.
                 db.execSQL("ALTER TABLE pending_upi_events ADD COLUMN direction TEXT NOT NULL DEFAULT 'DEBIT'")
+            }
+            if (oldVersion < 3) {
+                // v3: accountMask and bankName captured for multi-account management.
+                db.execSQL("ALTER TABLE pending_upi_events ADD COLUMN accountMask TEXT")
+                db.execSQL("ALTER TABLE pending_upi_events ADD COLUMN bankName TEXT")
             }
         }
     }
@@ -391,7 +405,9 @@ data class PendingUpiEvent(
     val status: Status,
     val createdAt: Long,
     val dedupeKey: String,
-    val direction: String = "DEBIT"
+    val direction: String = "DEBIT",
+    val accountMask: String? = null,
+    val bankName: String? = null
 ) {
     enum class Status {
         PENDING,
@@ -416,6 +432,8 @@ data class PendingUpiEvent(
         bundle.putLong("createdAt", createdAt)
         bundle.putString("dedupeKey", dedupeKey)
         bundle.putString("direction", direction)
+        bundle.putString("accountMask", accountMask)
+        bundle.putString("bankName", bankName)
         return bundle
     }
 }

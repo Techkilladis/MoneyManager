@@ -23,6 +23,7 @@ export interface Transaction {
   dismissed_at: number | null; // Timestamp when dismissed
   kind: TransactionKind; // v6: money out (EXPENSE) or money in (INCOME)
   sharedPaise: number; // v6: part of the amount owed back by others (splits)
+  accountId: string | null; // v7: linked funding source account
   createdAt: number;
   updatedAt: number;
 }
@@ -49,6 +50,22 @@ export interface Member {
   name: string;
   color: string | null; // Hex color for UI
   isDefault: boolean; // System members vs custom
+  createdAt: number;
+  updatedAt: number;
+}
+
+// v7: Accounts (funding sources: bank accounts, credit cards, cash)
+export type AccountType = 'SAVINGS' | 'CURRENT' | 'CREDIT_CARD' | 'CASH';
+
+export interface Account {
+  id: string;
+  name: string;
+  bankName: string | null;
+  mask: string | null;
+  type: AccountType;
+  color: string | null;
+  icon: string | null;
+  isDefault: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -133,7 +150,7 @@ export interface Split {
 }
 
 // Database Schema Version
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // SQL Statements
 export const schema = {
@@ -158,6 +175,7 @@ export const schema = {
       is_pending_capture INTEGER NOT NULL DEFAULT 0, -- 1 = captured UPI event awaiting review
       is_dismissed INTEGER NOT NULL DEFAULT 0,       -- 1 = dismissed (rejected/ignored)
       dismissed_at INTEGER,                           -- Timestamp when dismissed
+      accountId TEXT,                                 -- Linked account ID
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
@@ -356,6 +374,40 @@ export const schema = {
     { id: 'cat-income-gift', name: 'Gifts', icon: '🎁', color: '#EC4899', sortOrder: 104 },
     { id: 'cat-income-interest', name: 'Interest', icon: '🏦', color: '#F59E0B', sortOrder: 105 },
     { id: 'cat-income-other', name: 'Other income', icon: '💰', color: '#14B8A6', sortOrder: 106 },
+  ],
+
+  // v7: Accounts table
+  createAccountsTable: `
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      bankName TEXT,
+      mask TEXT,
+      type TEXT NOT NULL,
+      color TEXT,
+      icon TEXT,
+      isDefault INTEGER NOT NULL DEFAULT 0,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+  `,
+
+  createV7Indexes: [
+    'CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(accountId);',
+    'CREATE INDEX IF NOT EXISTS idx_accounts_bank_mask ON accounts(bankName, mask);',
+  ],
+
+  seedAccounts: [
+    {
+      id: 'account-cash',
+      name: 'Cash',
+      bankName: null,
+      mask: null,
+      type: 'CASH' as AccountType,
+      color: '#34C759',
+      icon: 'banknote',
+      isDefault: true,
+    },
   ],
 
   // Migration from v4 to v5 - add budgets table

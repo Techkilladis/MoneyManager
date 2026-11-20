@@ -21,6 +21,7 @@ export interface CreateTransactionInput {
   is_dismissed?: number;           // NEW: 1 = dismissed (rejected/ignored)
   dismissed_at?: number | null;    // NEW: Timestamp when dismissed
   kind?: TransactionKind;          // v6: EXPENSE (default) or INCOME
+  accountId?: string | null;       // v7: Linked account ID
 }
 
 export interface UpdateTransactionInput {
@@ -34,11 +35,13 @@ export interface UpdateTransactionInput {
   is_dismissed?: number;           // NEW
   dismissed_at?: number | null;    // NEW
   kind?: TransactionKind;
+  accountId?: string | null;
 }
 
 export interface TransactionFilters {
   categoryId?: string;
   memberId?: string;
+  accountId?: string | null;
   status?: TransactionStatus;
   startDate?: number;
   endDate?: number;
@@ -62,8 +65,8 @@ export const transactionRepository = {
         notificationId, rawNotification, parserMetadata,
         sourceEventId, sourceType,
         is_pending_capture, is_dismissed, dismissed_at,  -- NEW
-        createdAt, updatedAt, kind
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        createdAt, updatedAt, kind, accountId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.amountPaise,
@@ -86,6 +89,7 @@ export const transactionRepository = {
         timestamp,
         timestamp,
         input.kind ?? 'EXPENSE',
+        input.accountId || null,
       ]
     );
     
@@ -177,6 +181,10 @@ export const transactionRepository = {
       updates.push('kind = ?');
       values.push(input.kind);
     }
+    if (input.accountId !== undefined) {
+      updates.push('accountId = ?');
+      values.push(input.accountId);
+    }
     
     if (updates.length === 0) {
       return this.getById(id);
@@ -219,6 +227,14 @@ export const transactionRepository = {
     if (filters.memberId) {
       conditions.push('memberId = ?');
       values.push(filters.memberId);
+    }
+    if (filters.accountId) {
+      if (filters.accountId === 'none') {
+        conditions.push('accountId IS NULL');
+      } else {
+        conditions.push('accountId = ?');
+        values.push(filters.accountId);
+      }
     }
     if (filters.status) {
       conditions.push('status = ?');
@@ -357,6 +373,14 @@ export const transactionRepository = {
     if (filters.memberId) {
       conditions.push('memberId = ?');
       values.push(filters.memberId);
+    }
+    if (filters.accountId) {
+      if (filters.accountId === 'none') {
+        conditions.push('accountId IS NULL');
+      } else {
+        conditions.push('accountId = ?');
+        values.push(filters.accountId);
+      }
     }
     if (filters.status) {
       conditions.push('status = ?');
