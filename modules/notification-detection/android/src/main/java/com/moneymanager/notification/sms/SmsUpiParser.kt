@@ -19,7 +19,9 @@ object SmsUpiParser {
         val amountPaise: Long,
         val direction: Direction,
         val counterparty: String?,
-        val reference: String?
+        val reference: String?,
+        val accountMask: String? = null,
+        val bankName: String? = null
     )
 
     private val I = RegexOption.IGNORE_CASE
@@ -30,7 +32,12 @@ object SmsUpiParser {
     )
 
     private val IGNORE = Regex(
-        """\b(fail(?:ed|ure)?|declined|unsuccessful|pending|not\s+(?:been\s+)?processed|otp|one[\s-]?time\s+password|request(?:ed|s)?|collect|reminder|will\s+be\s+debited|to\s+be\s+debited|scheduled|mandate|autopay|offers?|cashback|coupons?|kyc|blocked)\b""",
+        """\b(fail(?:ed|ure)?|declined|unsuccessful|pending|not\s+(?:been\s+)?processed|otp|one[\s-]?time\s+password|request(?:ed|s)?|collect|reminder|will\s+be\s+debited|to\s+be\s+debited|scheduled|mandate|autopay|offers?|cashback(?:\s+of\s+up\s+to)?|coupons?|kyc|blocked|loans?|pre-?approved|apply\s+now|congratulations|winner|won|reward\s+points|instant\s+credit\s+limit|insurance|discounts?|limited\s+period\s+offer)\b""",
+        I
+    )
+
+    private val ACCOUNT_MASK_REGEX = Regex(
+        """\b(?:Acct|Account|A/c|Card)\s*(?:ending)?\s*[:#\-]?\s*[*xX]*([0-9]{3,6})\b""",
         I
     )
 
@@ -51,7 +58,7 @@ object SmsUpiParser {
     private const val HONORIFIC = """(?:(?:Mr|Mrs|Ms|Miss|Dr|Shri|Smt|Md|Mohd)\.?\s+)?"""
 
     private val VPA = Regex("""\b(?:to|from|by)\s+VPA\s+([\w.\-]{2,}@[A-Za-z]\w*)""", I)
-    private val TO_PARTY = Regex("""\b(?:trf\s+to|transfer(?:red)?\s+to|to)\s+$HONORIFIC($NAME)$END""", I)
+    private val TO_PARTY = Regex("""\b(?:trf\s+to|transfer(?:red)?\s+to|to|at)\s+$HONORIFIC($NAME)$END""", I)
     private val FROM_PARTY = Regex("""\b(?:from|by)\s+$HONORIFIC($NAME)$END""", I)
 
     // ICICI dual-party format: "debited for Rs 625; TAMILAGA UNAVU credited"
@@ -71,17 +78,47 @@ object SmsUpiParser {
     private val REFERENCES = listOf(
         Regex("""\bUPI/(?:DR|CR)/(\d{9,})""", I),
         Regex("""\bUPI\s*[:\-]?\s*(\d{9,})""", I),
-        Regex("""\b(?:RRN|UTR|Ref(?:erence)?\.?\s*(?:ID|No\.?|Number)?|Txn\s*ID)\s*[:#\-]?\s*(\d{9,})""", I)
+        Regex("""\b(?:RRN|UTR|Ref(?:erence)?\.?\s*(?:ID|No\.?|Number)?|Txn\s*ID)\s*[:#\-]?\s*(\d{9,})""", I),
+        Regex("""\b(?:ACH|NEFT|IMPS)[*:\-\s]+(?:NA[*:\-\s]+)?([A-Za-z0-9]{8,})""", I)
     )
 
     /** Bank SMS come from alphanumeric headers (e.g. AX-HDFCBK); skip plain phone numbers. */
     fun isCandidateSender(sender: String?): Boolean = sender != null && sender.any { it.isLetter() }
 
+    fun extractBankName(sender: String?, text: String): String? {
+        val s = sender?.uppercase() ?: ""
+        val t = text.uppercase()
+        return when {
+            t.contains("ICICI BANK") || s.contains("ICICI") -> "ICICI Bank"
+            t.contains("INDIAN BANK") || s.contains("INDBNK") || s.contains("INDIANB") -> "Indian Bank"
+            t.contains("HDFC BANK") || s.contains("HDFC") -> "HDFC Bank"
+            t.contains("STATE BANK OF INDIA") || t.contains("SBI") || s.contains("SBI") -> "SBI"
+            t.contains("AXIS BANK") || s.contains("AXIS") -> "Axis Bank"
+            t.contains("KOTAK") || s.contains("KOTAK") -> "Kotak Bank"
+            t.contains("BANK OF BARODA") || s.contains("BARODA") || s.contains("BOB") -> "Bank of Baroda"
+            t.contains("CANARA BANK") || s.contains("CANARA") || s.contains("CANBNK") -> "Canara Bank"
+            t.contains("PUNJAB NATIONAL BANK") || s.contains("PNB") -> "PNB"
+            t.contains("UNION BANK") || s.contains("UNIONB") || s.contains("UBI") -> "Union Bank"
+            t.contains("IDFC") || s.contains("IDFC") -> "IDFC First Bank"
+            t.contains("FEDERAL BANK") || s.contains("FEDBNK") -> "Federal Bank"
+            t.contains("YES BANK") || s.contains("YESB") -> "Yes Bank"
+            t.contains("INDUSIND") || s.contains("INDUS") -> "IndusInd Bank"
+            else -> null
+        }
+    }
+
     fun parse(sender: String?, body: String?): Result? {
         if (!isCandidateSender(sender) || body.isNullOrBlank()) return null
         val text = body.replace(Regex("""\s+"""), " ").trim()
-        if (!UPI_MARKER.containsMatchIn(text)) return null
         if (IGNORE.containsMatchIn(text)) return null
+
+        val accountMask = ACCOUNT_MASK_REGEX.find(text)?.groupValues?.get(1)
+        val bankName = extractBankName(sender, text)
+        val hasUpiMarker = UPI_MARKER.containsMatchIn(text)
+        val hasAccount = accountMask != null
+
+        // Must either have a UPI marker OR an account mask with a recognized bank identity
+        if (!hasUpiMarker && !(hasAccount && bankName != null)) return null
 
         val amountPaise = UpiMessageParser.amount(text)
             ?: BARE_AMOUNT.find(text)?.groupValues?.get(1)?.let(UpiMessageParser::toPaise)
@@ -95,7 +132,14 @@ object SmsUpiParser {
             else -> direction(text)
         } ?: return null
 
-        return Result(amountPaise, direction, counterparty(text, direction, slash?.groupValues?.getOrNull(3)), reference(text))
+        return Result(
+            amountPaise = amountPaise,
+            direction = direction,
+            counterparty = counterparty(text, direction, slash?.groupValues?.getOrNull(3)),
+            reference = reference(text),
+            accountMask = accountMask,
+            bankName = bankName
+        )
     }
 
     /** Whichever of the credit/debit words appears first decides the direction. */

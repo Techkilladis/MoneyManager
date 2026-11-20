@@ -19,6 +19,8 @@ export interface ParsedSms {
   merchant?: string | null;
   transactionReference?: string | null;
   direction: 'DEBIT' | 'CREDIT';
+  accountMask?: string | null;
+  bankName?: string | null;
 }
 
 export interface PendingUpiEvent {
@@ -37,6 +39,8 @@ export interface PendingUpiEvent {
   dedupeKey: string;
   /** DEBIT = money out (expense), CREDIT = money in (income). */
   direction?: 'DEBIT' | 'CREDIT';
+  accountMask?: string | null;
+  bankName?: string | null;
 }
 
 export interface CaptureHealth {

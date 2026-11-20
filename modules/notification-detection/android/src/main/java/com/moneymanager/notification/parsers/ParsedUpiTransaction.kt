@@ -11,5 +11,7 @@ data class ParsedUpiTransaction(
     val parserVersion: String = "1.0",
     val confidence: Double = 1.0,
     /** "DEBIT" (money out) or "CREDIT" (money in). */
-    val direction: String = "DEBIT"
+    val direction: String = "DEBIT",
+    val accountMask: String? = null,
+    val bankName: String? = null
 )
