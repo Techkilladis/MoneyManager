@@ -22,6 +22,7 @@ import * as alertsService from './alerts';
 import * as recapService from './recap';
 import * as backupService from './backup';
 import * as updateService from './updateService';
+import { accountBackfillService } from './accountBackfill';
 import { Transaction, TransactionKind, Account } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
@@ -117,6 +118,12 @@ export const transactionService = {
 
     // Recovery: Handle CONFIRMED transactions that weren't consumed from native
     await this.recoverUnconsumedEvents();
+
+    // Historical account backfill: scans confirmed transactions with rawNotification
+    // to link them to existing accounts or flag unconfigured accounts
+    await accountBackfillService.runAutoBackfill().catch((err) => {
+      console.warn('[Sync] Account backfill failed/skipped:', err);
+    });
   },
 
   // Sync native pending UPI events (moneymanager_notifications.db) into the
@@ -966,10 +973,12 @@ export const services = {
   recap: recapService,
   backup: backupService,
   update: updateService,
+  accountBackfill: accountBackfillService,
 };
 
 // Export individual services for direct imports
 export { budgetService };
 export { analyticsService };
 export { ledgerService };
+export { accountBackfillService };
 export { splitService, recurringService, alertsService, recapService, backupService, updateService };

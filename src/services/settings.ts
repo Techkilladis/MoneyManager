@@ -35,6 +35,8 @@ export interface SettingsShape {
   captureMode: 'instant' | 'auto';
   /** The last account ID selected when manually creating a transaction. */
   lastUsedAccountId: string | null;
+  /** Whether the historical confirmed transaction account backfill has completed. */
+  hasRunAccountBackfill: boolean;
 }
 
 const DEFAULTS: SettingsShape = {
@@ -55,6 +57,7 @@ const DEFAULTS: SettingsShape = {
   captureStepsOpened: [],
   captureMode: 'instant', // default: open quick-capture instantly on UPI notification
   lastUsedAccountId: null,
+  hasRunAccountBackfill: false,
 };
 
 type Key = keyof SettingsShape;

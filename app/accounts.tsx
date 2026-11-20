@@ -3,7 +3,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { radius, space, swatches } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Account, AccountType } from '@/database/schema';
-import { accountService } from '@/services';
+import { accountBackfillService, accountService, transactionService } from '@/services';
 import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { haptic } from '@/utils/haptics';
@@ -48,12 +48,19 @@ export default function AccountsScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const toast = useToast();
-  const { data: accounts, reload } = useScreenData(() => accountService.getAll());
+  const { data, reload } = useScreenData(async () => {
+    const [accs, backfillRes] = await Promise.all([
+      accountService.getAll(),
+      accountBackfillService.runAutoBackfill(),
+    ]);
+    return { accounts: accs, unconfigured: backfillRes.unconfigured };
+  });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  if (!accounts) return <LoadingView />;
+  if (!data) return <LoadingView />;
+  const accounts = data.accounts;
 
   const open = (acc?: Account) => {
     setError(null);
@@ -88,25 +95,36 @@ export default function AccountsScreen() {
 
     setSaving(true);
     try {
+      const bankName = draft.type === 'CASH' ? null : draft.bankName.trim() || null;
+      const mask = draft.type === 'CASH' ? null : draft.mask.trim() || null;
+
       if (draft.id) {
         await accountService.update(draft.id, {
           name,
-          bankName: draft.type === 'CASH' ? null : draft.bankName.trim() || null,
-          mask: draft.type === 'CASH' ? null : draft.mask.trim() || null,
+          bankName,
+          mask,
           type: draft.type,
           color: draft.color,
           icon: accountIcon(draft.type),
         });
+        if (mask) {
+          await accountBackfillService.completeBackfillForAccount(bankName || undefined, mask, draft.id);
+          await transactionService.assignAccountToPending(bankName || undefined, mask, draft.id);
+        }
         toast.show('Account updated');
       } else {
-        await accountService.create({
+        const created = await accountService.create({
           name,
-          bankName: draft.type === 'CASH' ? null : draft.bankName.trim() || null,
-          mask: draft.type === 'CASH' ? null : draft.mask.trim() || null,
+          bankName,
+          mask,
           type: draft.type,
           color: draft.color,
           icon: accountIcon(draft.type),
         });
+        if (mask) {
+          await accountBackfillService.completeBackfillForAccount(bankName || undefined, mask, created.id);
+          await transactionService.assignAccountToPending(bankName || undefined, mask, created.id);
+        }
         toast.show('Account added');
       }
       haptic.success();
@@ -152,6 +170,37 @@ export default function AccountsScreen() {
         <Text variant="caption" style={styles.intro}>
           Accounts represent your bank accounts, credit cards, and cash funding sources.
         </Text>
+
+        {data.unconfigured.length > 0 && (
+          <View style={{ marginBottom: space.lg }}>
+            <Text variant="label" style={{ marginBottom: space.xs }}>
+              Discovered from past transactions
+            </Text>
+            <Card padded={false}>
+              {data.unconfigured.map((disc, idx) => (
+                <React.Fragment key={`${disc.bankName}-${disc.mask}`}>
+                  {idx > 0 && <Divider />}
+                  <ListRow
+                    title={disc.bankName ? `${disc.bankName} (••${disc.mask})` : `Account ••${disc.mask}`}
+                    subtitle={`${disc.count} transaction${disc.count === 1 ? '' : 's'} waiting to link`}
+                    left={<IconTile icon="sparkles" color={colors.brand} />}
+                    right={<Chip label="Setup" selected color={colors.brand} />}
+                    onPress={() => {
+                      setDraft({
+                        id: null,
+                        name: disc.bankName ? `${disc.bankName}` : `Account ••${disc.mask}`,
+                        bankName: disc.bankName ?? '',
+                        mask: disc.mask,
+                        type: 'SAVINGS',
+                        color: swatches[accounts.length % (swatches.length - 1)],
+                      });
+                    }}
+                  />
+                </React.Fragment>
+              ))}
+            </Card>
+          </View>
+        )}
 
         <Card padded={false}>
           {accounts.map((acc, index) => {
