@@ -9,7 +9,7 @@ import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, Scrol
 import { router, useLocalSearchParams } from 'expo-router';
 import { font, fontFamily, space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { Account, AccountType, Category, Member } from '@/database/schema';
+import { Account, Category, Member } from '@/database/schema';
 import { transactionRepository } from '@/database/repositories/transactionRepository';
 import { accountService, categoryService, classificationService, memberService, transactionService } from '@/services';
 import { notificationDetectionService } from '@/services/notificationDetection';
@@ -27,6 +27,7 @@ import {
   splitINR,
 } from '@/utils/format';
 import { CategoryChips, CategoryGrid, MemberChips } from '@/components/Pickers';
+import { AccountDiscoveryModal, DiscoveredAccountData } from '@/components/AccountDiscoveryModal';
 import { haptic } from '@/utils/haptics';
 import {
   BottomBar,
@@ -40,7 +41,6 @@ import {
   ListRow,
   LoadingView,
   ScreenHeader,
-  SegmentedControl,
   Sheet,
   Text,
   TextField,
@@ -190,23 +190,6 @@ export default function QuickCaptureScreen() {
 
 // ---------------------------------------------------------------- card
 
-const SWATCHES = [
-  '#0A84FF', // blue
-  '#30B0C7', // teal
-  '#34C759', // green
-  '#FF9F0A', // orange
-  '#FF375F', // red/pink
-  '#AF52DE', // purple
-  '#64D2FF', // sky
-  '#8E8E93', // slate
-];
-
-const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
-  { value: 'SAVINGS', label: 'Savings' },
-  { value: 'CURRENT', label: 'Current' },
-  { value: 'CREDIT_CARD', label: 'Credit Card' },
-];
-
 interface Suggestion {
   categoryId: string | null;
   memberId: string | null;
@@ -233,15 +216,7 @@ function ReviewCard({
   const [members, setMembers] = useState<Member[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [discoveryVisible, setDiscoveryVisible] = useState(false);
-  const [discoveryDraft, setDiscoveryDraft] = useState<{
-    name: string;
-    bankName: string;
-    mask: string;
-    type: AccountType;
-    color: string;
-  } | null>(null);
-  const [savingAccount, setSavingAccount] = useState(false);
+  const [discoveryData, setDiscoveryData] = useState<DiscoveredAccountData | null>(null);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
 
   const [amount, setAmount] = useState('');
@@ -295,18 +270,12 @@ function ReviewCard({
         setMemberId(data.member?.id ?? null);
         setAccountId(data.account?.id ?? data.accountId ?? null);
 
-        // Discovery check: if transaction has an unconfigured account, trigger discovery sheet
+        // Discovery check: if transaction has an unconfigured account, trigger discovery modal
         if (!data.account && data.pendingAccount && data.pendingAccount.mask) {
-          const bank = data.pendingAccount.bankName ?? '';
-          const mask = data.pendingAccount.mask;
-          setDiscoveryDraft({
-            name: bank ? `${bank}` : `Account ••${mask}`,
-            bankName: bank,
-            mask,
-            type: 'SAVINGS',
-            color: SWATCHES[0],
+          setDiscoveryData({
+            bankName: data.pendingAccount.bankName ?? '',
+            mask: data.pendingAccount.mask,
           });
-          setDiscoveryVisible(true);
         }
 
         try {
@@ -324,32 +293,6 @@ function ReviewCard({
         if (mountedRef.current) setMissing(true);
       });
   }, [id]);
-
-  const saveDiscoveredAccount = async () => {
-    if (!discoveryDraft) return;
-    setSavingAccount(true);
-    try {
-      const created = await accountService.create({
-        name: discoveryDraft.name.trim() || discoveryDraft.bankName || 'Account',
-        bankName: discoveryDraft.bankName.trim() || undefined,
-        mask: discoveryDraft.mask.trim() || undefined,
-        type: discoveryDraft.type,
-        color: discoveryDraft.color,
-        icon: accountIcon(discoveryDraft.type),
-      });
-      await transactionService.assignAccountToPending(discoveryDraft.bankName, discoveryDraft.mask, created.id);
-      const refreshed = await accountService.getAll();
-      if (!mountedRef.current) return;
-      setAccounts(refreshed);
-      setAccountId(created.id);
-      setDiscoveryVisible(false);
-      toast.show(`${created.name} added`);
-    } catch {
-      toast.show('Could not save account', 'error');
-    } finally {
-      if (mountedRef.current) setSavingAccount(false);
-    }
-  };
 
   const finish = (message: string) => {
     haptic.success();
@@ -688,81 +631,18 @@ function ReviewCard({
         </Card>
       </Sheet>
 
-      <Sheet
-        visible={discoveryVisible}
-        onClose={() => setDiscoveryVisible(false)}
-        title="New Account Discovered"
-      >
-        {discoveryDraft && (
-          <View style={styles.discoveryForm}>
-            <Text variant="caption" style={styles.discoveryIntro}>
-              We detected a new account from your SMS notification. Set it up once to automatically assign this and future transactions.
-            </Text>
-
-            <View style={{ marginBottom: space.sm }}>
-              <Text variant="caption" style={{ marginBottom: space.xs }}>
-                Account Type
-              </Text>
-              <SegmentedControl
-                options={ACCOUNT_TYPES}
-                value={discoveryDraft.type}
-                onChange={(type) => setDiscoveryDraft((d) => (d ? { ...d, type } : null))}
-              />
-            </View>
-
-            <TextField
-              label="Account Name"
-              placeholder="e.g. ICICI Salary, Indian Bank Savings"
-              value={discoveryDraft.name}
-              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, name: text } : null))}
-            />
-
-            <TextField
-              label="Bank Name"
-              placeholder="e.g. ICICI Bank, Indian Bank"
-              value={discoveryDraft.bankName}
-              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, bankName: text } : null))}
-            />
-
-            <TextField
-              label="Account / Card Mask (last digits)"
-              placeholder="e.g. 172 or 1224"
-              value={discoveryDraft.mask}
-              keyboardType="numeric"
-              onChangeText={(text) => setDiscoveryDraft((d) => (d ? { ...d, mask: text.replace(/\D/g, '') } : null))}
-            />
-
-            <View style={styles.colorSection}>
-              <Text variant="caption" style={{ marginBottom: space.xs }}>
-                Color
-              </Text>
-              <View style={styles.swatchRow}>
-                {SWATCHES.map((swatch) => {
-                  const selected = discoveryDraft.color === swatch;
-                  return (
-                    <Pressable
-                      key={swatch}
-                      onPress={() => setDiscoveryDraft((d) => (d ? { ...d, color: swatch } : null))}
-                      style={[
-                        styles.swatch,
-                        { backgroundColor: swatch },
-                        selected && styles.swatchSelected,
-                      ]}
-                    />
-                  );
-                })}
-              </View>
-            </View>
-
-            <Button
-              title="Save account"
-              loading={savingAccount}
-              onPress={saveDiscoveredAccount}
-              style={{ marginTop: space.md }}
-            />
-          </View>
-        )}
-      </Sheet>
+      <AccountDiscoveryModal
+        visible={!!discoveryData}
+        initialData={discoveryData}
+        onClose={() => setDiscoveryData(null)}
+        onSaved={async (created) => {
+          const refreshed = await accountService.getAll();
+          if (!mountedRef.current) return;
+          setAccounts(refreshed);
+          setAccountId(created.id);
+          setDiscoveryData(null);
+        }}
+      />
 
       {success ? (
         <Animated.View style={[StyleSheet.absoluteFill, styles.successScrim, { opacity: celebrate }]} pointerEvents="none">
@@ -912,31 +792,5 @@ const useStyles = makeStyles((colors, scheme) => ({
     backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  discoveryForm: {
-    paddingBottom: space.lg,
-  },
-  discoveryIntro: {
-    color: colors.textSecondary,
-    marginBottom: space.md,
-  },
-  colorSection: {
-    marginTop: space.xs,
-    marginBottom: space.sm,
-  },
-  swatchRow: {
-    flexDirection: 'row',
-    gap: space.sm,
-    flexWrap: 'wrap',
-  },
-  swatch: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  swatchSelected: {
-    borderColor: colors.text,
   },
 }));

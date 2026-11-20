@@ -55,7 +55,9 @@
     "lint": "eslint .",
     "test": "jest",
     "test:native": "cd android && gradlew :money-manager-notification-detection:testDebugUnitTest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "check:all": "npm run check && npm run test:native"
   },
   "private": true,
   "jest": {
