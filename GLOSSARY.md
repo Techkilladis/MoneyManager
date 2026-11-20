@@ -1,5 +1,9 @@
 # Glossary
 
+### `Account`
+
+A financial funding source (such as a bank savings account, current account, credit card, or cash) associated with transaction debits and credits. Identified by bank name, account number mask (last digits), and account type (`SAVINGS`, `CURRENT`, `CREDIT_CARD`, `CASH`). _Avoid_: `Card`, `Bank`, `Wallet`.
+
 ### `APK`
 
 The Android Package Kit binary installed on device for native application upgrades. Related terms: `[Native Rebuild]`, `[Direct APK Download]`.
