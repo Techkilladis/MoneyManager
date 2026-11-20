@@ -4,6 +4,7 @@ import { CreateTransactionInput, transactionRepository } from '../database/repos
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
+import { accountRepository, CreateAccountInput, UpdateAccountInput } from '../database/repositories/accountRepository';
 import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
@@ -21,7 +22,7 @@ import * as alertsService from './alerts';
 import * as recapService from './recap';
 import * as backupService from './backup';
 import * as updateService from './updateService';
-import { Transaction, TransactionKind } from '../database/schema';
+import { Transaction, TransactionKind, Account } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
 export interface TransactionSnapshot {
@@ -751,6 +752,38 @@ export const memberService = {
   },
 };
 
+export const accountService = {
+  async getAll(): Promise<Account[]> {
+    return accountRepository.getAll();
+  },
+
+  async getById(id: string): Promise<Account | null> {
+    return accountRepository.getById(id);
+  },
+
+  async findByBankAndMask(bankName: string, mask: string): Promise<Account | null> {
+    return accountRepository.findByBankAndMask(bankName, mask);
+  },
+
+  async create(input: CreateAccountInput): Promise<Account> {
+    const account = await accountRepository.create(input);
+    dataEvents.emit();
+    return account;
+  },
+
+  async update(id: string, input: UpdateAccountInput): Promise<Account | null> {
+    const updated = await accountRepository.update(id, input);
+    dataEvents.emit();
+    return updated;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const deleted = await accountRepository.delete(id);
+    if (deleted) dataEvents.emit();
+    return deleted;
+  },
+};
+
 export const merchantService = {
   async getOrCreateByNormalizedKey(normalizedKey: string, canonicalName: string) {
     return merchantRepository.getOrCreateByNormalizedKey(normalizedKey, canonicalName);
@@ -805,6 +838,7 @@ export const services = {
   transaction: transactionService,
   category: categoryService,
   member: memberService,
+  account: accountService,
   notification: notificationDetectionService,
   classification: classificationService,
   merchant: merchantService,

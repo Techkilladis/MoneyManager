@@ -2,7 +2,7 @@
 // Using Expo SQLite (expo-sqlite for SDK 52)
 
 import * as SQLite from 'expo-sqlite';
-import { schema, SCHEMA_VERSION, now, Transaction, Category, Member, Merchant, MerchantMemory, Budget, RecurringPayment, Split } from './schema';
+import { schema, SCHEMA_VERSION, now, Transaction, Category, Member, Merchant, MerchantMemory, Budget, RecurringPayment, Split, Account, AccountType } from './schema';
 
 // Database instance
 let db: SQLite.SQLiteDatabase | null = null;
@@ -51,6 +51,9 @@ export async function initializeDatabase(): Promise<void> {
   // v6 tables and columns (idempotent; also covers fresh installs)
   await runMigrationV5ToV6(database);
   
+  // v7 accounts table and columns (idempotent)
+  await runMigrationV6ToV7(database);
+
   // Seed default data
   await seedDefaultData(database);
   
@@ -196,6 +199,14 @@ async function runMigrationV5ToV6(database: SQLite.SQLiteDatabase): Promise<void
   }
 }
 
+async function runMigrationV6ToV7(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.execAsync(schema.createAccountsTable);
+  await addColumnIfMissing(database, 'transactions', 'accountId', 'accountId TEXT');
+  for (const indexSql of schema.createV7Indexes) {
+    await database.execAsync(indexSql);
+  }
+}
+
 // Seed default categories and members
 async function seedDefaultData(database: SQLite.SQLiteDatabase): Promise<void> {
   const timestamp = now();
@@ -240,6 +251,22 @@ async function seedDefaultData(database: SQLite.SQLiteDatabase): Promise<void> {
         `INSERT INTO members (id, name, color, isDefault, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [member.id, member.name, member.color, member.isDefault, timestamp, timestamp]
+      );
+    }
+  }
+
+  // Seed default accounts (Cash)
+  for (const account of schema.seedAccounts) {
+    const existing = await database.getFirstAsync<{ id: string }>(
+      'SELECT id FROM accounts WHERE id = ?',
+      [account.id]
+    );
+
+    if (!existing) {
+      await database.runAsync(
+        `INSERT INTO accounts (id, name, bankName, mask, type, color, icon, isDefault, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [account.id, account.name, account.bankName, account.mask, account.type, account.color, account.icon, account.isDefault ? 1 : 0, timestamp, timestamp]
       );
     }
   }
@@ -312,6 +339,22 @@ export function mapTransactionRow(row: any): Transaction {
     dismissed_at: row.dismissed_at ?? null,         // NEW
     kind: row.kind === 'INCOME' ? 'INCOME' : 'EXPENSE',
     sharedPaise: row.shared_paise ?? 0,
+    accountId: row.accountId ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function mapAccountRow(row: any): Account {
+  return {
+    id: row.id,
+    name: row.name,
+    bankName: row.bankName ?? null,
+    mask: row.mask ?? null,
+    type: row.type as AccountType,
+    color: row.color ?? null,
+    icon: row.icon ?? null,
+    isDefault: Boolean(row.isDefault),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
