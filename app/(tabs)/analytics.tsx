@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshControl, ScrollView, useWindowDimensions, View } from 'react-native';
 import { router } from 'expo-router';
 import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
@@ -7,6 +7,7 @@ import { analyticsService, budgetService, ledgerService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
 import type { CategoryShare } from '@/services/ledger';
 import { weekBounds } from '@/services/ledger';
+import { accountIcon, formatAccountLabel } from '@/domain/account';
 import { BarChart, BarDatum, Donut } from '@/components/Charts';
 import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, startOfDay } from '@/utils/format';
 import {
@@ -123,10 +124,19 @@ async function loadSeries(mode: Mode, start: number, end: number): Promise<BarDa
 export default function InsightsScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { width: windowWidth } = useWindowDimensions();
+  const cardWidth = windowWidth - space.lg * 2;
   const [mode, setMode] = useState<Mode>('month');
   const [offset, setOffset] = useState(0);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const carouselRef = useRef<ScrollView>(null);
 
   const range = useMemo(() => rangeFor(mode, offset), [mode, offset]);
+
+  useEffect(() => {
+    carouselRef.current?.scrollTo({ x: 0, animated: false });
+    setCarouselIndex(0);
+  }, [mode, offset]);
 
   const fetcher = useCallback(async () => {
     // For the current (unfinished) period, compare against the same elapsed
@@ -138,7 +148,7 @@ export default function InsightsScreen() {
         ? { start: prevFull.start, end: Math.min(prevFull.end, prevFull.start + elapsed) }
         : prevFull;
     const period = { start: range.start, end: range.end, label: range.label };
-    const [totals, prevTotals, series, categories, merchants, members, largest, budgets, income, incomeSources] = await Promise.all([
+    const [totals, prevTotals, series, categories, merchants, members, largest, budgets, income, incomeSources, accountTotals] = await Promise.all([
       ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: range.start, end: range.end }),
       ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: prev.start, end: prev.end }),
       loadSeries(mode, range.start, range.end),
@@ -149,7 +159,16 @@ export default function InsightsScreen() {
       mode === 'month' ? budgetService.getMonthlyBudgets(new Date(range.start)) : Promise.resolve([]),
       ledgerService.incomeBetween(range.start, range.end),
       ledgerService.getCategoryShares(range.start, range.end, 'INCOME'),
+      ledgerService.getAccountTotals(range.start, range.end),
     ]);
+
+    const accountBreakdowns = await Promise.all(
+      accountTotals.map(async (acc) => ({
+        account: acc,
+        categories: await ledgerService.getCategorySharesByAccount(range.start, range.end, acc.accountId),
+      }))
+    );
+
     const elapsedDays = Math.max(1, Math.ceil((Math.min(Date.now(), range.end) - range.start) / DAY_MS));
     return {
       totals,
@@ -162,6 +181,8 @@ export default function InsightsScreen() {
       budgets,
       income: income.total,
       incomeSources,
+      accountTotals,
+      accountBreakdowns,
       elapsedDays,
       partial: prev !== prevFull,
     };
@@ -299,41 +320,138 @@ export default function InsightsScreen() {
 
             <View style={styles.block}>
               <SectionTitle title="Where it went" />
-              <Card>
-                <View style={styles.donutWrap}>
-                  <Donut
-                    slices={data.categories.map((c) => ({ key: c.categoryId ?? 'none', value: c.totalPaise, color: c.color ?? colors.textTertiary }))}
-                  >
-                    <Text variant="caption">{pluralize(data.categories.length, 'category', 'categories')}</Text>
-                    <Text variant="heading" numeric>
-                      {formatCompactINR(totals.total)}
+              <ScrollView
+                ref={carouselRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                style={{ width: cardWidth }}
+                contentContainerStyle={{ alignItems: 'flex-start' }}
+                onMomentumScrollEnd={(e) => {
+                  const idx = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+                  setCarouselIndex(idx);
+                }}
+              >
+                {/* Slide 0: All Accounts */}
+                <Card style={{ width: cardWidth }}>
+                  <View style={styles.accountSlideHeader}>
+                    <IconTile icon="landmark" color={colors.brand} size={36} />
+                    <View style={{ flex: 1 }}>
+                      <Text variant="labelStrong">All Accounts</Text>
+                      <Text variant="caption">
+                        {data.accountBreakdowns.length === 0
+                          ? 'Overall spending'
+                          : `${pluralize(data.accountBreakdowns.length, 'account', 'accounts')} with spending`}
+                      </Text>
+                    </View>
+                    <Text variant="labelStrong" numeric>
+                      {formatINR(totals.total, { decimals: 'never' })}
                     </Text>
-                  </Donut>
-                </View>
-                {data.categories.map((c) => (
-                  <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
-                    {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
-                    <View style={{ flex: 1, gap: 6 }}>
-                      <View style={styles.breakdownText}>
-                        <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
-                          {c.name}
-                        </Text>
-                        <Text variant="labelStrong" numeric>
-                          {formatINR(c.totalPaise, { decimals: 'never' })}
-                        </Text>
-                      </View>
-                      <View style={styles.breakdownText}>
-                        <View style={{ flex: 1 }}>
-                          <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
+                  </View>
+                  <Divider style={{ marginVertical: space.sm }} />
+                  <View style={styles.donutWrap}>
+                    <Donut
+                      slices={data.categories.map((c) => ({
+                        key: c.categoryId ?? 'none',
+                        value: c.totalPaise,
+                        color: c.color ?? colors.textTertiary,
+                      }))}
+                    >
+                      <Text variant="caption">{pluralize(data.categories.length, 'category', 'categories')}</Text>
+                      <Text variant="heading" numeric>
+                        {formatCompactINR(totals.total)}
+                      </Text>
+                    </Donut>
+                  </View>
+                  {data.categories.map((c) => (
+                    <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
+                      {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <View style={styles.breakdownText}>
+                          <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
+                            {c.name}
+                          </Text>
+                          <Text variant="labelStrong" numeric>
+                            {formatINR(c.totalPaise, { decimals: 'never' })}
+                          </Text>
                         </View>
-                        <Text variant="caption" numeric style={styles.pct}>
-                          {Math.round(c.share * 100)}%
-                        </Text>
+                        <View style={styles.breakdownText}>
+                          <View style={{ flex: 1 }}>
+                            <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
+                          </View>
+                          <Text variant="caption" numeric style={styles.pct}>
+                            {Math.round(c.share * 100)}%
+                          </Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
+                  ))}
+                </Card>
+
+                {/* Slides 1..N: Per-Account breakdown */}
+                {data.accountBreakdowns.map(({ account, categories: accCats }) => (
+                  <Card key={account.accountId} style={{ width: cardWidth }}>
+                    <View style={styles.accountSlideHeader}>
+                      <IconTile icon={accountIcon(account.type)} color={account.color} size={36} />
+                      <View style={{ flex: 1 }}>
+                        <Text variant="labelStrong">{formatAccountLabel(account)}</Text>
+                        <Text variant="caption">
+                          {Math.round(account.share * 100)}% of total spend
+                        </Text>
+                      </View>
+                      <Text variant="labelStrong" numeric>
+                        {formatINR(account.totalPaise, { decimals: 'never' })}
+                      </Text>
+                    </View>
+                    <Divider style={{ marginVertical: space.sm }} />
+                    <View style={styles.donutWrap}>
+                      <Donut
+                        slices={accCats.map((c) => ({
+                          key: c.categoryId ?? 'none',
+                          value: c.totalPaise,
+                          color: c.color ?? colors.textTertiary,
+                        }))}
+                      >
+                        <Text variant="caption">{pluralize(accCats.length, 'category', 'categories')}</Text>
+                        <Text variant="heading" numeric>
+                          {formatCompactINR(account.totalPaise)}
+                        </Text>
+                      </Donut>
+                    </View>
+                    {accCats.map((c) => (
+                      <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
+                        {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
+                        <View style={{ flex: 1, gap: 6 }}>
+                          <View style={styles.breakdownText}>
+                            <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
+                              {c.name}
+                            </Text>
+                            <Text variant="labelStrong" numeric>
+                              {formatINR(c.totalPaise, { decimals: 'never' })}
+                            </Text>
+                          </View>
+                          <View style={styles.breakdownText}>
+                            <View style={{ flex: 1 }}>
+                              <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
+                            </View>
+                            <Text variant="caption" numeric style={styles.pct}>
+                              {Math.round(c.share * 100)}%
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </Card>
                 ))}
-              </Card>
+              </ScrollView>
+
+              {1 + data.accountBreakdowns.length > 1 ? (
+                <View style={styles.carouselDots}>
+                  {Array.from({ length: 1 + data.accountBreakdowns.length }, (_, i) => (
+                    <View key={i} style={[styles.carouselDot, i === carouselIndex && styles.carouselDotActive]} />
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             {data.budgets.length > 0 ? (
@@ -619,6 +737,30 @@ const useStyles = makeStyles((colors) => ({
     backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  accountSlideHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingBottom: space.xs,
+  },
+  carouselDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.sm,
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.borderStrong,
+  },
+  carouselDotActive: {
+    width: 18,
+    borderRadius: 3,
+    backgroundColor: colors.brand,
   },
   insight: {
     flexDirection: 'row',

@@ -7,7 +7,7 @@
  * "Income" is the same filter on INCOME rows.
  */
 import { openDatabase } from '../database/db';
-import { Category, Member, Transaction, Account } from '../database/schema';
+import { Category, Member, Transaction, Account, AccountType } from '../database/schema';
 import { mapTransactionRow } from '../database/db';
 import { categoryRepository } from '../database/repositories/categoryRepository';
 import { memberRepository } from '../database/repositories/memberRepository';
@@ -220,6 +220,90 @@ export async function getCategoryShares(
       totalPaise: r.total,
       count: r.count,
       share: total > 0 ? r.total / total : 0,
+    };
+  });
+}
+
+export async function getCategorySharesByAccount(
+  start: number,
+  end: number,
+  accountId: string,
+  kind: 'EXPENSE' | 'INCOME' = 'EXPENSE'
+): Promise<CategoryShare[]> {
+  const db = await openDatabase();
+  const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
+  const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
+
+  const accountClause =
+    accountId === 'account-cash' ? '(accountId = ? OR accountId IS NULL)' : 'accountId = ?';
+
+  const rows = await db.getAllAsync<{ categoryId: string | null; total: number; count: number }>(
+    `SELECT categoryId, SUM(${amount}) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${where} AND ${accountClause} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+     GROUP BY categoryId HAVING total > 0 ORDER BY total DESC`,
+    [accountId, start, end]
+  );
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  const lookup = await loadLookup();
+  return rows.map((r) => {
+    const cat = r.categoryId ? lookup.categories.get(r.categoryId) : undefined;
+    return {
+      categoryId: r.categoryId,
+      name: cat?.name ?? 'Uncategorized',
+      icon: cat?.icon ?? null,
+      color: cat?.color ?? '#9CA3AF',
+      totalPaise: r.total,
+      count: r.count,
+      share: total > 0 ? r.total / total : 0,
+    };
+  });
+}
+
+export interface AccountSpendingTotal {
+  accountId: string;
+  name: string;
+  bankName: string | null;
+  mask: string | null;
+  type: AccountType;
+  color: string;
+  icon: string | null;
+  totalPaise: number;
+  count: number;
+  share: number;
+}
+
+export async function getAccountTotals(
+  start: number,
+  end: number,
+  kind: 'EXPENSE' | 'INCOME' = 'EXPENSE'
+): Promise<AccountSpendingTotal[]> {
+  const db = await openDatabase();
+  const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
+  const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
+
+  const rows = await db.getAllAsync<{ accId: string; total: number; count: number }>(
+    `SELECT COALESCE(accountId, 'account-cash') AS accId, SUM(${amount}) AS total, COUNT(*) AS count
+     FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+     GROUP BY accId HAVING total > 0 ORDER BY total DESC`,
+    [start, end]
+  );
+
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+  const lookup = await loadLookup();
+
+  return rows.map((r) => {
+    const acc = lookup.accounts.get(r.accId);
+    return {
+      accountId: r.accId,
+      name: acc?.name ?? (r.accId === 'account-cash' ? 'Cash' : 'Unknown Account'),
+      bankName: acc?.bankName ?? null,
+      mask: acc?.mask ?? null,
+      type: acc?.type ?? 'CASH',
+      color: acc?.color ?? '#34C759',
+      icon: acc?.icon ?? 'banknote',
+      totalPaise: r.total,
+      count: r.count,
+      share: grandTotal > 0 ? r.total / grandTotal : 0,
     };
   });
 }

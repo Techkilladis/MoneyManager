@@ -1,6 +1,8 @@
 import { addTx, d, freshDatabase } from '../../../test/db';
 import {
+  getAccountTotals,
   getCategoryShares,
+  getCategorySharesByAccount,
   getDailyTotals,
   getHistoryPage,
   getHistoryTotals,
@@ -169,5 +171,43 @@ describe('series and breakdowns', () => {
 
     const allItems = await getHistoryPage({});
     expect(allItems.length).toBe(3);
+  });
+
+  it('computes account spending totals with percentage shares', async () => {
+    const start = d(2026, 10, 1, 0).getTime();
+    const end = d(2026, 11, 1, 0).getTime();
+
+    await addTx({ amountPaise: 8000, at: d(2026, 10, 5), accountId: 'account-cash' });
+    await addTx({ amountPaise: 2000, at: d(2026, 10, 6), accountId: 'account-cash' });
+
+    const totals = await getAccountTotals(start, end);
+    expect(totals.length).toBe(1);
+    expect(totals[0].name).toBe('Cash');
+    expect(totals[0].totalPaise).toBe(10000);
+    expect(totals[0].count).toBe(2);
+    expect(totals[0].share).toBe(1);
+  });
+
+  it('computes category shares scoped to a specific account', async () => {
+    const start = d(2026, 10, 1, 0).getTime();
+    const end = d(2026, 11, 1, 0).getTime();
+
+    // Spend on ICICI
+    await addTx({ amountPaise: 6000, at: d(2026, 10, 2), categoryId: 'cat-food', accountId: 'acc-icici' });
+    await addTx({ amountPaise: 4000, at: d(2026, 10, 3), categoryId: 'cat-travel', accountId: 'acc-icici' });
+
+    // Spend on Cash
+    await addTx({ amountPaise: 5000, at: d(2026, 10, 4), categoryId: 'cat-food', accountId: 'account-cash' });
+
+    const iciciShares = await getCategorySharesByAccount(start, end, 'acc-icici');
+    expect(iciciShares.map((s) => [s.name, s.totalPaise, s.share])).toEqual([
+      ['Food', 6000, 0.6],
+      ['Travel', 4000, 0.4],
+    ]);
+
+    const cashShares = await getCategorySharesByAccount(start, end, 'account-cash');
+    expect(cashShares.map((s) => [s.name, s.totalPaise, s.share])).toEqual([
+      ['Food', 5000, 1.0],
+    ]);
   });
 });
