@@ -4,7 +4,6 @@ import { radius, space, swatches } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Account, AccountType } from '@/database/schema';
 import { accountBackfillService, accountService, transactionService } from '@/services';
-import { dataEvents } from '@/services/events';
 import { useScreenData } from '@/hooks/useScreenData';
 import { haptic } from '@/utils/haptics';
 import {
@@ -13,8 +12,6 @@ import {
   Card,
   Chip,
   Divider,
-  Icon,
-  IconName,
   IconTile,
   ListRow,
   LoadingView,
@@ -25,6 +22,7 @@ import {
   TextField,
   useToast,
 } from '@/components/ui';
+import { accountIcon, formatAccountType } from '@/domain/account';
 
 interface Draft {
   id: string | null;
@@ -41,8 +39,6 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: 'CREDIT_CARD', label: 'Credit Card' },
   { value: 'CASH', label: 'Cash' },
 ];
-
-import { accountIcon, formatAccountType } from '@/domain/account';
 
 export default function AccountsScreen() {
   const { colors } = useTheme();
@@ -130,7 +126,7 @@ export default function AccountsScreen() {
       haptic.success();
       setDraft(null);
       reload();
-    } catch (err) {
+    } catch {
       setError('Could not save account');
     } finally {
       setSaving(false);

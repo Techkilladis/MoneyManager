@@ -133,9 +133,14 @@ export default function InsightsScreen() {
 
   const range = useMemo(() => rangeFor(mode, offset), [mode, offset]);
 
+  const [prevPeriodKey, setPrevPeriodKey] = useState(`${mode}:${offset}`);
+  if (prevPeriodKey !== `${mode}:${offset}`) {
+    setPrevPeriodKey(`${mode}:${offset}`);
+    setCarouselIndex(0);
+  }
+
   useEffect(() => {
     carouselRef.current?.scrollTo({ x: 0, animated: false });
-    setCarouselIndex(0);
   }, [mode, offset]);
 
   const fetcher = useCallback(async () => {

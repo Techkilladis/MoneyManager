@@ -6,6 +6,21 @@ on:
       - main
     types:
       - closed
+  workflow_dispatch:
+    inputs:
+      force_build_type:
+        description: 'Build type to run (detect, native, ota)'
+        required: false
+        default: 'detect'
+        type: choice
+        options:
+          - detect
+          - native
+          - ota
+      pr_number:
+        description: 'PR number to comment on (optional)'
+        required: false
+        type: string
 
 permissions:
   contents: write       # For creating GitHub Releases
@@ -14,7 +29,7 @@ permissions:
 jobs:
   # STEP 1: Detect what changed in the merged PR
   detect-changes:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       has-native-changes: ${{ steps.changed.outputs.native_any }}
@@ -27,6 +42,7 @@ jobs:
       pr-body: ${{ steps.pr-info.outputs.body }}
       pr-user: ${{ steps.pr-info.outputs.user }}
       merge-commit: ${{ steps.commit.outputs.sha }}
+      pr-number: ${{ steps.pr-info.outputs.pr_number }}
     steps:
       - name: Checkout merged main
         uses: actions/checkout@v4
@@ -49,6 +65,18 @@ jobs:
       - name: Check for native module changes
         id: changed
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.force_build_type }}" = "native" ]; then
+              echo "native_any=true" >> $GITHUB_OUTPUT
+              echo "Manual native build requested."
+              exit 0
+            elif [ "${{ inputs.force_build_type }}" = "ota" ]; then
+              echo "native_any=false" >> $GITHUB_OUTPUT
+              echo "Manual OTA update requested."
+              exit 0
+            fi
+          fi
+
           BASE_COMMIT="HEAD^1"
           NATIVE_FILES=$(git diff --name-only "$BASE_COMMIT" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ package.json 2>/dev/null || true)
           if [ -n "$NATIVE_FILES" ]; then
@@ -64,7 +92,32 @@ jobs:
       - name: Process versioning
         id: version
         run: |
-          if [ "${{ steps.changed.outputs.native_any }}" = "true" ]; then
+          LATEST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [[ "$LATEST_COMMIT_MSG" =~ ^chore\(release\):\ bump\ version ]]; then
+            echo "Current commit is already bumped or running via manual dispatch. Extracting current version..."
+            node scripts/bump-version.js --current
+            VERSION=$(node -p "require('./package.json').version")
+            TAG="v$VERSION"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              git tag -a "$TAG" -m "chore(release): $TAG [skip ci]"
+            fi
+            # Push tag if missing on remote with retry
+            if ! git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+              MAX_RETRIES=3
+              RETRY=0
+              until git push origin "$TAG"; do
+                RETRY=$((RETRY + 1))
+                if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
+                  echo "Failed to push tag $TAG after $MAX_RETRIES attempts."
+                  exit 1
+                fi
+                echo "Tag push failed (attempt $RETRY/$MAX_RETRIES). Retrying in 5 seconds..."
+                sleep 5
+              done
+            fi
+          elif [ "${{ steps.changed.outputs.native_any }}" = "true" ]; then
             echo "Native changes detected. Bumping version manifests..."
             node scripts/bump-version.js
             VERSION=$(node -p "require('./package.json').version")
@@ -76,9 +129,20 @@ jobs:
               git add package-lock.json
             fi
             git commit -m "chore(release): bump version to $VERSION [skip ci]"
-            git tag "$TAG"
-            git push origin HEAD:main
-            git push origin "$TAG"
+            git tag -a "$TAG" -m "chore(release): $TAG [skip ci]"
+
+            # Atomic push of branch and tag with retry
+            MAX_RETRIES=3
+            RETRY=0
+            until git push --atomic origin HEAD:main "$TAG"; do
+              RETRY=$((RETRY + 1))
+              if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
+                echo "Failed to atomic push HEAD:main and $TAG after $MAX_RETRIES attempts."
+                exit 1
+              fi
+              echo "Atomic push failed (attempt $RETRY/$MAX_RETRIES). Retrying in 5 seconds..."
+              sleep 5
+            done
           else
             echo "No native changes detected. Extracting current version..."
             node scripts/bump-version.js --current
@@ -88,8 +152,14 @@ jobs:
       - name: PR info
         id: pr-info
         run: |
+          PR_NUM="${{ inputs.pr_number }}"
+          if [ -z "$PR_NUM" ] && [ -n "$GITHUB_EVENT_PATH" ]; then
+            PR_NUM=$(jq -r '.pull_request.number // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "")
+          fi
+          echo "pr_number=$PR_NUM" >> $GITHUB_OUTPUT
+
           # Use jq to safely read from GITHUB_EVENT_PATH (avoids shell injection from backticks in PR body)
-          TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "${{ github.event.pull_request.title }}")
+          TITLE=$(jq -r '.pull_request.title // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "${{ github.event.pull_request.title }}")
           BODY=$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "")
           # Sanitize title: keep only alphanumeric, spaces, dashes, dots
           echo "title=${TITLE//[^a-zA-Z0-9 \-\.]/}" >> $GITHUB_OUTPUT
@@ -206,11 +276,13 @@ jobs:
 
       # Post OTA success comment on merged PR
       - name: Post OTA update comment
+        if: needs.detect-changes.outputs.pr-number != ''
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = context.payload.pull_request.number;
+            const prNumber = parseInt('${{ needs.detect-changes.outputs.pr-number }}', 10);
+            if (!prNumber) return;
             const groupId = '${{ steps.ota.outputs.group_id }}';
             const version = '${{ needs.detect-changes.outputs.version }}';
             const user = '${{ needs.detect-changes.outputs.pr-user }}';
@@ -324,7 +396,7 @@ jobs:
 
             > **Triggered by**: @${{ needs.detect-changes.outputs.pr-user }}
             > **Merge commit**: ${{ needs.detect-changes.outputs.merge-commit }}
-            > **PR**: #${{ github.event.pull_request.number }}
+            > **PR**: #${{ needs.detect-changes.outputs.pr-number || 'N/A' }}
             > **Version Code**: ${{ needs.detect-changes.outputs.version-code }}
 
             This release contains a full native Android build with updated native modules.
@@ -343,11 +415,13 @@ jobs:
 
       # Post native build comment with direct APK download link on merged PR
       - name: Post native build comment
+        if: needs.detect-changes.outputs.pr-number != ''
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = context.payload.pull_request.number;
+            const prNumber = parseInt('${{ needs.detect-changes.outputs.pr-number }}', 10);
+            if (!prNumber) return;
             const user = '${{ needs.detect-changes.outputs.pr-user }}';
             const version = '${{ needs.detect-changes.outputs.version }}';
             const tag = '${{ needs.detect-changes.outputs.tag }}';

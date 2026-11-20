@@ -1,4 +1,4 @@
-import { Account, AccountType } from '@/database/schema';
+import { AccountType } from '@/database/schema';
 import { IconName } from '@/components/ui';
 
 export function accountIcon(type: AccountType): IconName {

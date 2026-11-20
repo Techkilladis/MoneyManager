@@ -344,7 +344,7 @@ function ReviewCard({
       setAccountId(created.id);
       setDiscoveryVisible(false);
       toast.show(`${created.name} added`);
-    } catch (err) {
+    } catch {
       toast.show('Could not save account', 'error');
     } finally {
       if (mountedRef.current) setSavingAccount(false);
