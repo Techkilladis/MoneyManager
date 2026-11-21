@@ -363,7 +363,9 @@ jobs:
         run: |
           set -o pipefail
           cd android
-          ./gradlew assembleRelease --no-daemon
+          echo "=== android/app/build.gradle around line 113 ==="
+          sed -n '95,135p' app/build.gradle
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Stage & Verify Compiled APK
         id: stage-apk
