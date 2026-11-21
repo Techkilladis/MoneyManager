@@ -47,6 +47,7 @@ modules/*/android/.cxx/
 
 # Superdesign scratch HTML
 .superdesign/tmp/
+.scratch/
 
 # IDE + tool scratch (not project source)
 .idea/
