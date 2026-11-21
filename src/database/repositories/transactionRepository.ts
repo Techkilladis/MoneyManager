@@ -24,6 +24,12 @@ export interface CreateTransactionInput {
   accountId?: string | null;       // v7: Linked account ID
 }
 
+export interface IdempotencyResult {
+  transaction: Transaction;
+  isNew: boolean;
+  relinked: boolean;
+}
+
 export interface UpdateTransactionInput {
   amountPaise?: number;
   merchant?: string;
@@ -460,21 +466,54 @@ export const transactionRepository = {
     });
   },
   
-  // NEW: Create transaction with idempotency check
-  async createWithIdempotency(input: CreateTransactionInput): Promise<{ transaction: Transaction; isNew: boolean }> {
+  // Create transaction with idempotency and in-place account re-link check
+  async createWithIdempotency(input: CreateTransactionInput): Promise<IdempotencyResult> {
+    const handleExisting = async (existing: Transaction): Promise<IdempotencyResult> => {
+      const isCashOrUnassigned =
+        existing.accountId === 'account-cash' ||
+        existing.accountId === null ||
+        existing.accountId === '';
+
+      const hasIncomingAccountInfo =
+        Boolean(input.accountId && input.accountId !== 'account-cash') ||
+        Boolean(input.parserMetadata);
+
+      if (isCashOrUnassigned && hasIncomingAccountInfo) {
+        const targetAccountId =
+          input.accountId && input.accountId !== 'account-cash' ? input.accountId : null;
+        const targetParserMetadata = input.parserMetadata ?? null;
+        const timestamp = now();
+        const database = await openDatabase();
+
+        await database.runAsync(
+          `UPDATE transactions 
+           SET accountId = COALESCE(?, accountId),
+               parserMetadata = COALESCE(?, parserMetadata),
+               updatedAt = ?
+           WHERE id = ?`,
+          [targetAccountId, targetParserMetadata, timestamp, existing.id]
+        );
+
+        const updated = await this.getById(existing.id);
+        return { transaction: updated!, isNew: false, relinked: true };
+      }
+
+      return { transaction: existing, isNew: false, relinked: false };
+    };
+
     // If sourceEventId provided, check for existing
     if (input.sourceEventId) {
       const existing = await this.getBySourceEventId(input.sourceEventId);
       if (existing) {
-        return { transaction: existing, isNew: false };
+        return handleExisting(existing);
       }
     }
-    
+
     // Also check notificationId for legacy deduplication
     if (input.notificationId) {
       const existing = await this.getByNotificationId(input.notificationId);
       if (existing) {
-        return { transaction: existing, isNew: false };
+        return handleExisting(existing);
       }
     }
 
@@ -493,11 +532,11 @@ export const transactionRepository = {
         [input.amountPaise, input.kind ?? 'EXPENSE', input.merchant, input.transactionTimestamp]
       );
       if (duplicate) {
-        return { transaction: mapTransactionRow(duplicate), isNew: false };
+        return handleExisting(mapTransactionRow(duplicate));
       }
     }
-    
+
     const transaction = await this.create(input);
-    return { transaction, isNew: true };
+    return { transaction, isNew: true, relinked: false };
   },
 };
