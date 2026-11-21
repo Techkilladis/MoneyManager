@@ -28,6 +28,7 @@ import { useScreenData } from '@/hooks/useScreenData';
 import { formatFullDate, formatINR, pluralize, timeAgo } from '@/utils/format';
 import { haptic } from '@/utils/haptics';
 import { CaptureStatusCard } from '@/components/CaptureStatusCard';
+import { RerunScanSheet } from '@/components/RerunScanSheet';
 import {
   Button,
   Card,
@@ -104,6 +105,7 @@ export default function SettingsScreen() {
   const [capture, setCapture] = useState<CaptureStatus | null>(null);
   const [busy, setBusy] = useState<'backup' | 'restore' | 'csv' | null>(null);
   const [pendingRestore, setPendingRestore] = useState<BackupFile | null>(null);
+  const [rerunScanVisible, setRerunScanVisible] = useState(false);
 
   // The SMS permission can change in system settings; re-read
   // whenever the app comes back to the foreground.
@@ -454,6 +456,14 @@ Reference: ${result.transactionReference ?? '—'}`
                   }}
                 />
               </View>
+              <Divider />
+              <ListRow
+                title="Rerun scan"
+                subtitle="Scan SMS inbox for missed payments or unlinked accounts"
+                left={<IconTile icon="refresh" />}
+                chevron
+                onPress={() => setRerunScanVisible(true)}
+              />
             </Card>
           </>
         ) : null}
@@ -566,6 +576,14 @@ Reference: ${result.transactionReference ?? '—'}`
           </>
         ) : null}
       </Sheet>
+
+      <RerunScanSheet
+        visible={rerunScanVisible}
+        onClose={() => setRerunScanVisible(false)}
+        onComplete={() => {
+          void reload();
+        }}
+      />
     </View>
   );
 }

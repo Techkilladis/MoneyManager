@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, View } from 'react-native';
 import { radius, space, swatches } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Account, AccountType } from '@/database/schema';
 import { accountBackfillService, accountService, transactionService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
 import { haptic } from '@/utils/haptics';
+import { RerunScanSheet } from '@/components/RerunScanSheet';
 import {
   BottomBar,
   Button,
@@ -40,20 +41,23 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: 'CASH', label: 'Cash' },
 ];
 
+async function fetchAccounts() {
+  const [accs, backfillRes] = await Promise.all([
+    accountService.getAll(),
+    accountBackfillService.runAutoBackfill(),
+  ]);
+  return { accounts: accs, unconfigured: backfillRes.unconfigured };
+}
+
 export default function AccountsScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const toast = useToast();
-  const { data, reload } = useScreenData(async () => {
-    const [accs, backfillRes] = await Promise.all([
-      accountService.getAll(),
-      accountBackfillService.runAutoBackfill(),
-    ]);
-    return { accounts: accs, unconfigured: backfillRes.unconfigured };
-  });
+  const { data, reload } = useScreenData(fetchAccounts);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [rerunScanVisible, setRerunScanVisible] = useState(false);
 
   if (!data) return <LoadingView />;
   const accounts = data.accounts;
@@ -166,6 +170,16 @@ export default function AccountsScreen() {
         <Text variant="caption" style={styles.intro}>
           Accounts represent your bank accounts, credit cards, and cash funding sources.
         </Text>
+
+        {Platform.OS === 'android' && (
+          <Button
+            title="Rerun scan"
+            variant="ghost"
+            icon="refresh"
+            onPress={() => setRerunScanVisible(true)}
+            style={{ marginBottom: space.sm }}
+          />
+        )}
 
         {data.unconfigured.length > 0 && (
           <View style={{ marginBottom: space.lg }}>
@@ -327,6 +341,14 @@ export default function AccountsScreen() {
           </View>
         )}
       </Sheet>
+
+      <RerunScanSheet
+        visible={rerunScanVisible}
+        onClose={() => setRerunScanVisible(false)}
+        onComplete={() => {
+          reload();
+        }}
+      />
     </View>
   );
 }
