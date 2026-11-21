@@ -32,8 +32,12 @@ describe('validate-keystore-secrets', () => {
   });
 
   afterAll(() => {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    } catch {
+      // Ignore transient file lock on Windows teardown
     }
   });
 
