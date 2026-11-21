@@ -78,7 +78,7 @@ jobs:
           fi
 
           BASE_COMMIT="HEAD^1"
-          NATIVE_FILES=$(git diff --name-only "$BASE_COMMIT" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ package.json 2>/dev/null || true)
+          NATIVE_FILES=$(git diff --name-only "$BASE_COMMIT" HEAD -- modules/ android/ ios/ app.json eas.json plugins/ package.json scripts/ .github/ 2>/dev/null || true)
           if [ -n "$NATIVE_FILES" ]; then
             echo "native_any=true" >> $GITHUB_OUTPUT
             echo "Native changes detected:"
