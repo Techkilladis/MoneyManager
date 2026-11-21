@@ -251,11 +251,77 @@ function writeGitHubOutputs(outputs) {
 }
 
 /**
+ * Stages a locally compiled APK file by verifying it, copying it to destination,
+ * validating byte parity, generating direct download URL, and writing GitHub outputs.
+ *
+ * @param {string} localPath
+ * @param {string} outputPath
+ * @param {{
+ *   owner?: string,
+ *   repo?: string,
+ *   tag?: string
+ * }} [options]
+ * @returns {{
+ *   path: string,
+ *   size: number,
+ *   filename: string,
+ *   directDownloadUrl: string,
+ *   valid: boolean
+ * }}
+ */
+function stageLocalApk(localPath, outputPath, options = {}) {
+  const sourceVerified = verifyApkFile(localPath);
+
+  const resolvedDest = path.resolve(outputPath);
+  const destDir = path.dirname(resolvedDest);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
+
+  if (sourceVerified.path !== resolvedDest) {
+    fs.copyFileSync(sourceVerified.path, resolvedDest);
+  }
+
+  const destVerified = verifyApkFile(resolvedDest);
+  if (destVerified.size !== sourceVerified.size) {
+    throw new Error(
+      `Byte parity mismatch: source size (${sourceVerified.size}) does not match destination size (${destVerified.size})`
+    );
+  }
+
+  const owner =
+    options.owner ||
+    (process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[0] : 'Techkilladis');
+  const repo =
+    options.repo ||
+    (process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[1] : 'MoneyManager');
+  const tag = options.tag !== undefined ? options.tag : (process.env.RELEASE_TAG || '');
+  const apkFilename = path.basename(resolvedDest);
+  const directDownloadUrl = getDirectDownloadUrl(owner, repo, tag, apkFilename);
+
+  writeGitHubOutputs({
+    apk_path: resolvedDest,
+    apk_filename: apkFilename,
+    apk_size: destVerified.size,
+    direct_download_url: directDownloadUrl,
+  });
+
+  return {
+    path: resolvedDest,
+    size: destVerified.size,
+    filename: apkFilename,
+    directDownloadUrl,
+    valid: true,
+  };
+}
+
+/**
  * CLI Entrypoint
  */
 async function main() {
   const args = process.argv.slice(2);
   let inputFile = null;
+  let localApk = null;
   let outputFile = null;
   let verifyOnly = null;
   let tag = process.env.RELEASE_TAG || '';
@@ -273,6 +339,8 @@ async function main() {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--input' && args[i + 1]) {
       inputFile = args[++i];
+    } else if (args[i] === '--local-apk' && args[i + 1]) {
+      localApk = args[++i];
     } else if (args[i] === '--output' && args[i + 1]) {
       outputFile = args[++i];
     } else if (args[i] === '--verify' && args[i + 1]) {
@@ -293,8 +361,27 @@ async function main() {
     return;
   }
 
+  // Determine if --local-apk was provided or if --input points to a .apk file
+  const isInputApk = inputFile && inputFile.toLowerCase().endsWith('.apk');
+  const localSource = localApk || (isInputApk ? inputFile : null);
+
+  if (localSource) {
+    const defaultFileName = tag ? `MoneyManager-${tag}.apk` : 'MoneyManager.apk';
+    const targetOutput = outputFile || path.join(process.cwd(), defaultFileName);
+
+    console.log(`Staging local APK: ${localSource} -> ${targetOutput}...`);
+    const staged = stageLocalApk(localSource, targetOutput, { owner, repo, tag });
+    console.log(`APK successfully verified and staged:`);
+    console.log(`  Path: ${staged.path}`);
+    console.log(`  Size: ${staged.size} bytes`);
+    console.log(`  Direct download URL: ${staged.directDownloadUrl}`);
+    return;
+  }
+
   if (!inputFile) {
-    console.error('Usage: node scripts/download-build-artifact.js --input <build-output.json> [--output <path.apk>] [--tag <vX.Y.Z>]');
+    console.error(
+      'Usage: node scripts/download-build-artifact.js [--local-apk <src.apk> | --input <build-output.json>] [--output <path.apk>] [--tag <vX.Y.Z>]'
+    );
     process.exit(1);
   }
 
@@ -339,4 +426,5 @@ module.exports = {
   formatReleaseComment,
   downloadArtifact,
   writeGitHubOutputs,
+  stageLocalApk,
 };

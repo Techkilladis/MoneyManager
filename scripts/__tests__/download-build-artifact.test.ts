@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 
 // Seam under test: scripts/download-build-artifact.js
 // We require the commonjs module under test
@@ -10,6 +11,7 @@ const {
   getDirectDownloadUrl,
   formatReleaseComment,
   downloadArtifact,
+  stageLocalApk,
 } = require('../download-build-artifact');
 
 describe('download-build-artifact', () => {
@@ -308,6 +310,225 @@ describe('download-build-artifact', () => {
 
     it('posts comment on merged PR containing release details and direct download link', () => {
       expect(workflowContent).toMatch(/releases\/download\//);
+    });
+  });
+
+  describe('stageLocalApk', () => {
+    const stageSrcDir = path.join(tmpDir, 'stage-src');
+    const stageDestDir = path.join(tmpDir, 'stage-dest');
+
+    beforeEach(() => {
+      if (!fs.existsSync(stageSrcDir)) {
+        fs.mkdirSync(stageSrcDir, { recursive: true });
+      }
+      if (!fs.existsSync(stageDestDir)) {
+        fs.mkdirSync(stageDestDir, { recursive: true });
+      }
+    });
+
+    afterEach(() => {
+      delete process.env.GITHUB_OUTPUT;
+    });
+
+    it('stages an existing non-empty .apk file, copies it to destination, and validates byte parity', () => {
+      const srcApk = path.join(stageSrcDir, 'app-release.apk');
+      const destApk = path.join(stageDestDir, 'MoneyManager-v1.0.0.apk');
+      const fakeApkContent = Buffer.from('FAKE-APK-RELEASE-BINARY-STREAM-12345');
+      fs.writeFileSync(srcApk, fakeApkContent);
+
+      const result = stageLocalApk(srcApk, destApk, {
+        owner: 'Techkilladis',
+        repo: 'MoneyManager',
+        tag: 'v1.0.0',
+      });
+
+      expect(fs.existsSync(destApk)).toBe(true);
+      expect(fs.readFileSync(destApk)).toEqual(fakeApkContent);
+      expect(result).toEqual({
+        path: path.resolve(destApk),
+        size: fakeApkContent.length,
+        filename: 'MoneyManager-v1.0.0.apk',
+        directDownloadUrl:
+          'https://github.com/Techkilladis/MoneyManager/releases/download/v1.0.0/MoneyManager-v1.0.0.apk',
+        valid: true,
+      });
+    });
+
+    it('generates direct_download_url matching GitHub release asset format', () => {
+      const srcApk = path.join(stageSrcDir, 'source.apk');
+      const destApk = path.join(stageDestDir, 'target.apk');
+      fs.writeFileSync(srcApk, Buffer.from('TEST-APK-DATA'));
+
+      const result = stageLocalApk(srcApk, destApk, {
+        owner: 'CustomOwner',
+        repo: 'CustomRepo',
+        tag: 'v2.5.0',
+      });
+
+      expect(result.directDownloadUrl).toBe(
+        'https://github.com/CustomOwner/CustomRepo/releases/download/v2.5.0/target.apk'
+      );
+    });
+
+    it('writes apk_path, apk_filename, apk_size, and direct_download_url to GITHUB_OUTPUT if defined', () => {
+      const srcApk = path.join(stageSrcDir, 'output-test.apk');
+      const destApk = path.join(stageDestDir, 'output-dest.apk');
+      const outputFile = path.join(tmpDir, 'stage_gh_output.txt');
+      fs.writeFileSync(srcApk, Buffer.from('APK-PAYLOAD'));
+      fs.writeFileSync(outputFile, '');
+
+      process.env.GITHUB_OUTPUT = outputFile;
+
+      stageLocalApk(srcApk, destApk, {
+        owner: 'Techkilladis',
+        repo: 'MoneyManager',
+        tag: 'v1.2.3',
+      });
+
+      const outputContent = fs.readFileSync(outputFile, 'utf8');
+      expect(outputContent).toContain(`apk_path=${path.resolve(destApk)}\n`);
+      expect(outputContent).toContain('apk_filename=output-dest.apk\n');
+      expect(outputContent).toContain(`apk_size=${Buffer.from('APK-PAYLOAD').length}\n`);
+      expect(outputContent).toContain(
+        'direct_download_url=https://github.com/Techkilladis/MoneyManager/releases/download/v1.2.3/output-dest.apk\n'
+      );
+    });
+
+    it('throws descriptive error if source file does not exist', () => {
+      const missingApk = path.join(stageSrcDir, 'missing.apk');
+      const destApk = path.join(stageDestDir, 'dest.apk');
+
+      expect(() => stageLocalApk(missingApk, destApk)).toThrow(
+        /APK file does not exist:/i
+      );
+    });
+
+    it('throws descriptive error if source file is 0 bytes', () => {
+      const emptyApk = path.join(stageSrcDir, 'empty.apk');
+      const destApk = path.join(stageDestDir, 'dest.apk');
+      fs.writeFileSync(emptyApk, Buffer.alloc(0));
+
+      expect(() => stageLocalApk(emptyApk, destApk)).toThrow(
+        /APK file is empty \(0 bytes\):/i
+      );
+    });
+
+    it('throws descriptive error if source file lacks .apk extension', () => {
+      const invalidExt = path.join(stageSrcDir, 'not-an-apk.txt');
+      const destApk = path.join(stageDestDir, 'dest.apk');
+      fs.writeFileSync(invalidExt, Buffer.from('Hello'));
+
+      expect(() => stageLocalApk(invalidExt, destApk)).toThrow(
+        /must end with \.apk extension/i
+      );
+    });
+
+    it('creates destination directory if it does not already exist', () => {
+      const srcApk = path.join(stageSrcDir, 'nested-test.apk');
+      const nestedDestApk = path.join(stageDestDir, 'sub', 'nested', 'MoneyManager-v1.0.0.apk');
+      fs.writeFileSync(srcApk, Buffer.from('NESTED-APK-CONTENT'));
+
+      const result = stageLocalApk(srcApk, nestedDestApk, { tag: 'v1.0.0' });
+
+      expect(fs.existsSync(nestedDestApk)).toBe(true);
+      expect(result.valid).toBe(true);
+    });
+
+    it('throws error on byte parity mismatch if destination size differs from source', () => {
+      const srcApk = path.join(stageSrcDir, 'parity-src.apk');
+      const destApk = path.join(stageDestDir, 'parity-dest.apk');
+      fs.writeFileSync(srcApk, Buffer.from('ORIGINAL-FULL-DATA'));
+
+      const copySpy = jest.spyOn(fs, 'copyFileSync').mockImplementation((_src, dest) => {
+        fs.writeFileSync(dest as string, Buffer.from('SHORT'));
+      });
+
+      try {
+        expect(() => stageLocalApk(srcApk, destApk)).toThrow(/Byte parity mismatch/i);
+      } finally {
+        copySpy.mockRestore();
+      }
+    });
+  });
+
+  describe('CLI execution with local APK staging', () => {
+    const scriptPath = path.resolve(__dirname, '../download-build-artifact.js');
+    const cliSrcDir = path.join(tmpDir, 'cli-src');
+    const cliDestDir = path.join(tmpDir, 'cli-dest');
+
+    beforeEach(() => {
+      if (!fs.existsSync(cliSrcDir)) {
+        fs.mkdirSync(cliSrcDir, { recursive: true });
+      }
+      if (!fs.existsSync(cliDestDir)) {
+        fs.mkdirSync(cliDestDir, { recursive: true });
+      }
+    });
+
+    it('stages the file and exits 0 when called with --local-apk, --output, and --tag', () => {
+      const srcApk = path.join(cliSrcDir, 'cli-release.apk');
+      const destApk = path.join(cliDestDir, 'MoneyManager-v2.0.0.apk');
+      const outputFile = path.join(tmpDir, 'cli_output_1.txt');
+      fs.writeFileSync(srcApk, Buffer.from('CLI-APK-DATA-1'));
+      fs.writeFileSync(outputFile, '');
+
+      const stdout = execSync(
+        `node "${scriptPath}" --local-apk "${srcApk}" --output "${destApk}" --tag v2.0.0`,
+        {
+          env: { ...process.env, GITHUB_OUTPUT: outputFile, GITHUB_REPOSITORY: 'Techkilladis/MoneyManager' },
+          encoding: 'utf8',
+        }
+      );
+
+      expect(stdout).toMatch(/APK successfully (verified and )?staged/i);
+      expect(fs.existsSync(destApk)).toBe(true);
+      expect(fs.readFileSync(destApk, 'utf8')).toBe('CLI-APK-DATA-1');
+
+      const ghOutput = fs.readFileSync(outputFile, 'utf8');
+      expect(ghOutput).toContain(`apk_path=${destApk}`);
+      expect(ghOutput).toContain('apk_filename=MoneyManager-v2.0.0.apk');
+      expect(ghOutput).toContain(
+        'direct_download_url=https://github.com/Techkilladis/MoneyManager/releases/download/v2.0.0/MoneyManager-v2.0.0.apk'
+      );
+    });
+
+    it('routes --input <src.apk> to local staging when input ends with .apk and exists', () => {
+      const srcApk = path.join(cliSrcDir, 'routed-input.apk');
+      const destApk = path.join(cliDestDir, 'MoneyManager-v2.1.0.apk');
+      const outputFile = path.join(tmpDir, 'cli_output_2.txt');
+      fs.writeFileSync(srcApk, Buffer.from('CLI-APK-DATA-ROUTED'));
+      fs.writeFileSync(outputFile, '');
+
+      const stdout = execSync(
+        `node "${scriptPath}" --input "${srcApk}" --output "${destApk}" --tag v2.1.0`,
+        {
+          env: { ...process.env, GITHUB_OUTPUT: outputFile, GITHUB_REPOSITORY: 'Techkilladis/MoneyManager' },
+          encoding: 'utf8',
+        }
+      );
+
+      expect(stdout).toMatch(/APK successfully (verified and )?staged/i);
+      expect(fs.existsSync(destApk)).toBe(true);
+      expect(fs.readFileSync(destApk, 'utf8')).toBe('CLI-APK-DATA-ROUTED');
+
+      const ghOutput = fs.readFileSync(outputFile, 'utf8');
+      expect(ghOutput).toContain(`apk_path=${destApk}`);
+      expect(ghOutput).toContain('apk_filename=MoneyManager-v2.1.0.apk');
+    });
+
+    it('exits with code 1 and error message when --local-apk file does not exist', () => {
+      const missingApk = path.join(cliSrcDir, 'non-existent-file.apk');
+      const destApk = path.join(cliDestDir, 'MoneyManager-v3.0.0.apk');
+
+      expect(() => {
+        execSync(
+          `node "${scriptPath}" --local-apk "${missingApk}" --output "${destApk}" --tag v3.0.0`,
+          {
+            stdio: 'pipe',
+            encoding: 'utf8',
+          }
+        );
+      }).toThrow();
     });
   });
 });
