@@ -51,10 +51,10 @@ describe('plugins/withReleaseSigning', () => {
       expect(modified).toContain('System.getenv("ANDROID_KEY_ALIAS") ?: findProperty("ANDROID_KEY_ALIAS")');
       expect(modified).toContain('System.getenv("ANDROID_KEY_PASSWORD") ?: findProperty("ANDROID_KEY_PASSWORD")');
       expect(modified).toContain('if (ksPassword && ksAlias && ksKeyPassword && file(ksPath).exists())');
-      expect(modified).toContain('storeFile file(ksPath)');
-      expect(modified).toContain('storePassword ksPassword');
-      expect(modified).toContain('keyAlias ksAlias');
-      expect(modified).toContain('keyPassword ksKeyPassword');
+      expect(modified).toContain('storeFile = file(ksPath)');
+      expect(modified).toContain('storePassword = ksPassword');
+      expect(modified).toContain('keyAlias = ksAlias');
+      expect(modified).toContain('keyPassword = ksKeyPassword');
     });
 
     it('modifies buildTypes.release to conditionally use signingConfigs.release or fall back to debug', () => {
