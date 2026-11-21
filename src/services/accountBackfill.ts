@@ -36,6 +36,10 @@ export interface DiscoveredAccount {
   count: number;
 }
 
+export interface BackfillOptions {
+  force?: boolean; // When true, runs backfill even if hasRunAccountBackfill is true
+}
+
 export const accountBackfillService = {
   /** Check if the historical account backfill has already completed. */
   async isBackfillCompleted(): Promise<boolean> {
@@ -47,9 +51,9 @@ export const accountBackfillService = {
    * Auto-links transactions to matching existing accounts without modifying status or timestamps.
    * Collects unique unconfigured accounts that need user configuration.
    */
-  async runAutoBackfill(): Promise<{ linkedCount: number; unconfigured: DiscoveredAccount[] }> {
+  async runAutoBackfill(options?: BackfillOptions): Promise<{ linkedCount: number; unconfigured: DiscoveredAccount[] }> {
     const isDone = await this.isBackfillCompleted();
-    if (isDone) {
+    if (isDone && !options?.force) {
       return { linkedCount: 0, unconfigured: [] };
     }
 
@@ -61,7 +65,7 @@ export const accountBackfillService = {
       sourceApp: string | null;
     }>(
       `SELECT id, rawNotification, parserMetadata, sourceApp FROM transactions 
-       WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '')`
+       WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '' OR accountId = 'account-cash')`
     );
 
     const accounts = await accountRepository.getAll();
@@ -145,7 +149,7 @@ export const accountBackfillService = {
       sourceApp: string | null;
     }>(
       `SELECT id, rawNotification, parserMetadata, sourceApp FROM transactions 
-       WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '')`
+       WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '' OR accountId = 'account-cash')`
     );
 
     let updatedCount = 0;
@@ -181,8 +185,13 @@ export const accountBackfillService = {
       }
     }
 
+    // Synchronously update pending captures
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { transactionService } = require('./index');
+    await transactionService.assignAccountToPending(bankName, mask, accountId);
+
     // Re-check if any unconfigured remain
-    const remaining = await this.runAutoBackfill();
+    const remaining = await this.runAutoBackfill({ force: true });
     if (remaining.unconfigured.length === 0) {
       await setSetting('hasRunAccountBackfill', true);
     }
