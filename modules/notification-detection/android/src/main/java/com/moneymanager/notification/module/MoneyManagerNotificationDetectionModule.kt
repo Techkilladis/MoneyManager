@@ -49,10 +49,10 @@ class MoneyManagerNotificationDetectionModule : Module() {
         }
 
         // Reads recent bank SMS from the inbox and stores any UPI payments found.
-        AsyncFunction("scanSmsInbox") { firstScanDays: Int, promise: Promise ->
+        AsyncFunction("scanSmsInbox") { firstScanDays: Int, fullScan: Boolean?, promise: Promise ->
             val ctx = context
             if (ctx != null) {
-                promise.resolve(SmsInbox.scan(ctx, firstScanDays))
+                promise.resolve(SmsInbox.scan(ctx, firstScanDays, fullScan ?: false))
             } else {
                 promise.reject("ERR_CONTEXT", "Context not available", null)
             }

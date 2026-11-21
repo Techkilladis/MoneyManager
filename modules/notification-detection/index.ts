@@ -26,6 +26,11 @@ export interface SmsScanResult {
   captured: number;
 }
 
+export interface SmsScanOptions {
+  firstScanDays?: number; // Default 7
+  fullScan?: boolean; // When true, scans up to 90 days ignoring lastScanAt
+}
+
 // ============================================
 // Module Interface
 // ============================================
@@ -35,7 +40,7 @@ export interface MoneyManagerNotificationDetectionModuleType {
 
   // SMS access (READ_SMS + RECEIVE_SMS; the runtime prompt is requested from JS)
   isSmsAccessEnabled(): Promise<{ enabled: boolean }>;
-  scanSmsInbox(firstScanDays: number): Promise<SmsScanResult>;
+  scanSmsInbox(firstScanDays: number, fullScan?: boolean): Promise<SmsScanResult>;
 
   // Pending Events
   getPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
