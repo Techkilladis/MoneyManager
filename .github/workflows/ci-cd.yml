@@ -329,62 +329,65 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install EAS CLI
-        run: npm install -g eas-cli@latest
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      # Authenticate with EAS via EXPO_TOKEN environment variable
-      - name: EAS login
-        env:
-          EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::error::EAS_ACCESS_TOKEN secret is not set"
-            exit 1
-          fi
-          echo "EAS authenticated via EXPO_TOKEN environment variable"
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
 
-      # Execute EAS Android cloud build with wait and json flags on production profile
-      - name: Build Android APK
-        id: eas-build
-        env:
-          EXPO_TOKEN: ${{ secrets.EAS_ACCESS_TOKEN }}
+      - name: Expo Prebuild (Continuous Native Generation)
         run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::error::EAS_ACCESS_TOKEN secret is not set"
-            exit 1
-          fi
-          echo "Executing EAS Android cloud build (production profile)..."
           set -o pipefail
-          npx eas-cli@latest build --platform android --profile production --non-interactive --wait --json > eas-build-output.json
+          npx expo prebuild --platform android --clean
 
-      # Parse build artifact URL, download the .apk, and set step outputs
-      - name: Download build artifact APK
-        id: download-apk
+      - name: Validate Keystore Secrets
+        id: validate-keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          node scripts/validate-keystore-secrets.js
+
+      - name: Assemble Release APK via Gradle
+        id: assemble-apk
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.validate-keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Stage & Verify Compiled APK
+        id: stage-apk
         env:
           RELEASE_TAG: ${{ needs.detect-changes.outputs.tag }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node scripts/download-build-artifact.js \
-            --input eas-build-output.json \
+            --local-apk android/app/build/outputs/apk/release/app-release.apk \
             --tag "${{ needs.detect-changes.outputs.tag }}" \
             --output "${{ github.workspace }}/MoneyManager-${{ needs.detect-changes.outputs.tag }}.apk"
 
-      # Verify downloaded .apk exists and is non-empty before publication
-      - name: Verify APK artifact exists
-        id: verify-apk
+      - name: Clean up ephemeral keystore
+        if: always()
         run: |
-          node scripts/download-build-artifact.js \
-            --verify "${{ steps.download-apk.outputs.apk_path }}"
+          node scripts/validate-keystore-secrets.js --cleanup android/app/release.keystore || true
 
-      # Upload APK as runner artifact
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-android
-          path: ${{ steps.download-apk.outputs.apk_path }}
+          path: ${{ steps.stage-apk.outputs.apk_path }}
           retention-days: 30
 
-      # Create GitHub Release with direct APK attachment
       - name: Create GitHub Release
         id: create-release
         uses: softprops/action-gh-release@v2
@@ -409,11 +412,10 @@ jobs:
             ---
             _Automated by CI/CD pipeline_
           files: |
-            ${{ steps.download-apk.outputs.apk_path }}
+            ${{ steps.stage-apk.outputs.apk_path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
 
-      # Post native build comment with direct APK download link on merged PR
       - name: Post native build comment
         if: needs.detect-changes.outputs.pr-number != ''
         uses: actions/github-script@v7
@@ -427,9 +429,9 @@ jobs:
             const tag = '${{ needs.detect-changes.outputs.tag }}';
             const versionCode = '${{ needs.detect-changes.outputs.version-code }}';
             const commitSha = '${{ needs.detect-changes.outputs.merge-commit }}';
-            const apkFileName = '${{ steps.download-apk.outputs.apk_filename }}' || `MoneyManager-${tag}.apk`;
-            const fileSizeBytes = parseInt('${{ steps.download-apk.outputs.apk_size }}' || '0', 10);
-            let directDownloadUrl = '${{ steps.download-apk.outputs.direct_download_url }}' || `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${apkFileName}`;
+            const apkFileName = '${{ steps.stage-apk.outputs.apk_filename }}' || `MoneyManager-${tag}.apk`;
+            const fileSizeBytes = parseInt('${{ steps.stage-apk.outputs.apk_size }}' || '0', 10);
+            let directDownloadUrl = '${{ steps.stage-apk.outputs.direct_download_url }}' || `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${apkFileName}`;
             const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`;
 
             try {
