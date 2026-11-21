@@ -20,6 +20,10 @@ The CI step that automatically increments `android.versionCode` and semantic ver
 
 The automated GitHub Actions workflow triggered on pull request merge to build either an Over-the-Air update or a native APK. Related terms: `[Pull Request (PR)]`, `[Auto-Detect]`, `[OTA Update]`, `[Native Rebuild]`.
 
+### `Complete Scan`
+
+A deep inbox SMS scan mode that evaluates all available messages in the device inbox regardless of previous scan timestamps, safely deduplicating against existing records. Related terms: `[Rerun Scan]`, `[In-Place Account Re-link]`.
+
 ### `Direct APK Download`
 
 A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immediate file download in the browser. Related terms: `[APK]`, `[GitHub Release]`, `[Native Update Prompt]`.
@@ -27,6 +31,10 @@ A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immedi
 ### `GitHub Release`
 
 A tagged release on GitHub hosting the compiled APK file as a downloadable asset. Related terms: `[Direct APK Download]`, `[APK]`.
+
+### `In-Place Account Re-link`
+
+The process of updating an existing transaction's `accountId` in SQLite (upgrading `'account-cash'` or empty accounts with the detected bank account) based on parsed SMS metadata without creating duplicate records. Related terms: `[Account]`, `[Rerun Scan]`.
 
 ### `Main Branch`
 
@@ -51,6 +59,10 @@ A deliberate minimum display duration (3 seconds) enforced during the OTA downlo
 ### `Pull Request (PR)`
 
 A GitHub pull request whose merge into the main branch initiates the build and release workflow. Related terms: `[Main Branch]`, `[CI/CD Pipeline]`.
+
+### `Rerun Scan`
+
+An on-demand action in Settings and Accounts that re-evaluates the SMS inbox (either incrementally or via a complete scan) to ingest previously missed bank payments and update existing cash-assigned transactions in place with their detected bank accounts. Related terms: `[Complete Scan]`, `[In-Place Account Re-link]`, `[Account]`.
 
 ### `Two-Stage OTA Prompt`
 
