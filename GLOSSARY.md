@@ -28,6 +28,10 @@ A deep inbox SMS scan mode that evaluates all available messages in the device i
 
 A direct HTTPS link to the `.apk` asset in a GitHub Release that triggers immediate file download in the browser. Related terms: `[APK]`, `[GitHub Release]`, `[Native Update Prompt]`.
 
+### `GitHub Actions Android Build`
+
+Direct compilation of the Android APK binary on a GitHub Actions runner using Gradle and the Android SDK, eliminating cloud build queue limits. Related terms: `[Native Rebuild]`, `[Release Signing Plugin]`, `[Keystore Secret]`.
+
 ### `GitHub Release`
 
 A tagged release on GitHub hosting the compiled APK file as a downloadable asset. Related terms: `[Direct APK Download]`, `[APK]`.
@@ -36,13 +40,17 @@ A tagged release on GitHub hosting the compiled APK file as a downloadable asset
 
 The process of updating an existing transaction's `accountId` in SQLite (upgrading `'account-cash'` or empty accounts with the detected bank account) based on parsed SMS metadata without creating duplicate records. Related terms: `[Account]`, `[Rerun Scan]`.
 
+### `Keystore Secret`
+
+The base64-encoded Android release signing keystore and accompanying credentials stored securely in GitHub Repository Secrets. Related terms: `[Release Signing Plugin]`, `[GitHub Actions Android Build]`.
+
 ### `Main Branch`
 
 The production-ready trunk branch where merged code lives. Related terms: `[Pull Request (PR)]`, `[CI/CD Pipeline]`.
 
 ### `Native Rebuild`
 
-A complete Android APK compiled by EAS when native modules or configuration change. Related terms: `[APK]`, `[Automated Version Bumping]`, `[Update Precedence]`.
+A complete Android APK compiled directly on GitHub Actions runners when native modules or configuration change. Related terms: `[APK]`, `[Automated Version Bumping]`, `[GitHub Actions Android Build]`, `[Update Precedence]`.
 
 ### `Native Update Prompt`
 
@@ -63,6 +71,10 @@ A GitHub pull request whose merge into the main branch initiates the build and r
 ### `Rerun Scan`
 
 An on-demand action in Settings and Accounts that re-evaluates the SMS inbox (either incrementally or via a complete scan) to ingest previously missed bank payments and update existing cash-assigned transactions in place with their detected bank accounts. Related terms: `[Complete Scan]`, `[In-Place Account Re-link]`, `[Account]`.
+
+### `Release Signing Plugin`
+
+The Expo config plugin (`plugins/withReleaseSigning.js`) that injects release keystore signing configurations into the generated Android Gradle project during `expo prebuild`. Related terms: `[GitHub Actions Android Build]`, `[Keystore Secret]`.
 
 ### `Two-Stage OTA Prompt`
 
