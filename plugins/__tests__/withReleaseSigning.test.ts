@@ -50,11 +50,11 @@ describe('plugins/withReleaseSigning', () => {
       expect(modified).toContain('System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: findProperty("ANDROID_KEYSTORE_PASSWORD")');
       expect(modified).toContain('System.getenv("ANDROID_KEY_ALIAS") ?: findProperty("ANDROID_KEY_ALIAS")');
       expect(modified).toContain('System.getenv("ANDROID_KEY_PASSWORD") ?: findProperty("ANDROID_KEY_PASSWORD")');
-      expect(modified).toContain('if (keystorePassword && keyAlias && keyPassword && file(keystorePath).exists())');
-      expect(modified).toContain('storeFile file(keystorePath)');
-      expect(modified).toContain('storePassword keystorePassword');
-      expect(modified).toContain('keyAlias keyAlias');
-      expect(modified).toContain('keyPassword keyPassword');
+      expect(modified).toContain('if (ksPassword && ksAlias && ksKeyPassword && file(ksPath).exists())');
+      expect(modified).toContain('storeFile file(ksPath)');
+      expect(modified).toContain('storePassword ksPassword');
+      expect(modified).toContain('keyAlias ksAlias');
+      expect(modified).toContain('keyPassword ksKeyPassword');
     });
 
     it('modifies buildTypes.release to conditionally use signingConfigs.release or fall back to debug', () => {
@@ -75,7 +75,7 @@ describe('plugins/withReleaseSigning', () => {
       expect(secondPass).toBe(firstPass);
 
       // Verify release block only appears once in signingConfigs
-      const releaseBlockCount = (secondPass.match(/def keystorePath = System\.getenv/g) || []).length;
+      const releaseBlockCount = (secondPass.match(/def ksPath = System\.getenv/g) || []).length;
       expect(releaseBlockCount).toBe(1);
 
       // Verify conditional signing config only appears once in release build type
