@@ -47,7 +47,7 @@ jobs:
       - name: Checkout merged main
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -186,7 +186,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -317,7 +317,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -375,6 +375,19 @@ jobs:
             --local-apk android/app/build/outputs/apk/release/app-release.apk \
             --tag "${{ needs.detect-changes.outputs.tag }}" \
             --output "${{ github.workspace }}/MoneyManager-${{ needs.detect-changes.outputs.tag }}.apk"
+
+      - name: Verify APK Signature & Schemes
+        env:
+          APK_PATH: ${{ steps.stage-apk.outputs.apk_path }}
+        run: |
+          echo "Verifying APK signature schemes (v1/v2) and certificates..."
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose --print-certs "$APK_PATH"
+          else
+            echo "apksigner not found in build-tools, falling back to PATH apksigner"
+            apksigner verify --verbose --print-certs "$APK_PATH"
+          fi
 
       - name: Clean up ephemeral keystore
         if: always()
