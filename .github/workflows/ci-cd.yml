@@ -363,7 +363,7 @@ jobs:
         run: |
           set -o pipefail
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Stage & Verify Compiled APK
         id: stage-apk
