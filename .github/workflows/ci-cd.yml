@@ -376,18 +376,50 @@ jobs:
             --tag "${{ needs.detect-changes.outputs.tag }}" \
             --output "${{ github.workspace }}/MoneyManager-${{ needs.detect-changes.outputs.tag }}.apk"
 
+      - name: Sign APK with Android SDK apksigner (v1, v2, v3 Schemes)
+        env:
+          APK_PATH: ${{ steps.stage-apk.outputs.apk_path }}
+          ANDROID_KEYSTORE_PATH: ${{ steps.validate-keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          echo "Signing APK with Android SDK apksigner (enforcing dual v1 + v2 + v3 schemes)..."
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            APKSIGNER="apksigner"
+          fi
+          "$APKSIGNER" sign \
+            --ks "$ANDROID_KEYSTORE_PATH" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            "$APK_PATH"
+
       - name: Verify APK Signature & Schemes
         env:
           APK_PATH: ${{ steps.stage-apk.outputs.apk_path }}
         run: |
-          echo "Verifying APK signature schemes (v1/v2) and certificates..."
+          echo "Verifying APK signature schemes (v1/v2/v3) and certificates..."
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)
-          if [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --verbose --print-certs "$APK_PATH"
-          else
-            echo "apksigner not found in build-tools, falling back to PATH apksigner"
-            apksigner verify --verbose --print-certs "$APK_PATH"
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            APKSIGNER="apksigner"
           fi
+          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK_PATH")
+          echo "$VERIFY_OUTPUT"
+          if ! echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"; then
+            echo "::error::APK is missing Scheme v1 (JAR signing) signature!"
+            exit 1
+          fi
+          if ! echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"; then
+            echo "::error::APK is missing Scheme v2 signature!"
+            exit 1
+          fi
+          echo "APK successfully verified with both v1 and v2 schemes!"
 
       - name: Clean up ephemeral keystore
         if: always()
