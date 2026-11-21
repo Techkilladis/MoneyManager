@@ -55,6 +55,8 @@ describe('plugins/withReleaseSigning', () => {
       expect(modified).toContain('storePassword keystorePassword');
       expect(modified).toContain('keyAlias keyAlias');
       expect(modified).toContain('keyPassword keyPassword');
+      expect(modified).toContain('v1SigningEnabled true');
+      expect(modified).toContain('v2SigningEnabled true');
     });
 
     it('modifies buildTypes.release to conditionally use signingConfigs.release or fall back to debug', () => {

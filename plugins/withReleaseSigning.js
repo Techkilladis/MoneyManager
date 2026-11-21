@@ -110,6 +110,8 @@ function generateReleaseBlock(indent = '    ', eol = '\n') {
     `${indent}        storePassword keystorePassword`,
     `${indent}        keyAlias keyAlias`,
     `${indent}        keyPassword keyPassword`,
+    `${indent}        v1SigningEnabled true`,
+    `${indent}        v2SigningEnabled true`,
     `${indent}    }`,
     `${indent}}`,
   ].join(eol);
