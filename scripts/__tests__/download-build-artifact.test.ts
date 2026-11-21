@@ -281,6 +281,11 @@ describe('download-build-artifact', () => {
   describe('ci-cd.yml workflow verification for native-build', () => {
     const workflowPath = path.resolve(__dirname, '../../.github/workflows/ci-cd.yml');
     const workflowContent = fs.readFileSync(workflowPath, 'utf8');
+    const nativeBuildContent = workflowContent.slice(workflowContent.indexOf('native-build:'));
+    const otaUpdateContent = workflowContent.slice(
+      workflowContent.indexOf('ota-update:'),
+      workflowContent.indexOf('native-build:')
+    );
 
     it('has removed the non-functional /tmp daily build cap check', () => {
       expect(workflowContent).not.toContain('/tmp/eas-native-build-cap');
@@ -288,28 +293,69 @@ describe('download-build-artifact', () => {
       expect(workflowContent).not.toContain('Native Build Skipped (Daily Cap Reached)');
     });
 
-    it('executes EAS Android cloud build with --wait, --json, and production profile', () => {
-      expect(workflowContent).toMatch(/eas.*build.*--platform\s+android.*--profile\s+production/);
-      expect(workflowContent).toMatch(/--wait/);
-      expect(workflowContent).toMatch(/--json/);
+    it('does not contain eas build --platform android or eas login in native-build', () => {
+      expect(nativeBuildContent).not.toMatch(/eas.*build.*--platform\s+android/);
+      expect(nativeBuildContent).not.toMatch(/name:\s*EAS login/i);
+      expect(nativeBuildContent).not.toContain('eas login');
+      expect(nativeBuildContent).not.toContain('EAS_ACCESS_TOKEN');
     });
 
-    it('parses build artifact URL and downloads .apk into runner workspace', () => {
-      expect(workflowContent).toMatch(/download-build-artifact\.js/);
-      expect(workflowContent).toMatch(/apk/i);
+    it('configures JDK 17 with actions/setup-java@v4 and distribution temurin', () => {
+      expect(nativeBuildContent).toContain('actions/setup-java@v4');
+      expect(nativeBuildContent).toMatch(/distribution:\s*['"]?temurin['"]?/);
+      expect(nativeBuildContent).toMatch(/java-version:\s*['"]?17['"]?/);
     });
 
-    it('verifies downloaded .apk file exists before release publication', () => {
-      expect(workflowContent).toMatch(/verify/i);
+    it('caches Gradle using gradle/actions/setup-gradle@v4', () => {
+      expect(nativeBuildContent).toContain('gradle/actions/setup-gradle@v4');
     });
 
-    it('publishes GitHub Release tagged with v{version} and attaches .apk asset directly', () => {
-      expect(workflowContent).toMatch(/softprops\/action-gh-release@v2/);
-      expect(workflowContent).toMatch(/\.apk/);
+    it('validates keystore secrets via node scripts/validate-keystore-secrets.js', () => {
+      expect(nativeBuildContent).toMatch(/node\s+scripts\/validate-keystore-secrets\.js/);
+      expect(nativeBuildContent).toContain('ANDROID_KEYSTORE_BASE64:');
+      expect(nativeBuildContent).toContain('ANDROID_KEYSTORE_PASSWORD:');
+      expect(nativeBuildContent).toContain('ANDROID_KEY_ALIAS:');
+      expect(nativeBuildContent).toContain('ANDROID_KEY_PASSWORD:');
     });
 
-    it('posts comment on merged PR containing release details and direct download link', () => {
-      expect(workflowContent).toMatch(/releases\/download\//);
+    it('invokes Continuous Native Generation via npx expo prebuild --platform android --clean', () => {
+      expect(nativeBuildContent).toMatch(/npx\s+expo\s+prebuild\s+--platform\s+android\s+--clean/);
+    });
+
+    it('assembles release APK via Gradle: ./gradlew assembleRelease --no-daemon inside android/', () => {
+      expect(nativeBuildContent).toMatch(/\.\/gradlew\s+assembleRelease\s+--no-daemon/);
+      expect(nativeBuildContent).toMatch(/cd\s+android/);
+      expect(nativeBuildContent).toContain('ANDROID_KEYSTORE_PATH:');
+    });
+
+    it('stages & verifies APK with node scripts/download-build-artifact.js --local-apk', () => {
+      expect(nativeBuildContent).toMatch(/node\s+scripts\/download-build-artifact\.js/);
+      expect(nativeBuildContent).toMatch(/--local-apk\s+android\/app\/build\/outputs\/apk\/release\/app-release\.apk/);
+      expect(nativeBuildContent).toMatch(/--tag\s+["']?\$\{\{\s*needs\.detect-changes\.outputs\.tag\s*\}\}["']?/);
+      expect(nativeBuildContent).toMatch(/--output\s+["']?\$\{\{\s*github\.workspace\s*\}\}\/MoneyManager-\$\{\{\s*needs\.detect-changes\.outputs\.tag\s*\}\}\.apk["']?/);
+    });
+
+    it('cleans up ephemeral keystore in an if: always() step', () => {
+      expect(nativeBuildContent).toMatch(/node\s+scripts\/validate-keystore-secrets\.js\s+--cleanup\s+android\/app\/release\.keystore/);
+      expect(nativeBuildContent).toMatch(/if:\s*always\(\)/);
+    });
+
+    it('uses steps.stage-apk.outputs.apk_path for upload-artifact and action-gh-release', () => {
+      expect(nativeBuildContent).toContain('steps.stage-apk.outputs.apk_path');
+      expect(nativeBuildContent).not.toContain('steps.download-apk.outputs.apk_path');
+      expect(nativeBuildContent).toMatch(/actions\/upload-artifact@v4/);
+      expect(nativeBuildContent).toMatch(/softprops\/action-gh-release@v2/);
+    });
+
+    it('uses steps.stage-apk outputs in PR comment script', () => {
+      expect(nativeBuildContent).toContain('steps.stage-apk.outputs.apk_filename');
+      expect(nativeBuildContent).toContain('steps.stage-apk.outputs.apk_size');
+      expect(nativeBuildContent).toContain('steps.stage-apk.outputs.direct_download_url');
+    });
+
+    it('leaves the ota-update job untouched, still containing eas update', () => {
+      expect(otaUpdateContent).toMatch(/eas(-cli@latest)?\s+update/);
+      expect(otaUpdateContent).toContain('EAS_ACCESS_TOKEN');
     });
   });
 
