@@ -326,10 +326,20 @@ describe('download-build-artifact', () => {
       expect(nativeBuildContent).toMatch(/npx\s+expo\s+prebuild\s+--platform\s+android\s+--clean/);
     });
 
+    it('ensures Expo Prebuild runs before Validate Keystore Secrets so --clean does not wipe the provisioned keystore', () => {
+      const prebuildIndex = nativeBuildContent.indexOf('expo prebuild');
+      const validateIndex = nativeBuildContent.indexOf('validate-keystore-secrets.js');
+      const assembleIndex = nativeBuildContent.indexOf('assembleRelease');
+      expect(prebuildIndex).toBeGreaterThan(-1);
+      expect(validateIndex).toBeGreaterThan(prebuildIndex);
+      expect(assembleIndex).toBeGreaterThan(validateIndex);
+    });
+
     it('assembles release APK via Gradle: ./gradlew assembleRelease --no-daemon inside android/', () => {
       expect(nativeBuildContent).toMatch(/\.\/gradlew\s+assembleRelease\s+--no-daemon/);
       expect(nativeBuildContent).toMatch(/cd\s+android/);
       expect(nativeBuildContent).toContain('ANDROID_KEYSTORE_PATH:');
+      expect(nativeBuildContent).toContain('ANDROID_KEYSTORE_PATH: ${{ steps.validate-keystore.outputs.keystore_path }}');
     });
 
     it('stages & verifies APK with node scripts/download-build-artifact.js --local-apk', () => {

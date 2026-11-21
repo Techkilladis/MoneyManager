@@ -31,10 +31,10 @@ Always run `npm run check` before declaring any task done or merging PRs. Note: 
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
-## Building with EAS
+## Building & Releases
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+- **Native Android Builds**: Native Android APKs are compiled directly on GitHub Actions runners via Gradle with Continuous Native Generation (`expo prebuild --clean`) and declarative release signing (`plugins/withReleaseSigning.js`) per ADR-005.
+- **EAS Services**: Use EAS to ship over-the-air JavaScript and asset updates (`eas update`) and submit builds to app stores (`eas submit`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples. Docs: https://docs.expo.dev/eas/index.md
 
 ## Rules
 

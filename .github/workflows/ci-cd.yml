@@ -338,6 +338,11 @@ jobs:
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Expo Prebuild (Continuous Native Generation)
+        run: |
+          set -o pipefail
+          npx expo prebuild --platform android --clean
+
       - name: Validate Keystore Secrets
         id: validate-keystore
         env:
@@ -348,15 +353,10 @@ jobs:
         run: |
           node scripts/validate-keystore-secrets.js
 
-      - name: Expo Prebuild (Continuous Native Generation)
-        run: |
-          set -o pipefail
-          npx expo prebuild --platform android --clean
-
       - name: Assemble Release APK via Gradle
         id: assemble-apk
         env:
-          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release.keystore
+          ANDROID_KEYSTORE_PATH: ${{ steps.validate-keystore.outputs.keystore_path }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}

@@ -91,6 +91,31 @@ function findBlock(content, blockName, fromIndex = 0) {
 }
 
 /**
+ * Generates the Groovy DSL block for signingConfigs.release.
+ *
+ * @param {string} indent
+ * @param {string} eol
+ * @returns {string}
+ */
+function generateReleaseBlock(indent = '    ', eol = '\n') {
+  return [
+    `${indent}release {`,
+    `${indent}    def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH") ?: findProperty("ANDROID_KEYSTORE_PATH") ?: "release.keystore"`,
+    `${indent}    def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: findProperty("ANDROID_KEYSTORE_PASSWORD")`,
+    `${indent}    def keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: findProperty("ANDROID_KEY_ALIAS")`,
+    `${indent}    def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: findProperty("ANDROID_KEY_PASSWORD")`,
+    ``,
+    `${indent}    if (keystorePassword && keyAlias && keyPassword && file(keystorePath).exists()) {`,
+    `${indent}        storeFile file(keystorePath)`,
+    `${indent}        storePassword keystorePassword`,
+    `${indent}        keyAlias keyAlias`,
+    `${indent}        keyPassword keyPassword`,
+    `${indent}    }`,
+    `${indent}}`,
+  ].join(eol);
+}
+
+/**
  * Declaratively modifies the contents of `android/app/build.gradle` to:
  * 1. Add `signingConfigs.release` reading environment variables / Gradle project properties.
  * 2. Update `buildTypes.release` to conditionally use `signingConfigs.release` or fall back to debug.
@@ -114,22 +139,7 @@ function modifyAppBuildGradle(buildGradle) {
       const lastNewline = beforeClose.lastIndexOf('\n');
       const indent = lastNewline !== -1 ? beforeClose.slice(lastNewline + 1) : '    ';
 
-      const releaseBlock = [
-        `${indent}    release {`,
-        `${indent}        def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH") ?: findProperty("ANDROID_KEYSTORE_PATH") ?: "release.keystore"`,
-        `${indent}        def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: findProperty("ANDROID_KEYSTORE_PASSWORD")`,
-        `${indent}        def keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: findProperty("ANDROID_KEY_ALIAS")`,
-        `${indent}        def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: findProperty("ANDROID_KEY_PASSWORD")`,
-        ``,
-        `${indent}        if (keystorePassword && keyAlias && keyPassword && file(keystorePath).exists()) {`,
-        `${indent}            storeFile file(keystorePath)`,
-        `${indent}            storePassword keystorePassword`,
-        `${indent}            keyAlias keyAlias`,
-        `${indent}            keyPassword keyPassword`,
-        `${indent}        }`,
-        `${indent}    }`,
-      ].join(eol);
-
+      const releaseBlock = generateReleaseBlock(`${indent}    `, eol);
       const insertPos = lastNewline !== -1 ? lastNewline + 1 : signingConfigsBlock.closeBrace;
       content = content.slice(0, insertPos) + releaseBlock + eol + indent + content.slice(signingConfigsBlock.closeBrace);
     }
@@ -142,6 +152,7 @@ function modifyAppBuildGradle(buildGradle) {
         ? buildTypesMatch.index
         : androidBlock.openBrace + 1;
       const indent = '    ';
+      const releaseBlock = generateReleaseBlock(`${indent}    `, eol);
       const newSigningConfigs = [
         `${indent}signingConfigs {`,
         `${indent}    debug {`,
@@ -150,19 +161,7 @@ function modifyAppBuildGradle(buildGradle) {
         `${indent}        keyAlias 'androiddebugkey'`,
         `${indent}        keyPassword 'android'`,
         `${indent}    }`,
-        `${indent}    release {`,
-        `${indent}        def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH") ?: findProperty("ANDROID_KEYSTORE_PATH") ?: "release.keystore"`,
-        `${indent}        def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: findProperty("ANDROID_KEYSTORE_PASSWORD")`,
-        `${indent}        def keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: findProperty("ANDROID_KEY_ALIAS")`,
-        `${indent}        def keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: findProperty("ANDROID_KEY_PASSWORD")`,
-        ``,
-        `${indent}        if (keystorePassword && keyAlias && keyPassword && file(keystorePath).exists()) {`,
-        `${indent}            storeFile file(keystorePath)`,
-        `${indent}            storePassword keystorePassword`,
-        `${indent}            keyAlias keyAlias`,
-        `${indent}            keyPassword keyPassword`,
-        `${indent}        }`,
-        `${indent}    }`,
+        releaseBlock,
         `${indent}}`,
         ``,
       ].join(eol);
