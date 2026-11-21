@@ -23,6 +23,7 @@ import * as recapService from './recap';
 import * as backupService from './backup';
 import * as updateService from './updateService';
 import { accountBackfillService } from './accountBackfill';
+import { rerunScanService, RerunScanMode, RerunScanResult, RerunScanOptions } from './rerunScan';
 import { Transaction, TransactionKind, Account } from '../database/schema';
 
 /** Everything needed to put a deleted transaction back (undo). */
@@ -95,6 +96,15 @@ function afterSpendingChange() {
   void alertsService.checkBudgetAlerts();
 }
 
+export interface SyncPendingResult {
+  created: number;
+  relinked: number;
+}
+
+export interface SyncPendingOptions {
+  skipInboxScan?: boolean;
+}
+
 export const transactionService = {
   // Initialize database
   async initialize(): Promise<void> {
@@ -130,7 +140,7 @@ export const transactionService = {
   // app database as PENDING capture transactions. Idempotent: a native event
   // is never turned into more than one app transaction, keyed by
   // sourceEventId (ADR 001).
-  async syncPendingNativeEvents(): Promise<number> {
+  async syncPendingNativeEvents(options?: SyncPendingOptions): Promise<SyncPendingResult> {
     try {
       await notificationDetectionService.initialize();
 
@@ -139,51 +149,51 @@ export const transactionService = {
       // before doing the heavier inbox scan.
       const initialEvents = await notificationDetectionService.getPendingUpiEvents();
       let created = 0;
+      let relinked = 0;
       for (const event of initialEvents) {
         try {
           const input = await captureInput(event);
           const result = await transactionRepository.createWithIdempotency(input);
           if (result.isNew) created++;
+          if (result.relinked) relinked++;
         } catch (error) {
           console.warn(`[Sync] Skipped native event ${event.id}:`, error);
         }
       }
 
-      if (created > 0) {
-        dataEvents.emit();
-      }
-
       // Step 2: Scan SMS inbox for any missed messages while app was not running
-      try {
-        const scanRes = await notificationDetectionService.scanSmsInbox();
-        if (scanRes.captured > 0) {
-          const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
-          for (const event of inboxEvents) {
-            try {
-              const input = await captureInput(event);
-              const result = await transactionRepository.createWithIdempotency(input);
-              if (result.isNew) created++;
-            } catch (error) {
-              console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+      if (!options?.skipInboxScan) {
+        try {
+          const scanRes = await notificationDetectionService.scanSmsInbox();
+          if (scanRes.captured > 0) {
+            const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
+            for (const event of inboxEvents) {
+              try {
+                const input = await captureInput(event);
+                const result = await transactionRepository.createWithIdempotency(input);
+                if (result.isNew) created++;
+                if (result.relinked) relinked++;
+              } catch (error) {
+                console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+              }
             }
           }
-          if (created > 0) {
-            dataEvents.emit();
-          }
+        } catch (scanError) {
+          console.warn('[Sync] SMS inbox scan skipped/failed:', scanError);
         }
-      } catch (scanError) {
-        console.warn('[Sync] SMS inbox scan skipped/failed:', scanError);
       }
 
-      if (created > 0) {
-        console.log(`[Sync] Native pending events: synced ${created} new captures`);
+      if (created > 0 || relinked > 0) {
+        dataEvents.emit();
+        console.log(`[Sync] Native pending events: synced ${created} new captures, ${relinked} relinked`);
       }
-      return created;
+
+      return { created, relinked };
     } catch (error) {
       // Native ingestion is an enhancement — the app must stay usable when
       // the module is unavailable (e.g. non-Android platforms).
       console.warn('[Sync] Failed to sync native pending events:', error);
-      return 0;
+      return { created: 0, relinked: 0 };
     }
   },
 
@@ -974,6 +984,7 @@ export const services = {
   backup: backupService,
   update: updateService,
   accountBackfill: accountBackfillService,
+  rerunScan: rerunScanService,
 };
 
 // Export individual services for direct imports
@@ -981,4 +992,5 @@ export { budgetService };
 export { analyticsService };
 export { ledgerService };
 export { accountBackfillService };
+export { rerunScanService, RerunScanMode, RerunScanResult, RerunScanOptions };
 export { splitService, recurringService, alertsService, recapService, backupService, updateService };

@@ -27,8 +27,8 @@ const FOREGROUND_SYNC_MS = 20_000;
 function syncNative() {
   transactionService
     .syncPendingNativeEvents()
-    .then((created) => {
-      if (created > 0) dataEvents.emit();
+    .then((result) => {
+      if (result.created > 0 || result.relinked > 0) dataEvents.emit();
     })
     .catch((error) => console.warn('[RootLayout] Native sync failed:', error));
 }

@@ -73,6 +73,11 @@ export interface SmsScanResult {
   captured: number;
 }
 
+export interface SmsScanOptions {
+  firstScanDays?: number;
+  fullScan?: boolean;
+}
+
 export interface WidgetSnapshot {
   today: string;
   month: string;
@@ -94,7 +99,7 @@ export interface ParsingStats {
 interface NativeModuleInterface {
   initialize(): Promise<{ success: boolean }>;
   isSmsAccessEnabled(): Promise<{ enabled: boolean }>;
-  scanSmsInbox(firstScanDays: number): Promise<SmsScanResult>;
+  scanSmsInbox(firstScanDays: number, fullScan?: boolean): Promise<SmsScanResult>;
   getPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
   getAllPendingUpiEvents(): Promise<{ events: PendingUpiEvent[] }>;
   getPendingUpiEvent(id: string): Promise<{ event: PendingUpiEvent | null }>;
@@ -174,12 +179,21 @@ class NotificationDetectionService {
 
   /**
    * Reads recent bank SMS and stores any UPI payments found as pending events.
-   * The first scan looks back `firstScanDays`; later scans continue from the last one.
+   * The first scan looks back `firstScanDays` (default 7); later scans continue from the last one.
+   * When `fullScan` is true, scans up to 90 days of SMS history.
    */
-  async scanSmsInbox(firstScanDays = 7): Promise<SmsScanResult> {
+  async scanSmsInbox(options?: SmsScanOptions | number): Promise<SmsScanResult> {
     if (!this.nativeModule) return { scanned: 0, captured: 0 };
     try {
-      return await this.nativeModule.scanSmsInbox(firstScanDays);
+      let days = 7;
+      let fullScan = false;
+      if (typeof options === 'number') {
+        days = options;
+      } else if (options) {
+        days = options.firstScanDays ?? 7;
+        fullScan = options.fullScan ?? false;
+      }
+      return await this.nativeModule.scanSmsInbox(days, fullScan);
     } catch (error) {
       console.error('NotificationDetectionService: SMS scan failed', error);
       return { scanned: 0, captured: 0 };
