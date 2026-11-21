@@ -67,7 +67,8 @@
     ],
     "testMatch": [
       "<rootDir>/src/**/__tests__/**/*.test.ts?(x)",
-      "<rootDir>/scripts/**/__tests__/**/*.test.ts?(x)"
+      "<rootDir>/scripts/**/__tests__/**/*.test.ts?(x)",
+      "<rootDir>/plugins/**/__tests__/**/*.test.ts?(x)"
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
