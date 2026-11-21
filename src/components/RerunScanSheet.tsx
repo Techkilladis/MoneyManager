@@ -17,10 +17,11 @@ export interface RerunScanSheetProps {
 
 export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetProps) {
   const [loading, setLoading] = useState(false);
-  const [, setDiscoveryQueue] = useState<DiscoveredAccount[]>([]);
-  const [activeDiscovery, setActiveDiscovery] = useState<DiscoveredAccount | null>(null);
+  const [discoveryQueue, setDiscoveryQueue] = useState<DiscoveredAccount[]>([]);
   const toast = useToast();
   const styles = useStyles();
+
+  const activeDiscovery = discoveryQueue[0] ?? null;
 
   const handleScan = async (mode: RerunScanMode) => {
     setLoading(true);
@@ -41,7 +42,6 @@ export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetP
 
       if (res.unconfigured && res.unconfigured.length > 0) {
         setDiscoveryQueue(res.unconfigured);
-        setActiveDiscovery(res.unconfigured[0]);
       } else {
         onClose();
       }
@@ -61,16 +61,11 @@ export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetP
   };
 
   const advanceDiscoveryQueue = () => {
-    setDiscoveryQueue((prev) => {
-      const remaining = prev.slice(1);
-      if (remaining.length > 0) {
-        setActiveDiscovery(remaining[0]);
-      } else {
-        setActiveDiscovery(null);
-        onClose();
-      }
-      return remaining;
-    });
+    const remaining = discoveryQueue.slice(1);
+    setDiscoveryQueue(remaining);
+    if (remaining.length === 0) {
+      onClose();
+    }
   };
 
   return (
@@ -109,7 +104,7 @@ export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetP
             : null
         }
         onClose={advanceDiscoveryQueue}
-        onSaved={advanceDiscoveryQueue}
+        onSaved={() => {}}
       />
     </>
   );

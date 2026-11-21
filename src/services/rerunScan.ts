@@ -39,8 +39,8 @@ export const rerunScanService = {
       firstScanDays: 7,
     });
 
-    // 3. Sync native pending events into SQLite
-    const syncResult = await transactionService.syncPendingNativeEvents();
+    // 3. Sync native pending events into SQLite (skip redundant inbox scan)
+    const syncResult = await transactionService.syncPendingNativeEvents({ skipInboxScan: true });
 
     // 4. Run historical account backfill
     const backfillResult = await accountBackfillService.runAutoBackfill({ force: true });

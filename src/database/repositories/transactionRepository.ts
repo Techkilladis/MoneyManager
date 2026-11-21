@@ -495,7 +495,8 @@ export const transactionRepository = {
         );
 
         const updated = await this.getById(existing.id);
-        return { transaction: updated!, isNew: false, relinked: true };
+        const relinked = Boolean(targetAccountId && targetAccountId !== existing.accountId);
+        return { transaction: updated!, isNew: false, relinked };
       }
 
       return { transaction: existing, isNew: false, relinked: false };

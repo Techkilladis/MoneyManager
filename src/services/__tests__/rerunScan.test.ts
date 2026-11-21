@@ -53,7 +53,9 @@ describe('rerunScanService.rerunScan', () => {
       fullScan: false,
       firstScanDays: 7,
     });
-    expect(transactionService.syncPendingNativeEvents).toHaveBeenCalled();
+    expect(transactionService.syncPendingNativeEvents).toHaveBeenCalledWith({
+      skipInboxScan: true,
+    });
     expect(accountBackfillService.runAutoBackfill).toHaveBeenCalledWith({ force: true });
     expect(dataEvents.emit).toHaveBeenCalled();
 

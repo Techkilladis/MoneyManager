@@ -178,6 +178,56 @@ describe('RerunScanSheet', () => {
     expect(discoveryModal.props.initialData).toEqual({ bankName: 'SBI', mask: '5544' });
   });
 
+  it('advances through multiple discovered accounts in sequence on close/save', async () => {
+    const unconfigured = [
+      { bankName: 'SBI', mask: '5544', count: 1 },
+      { bankName: 'HDFC', mask: '8877', count: 1 },
+    ];
+    (rerunScanService.rerunScan as jest.Mock).mockResolvedValue({
+      scanned: 50,
+      captured: 0,
+      relinked: 0,
+      unconfigured,
+    });
+
+    let testRenderer: renderer.ReactTestRenderer | undefined;
+    await act(async () => {
+      testRenderer = renderer.create(
+        <RerunScanSheet visible={true} onClose={onClose} onComplete={onComplete} />
+      );
+    });
+
+    const rows = testRenderer!.root.findAllByType(ListRow);
+    const incrementalRow = rows.find((r) => r.props.title === 'Incremental scan');
+
+    await act(async () => {
+      incrementalRow!.props.onPress();
+    });
+
+    // 1st account shown
+    let discoveryModal = testRenderer!.root.findByType(AccountDiscoveryModal);
+    expect(discoveryModal.props.initialData).toEqual({ bankName: 'SBI', mask: '5544' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Advance 1st account
+    await act(async () => {
+      discoveryModal.props.onClose();
+    });
+
+    // 2nd account shown
+    discoveryModal = testRenderer!.root.findByType(AccountDiscoveryModal);
+    expect(discoveryModal.props.initialData).toEqual({ bankName: 'HDFC', mask: '8877' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Advance 2nd account
+    await act(async () => {
+      discoveryModal.props.onClose();
+    });
+
+    // All accounts drained -> onClose called
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('displays permission alert when SMS_PERMISSION_DENIED error occurs', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     (rerunScanService.rerunScan as jest.Mock).mockRejectedValue(

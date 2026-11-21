@@ -150,4 +150,29 @@ describe('transactionRepository.createWithIdempotency', () => {
     const fresh = await transactionRepository.getById(initial.id);
     expect(fresh?.accountId).toBe('acc-existing-bank');
   });
+
+  it('updates parserMetadata but returns relinked: false when input lacks resolved accountId', async () => {
+    await transactionRepository.create({
+      amountPaise: 12000,
+      merchant: 'Swiggy Instamart',
+      transactionTimestamp: 1700000000000,
+      sourceEventId: 'evt-meta-only',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'account-cash',
+    });
+
+    const rescan = await transactionRepository.createWithIdempotency({
+      amountPaise: 12000,
+      merchant: 'Swiggy Instamart',
+      transactionTimestamp: 1700000000000,
+      sourceEventId: 'evt-meta-only',
+      sourceType: 'UPI_NOTIFICATION',
+      parserMetadata: '{"pendingAccount":{"bankName":"SBI","mask":"9988"}}',
+    });
+
+    expect(rescan.isNew).toBe(false);
+    expect(rescan.relinked).toBe(false);
+    expect(rescan.transaction.accountId).toBe('account-cash');
+    expect(rescan.transaction.parserMetadata).toBe('{"pendingAccount":{"bankName":"SBI","mask":"9988"}}');
+  });
 });

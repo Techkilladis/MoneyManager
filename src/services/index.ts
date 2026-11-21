@@ -101,6 +101,10 @@ export interface SyncPendingResult {
   relinked: number;
 }
 
+export interface SyncPendingOptions {
+  skipInboxScan?: boolean;
+}
+
 export const transactionService = {
   // Initialize database
   async initialize(): Promise<void> {
@@ -136,7 +140,7 @@ export const transactionService = {
   // app database as PENDING capture transactions. Idempotent: a native event
   // is never turned into more than one app transaction, keyed by
   // sourceEventId (ADR 001).
-  async syncPendingNativeEvents(): Promise<SyncPendingResult> {
+  async syncPendingNativeEvents(options?: SyncPendingOptions): Promise<SyncPendingResult> {
     try {
       await notificationDetectionService.initialize();
 
@@ -158,23 +162,25 @@ export const transactionService = {
       }
 
       // Step 2: Scan SMS inbox for any missed messages while app was not running
-      try {
-        const scanRes = await notificationDetectionService.scanSmsInbox();
-        if (scanRes.captured > 0) {
-          const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
-          for (const event of inboxEvents) {
-            try {
-              const input = await captureInput(event);
-              const result = await transactionRepository.createWithIdempotency(input);
-              if (result.isNew) created++;
-              if (result.relinked) relinked++;
-            } catch (error) {
-              console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+      if (!options?.skipInboxScan) {
+        try {
+          const scanRes = await notificationDetectionService.scanSmsInbox();
+          if (scanRes.captured > 0) {
+            const inboxEvents = await notificationDetectionService.getPendingUpiEvents();
+            for (const event of inboxEvents) {
+              try {
+                const input = await captureInput(event);
+                const result = await transactionRepository.createWithIdempotency(input);
+                if (result.isNew) created++;
+                if (result.relinked) relinked++;
+              } catch (error) {
+                console.warn(`[Sync] Skipped native event ${event.id}:`, error);
+              }
             }
           }
+        } catch (scanError) {
+          console.warn('[Sync] SMS inbox scan skipped/failed:', scanError);
         }
-      } catch (scanError) {
-        console.warn('[Sync] SMS inbox scan skipped/failed:', scanError);
       }
 
       if (created > 0 || relinked > 0) {

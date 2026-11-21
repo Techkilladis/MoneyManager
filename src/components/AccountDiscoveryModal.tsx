@@ -4,7 +4,7 @@ import { space } from '@/design/tokens';
 import { makeStyles } from '@/design/theme';
 import { Account, AccountType } from '@/database/schema';
 import { accountIcon } from '@/domain/account';
-import { accountService, transactionService } from '@/services';
+import { accountBackfillService, accountService, transactionService } from '@/services';
 import { Button, SegmentedControl, Sheet, Text, TextField, useToast } from '@/components/ui';
 
 const SWATCHES = [
@@ -74,11 +74,19 @@ function AccountDiscoveryForm({
         icon: accountIcon(draft.type),
       });
 
-      await transactionService.assignAccountToPending(
-        draft.bankName,
-        draft.mask,
-        created.id
-      );
+      if (draft.mask.trim()) {
+        await accountBackfillService.completeBackfillForAccount(
+          draft.bankName.trim() || undefined,
+          draft.mask.trim(),
+          created.id
+        );
+      } else {
+        await transactionService.assignAccountToPending(
+          draft.bankName,
+          draft.mask,
+          created.id
+        );
+      }
 
       toast.show(`${created.name} added`);
       onSaved(created);
