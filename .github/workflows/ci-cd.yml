@@ -395,6 +395,7 @@ jobs:
             --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
             --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+            --min-sdk-version 21 \
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
@@ -409,7 +410,7 @@ jobs:
           if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
             APKSIGNER="apksigner"
           fi
-          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK_PATH")
+          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --min-sdk-version 21 --print-certs "$APK_PATH")
           echo "$VERIFY_OUTPUT"
           if ! echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"; then
             echo "::error::APK is missing Scheme v1 (JAR signing) signature!"
