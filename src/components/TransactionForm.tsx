@@ -112,7 +112,7 @@ export function TransactionForm({
 
   const loadOptions = useCallback(() => {
     Promise.all([
-      categoryService.getAll(),
+      categoryService.getRankedByUsage(),
       memberService.getAll(),
       accountService.getAll(),
       ledgerService.getRecentMerchants(10),
@@ -230,6 +230,10 @@ export function TransactionForm({
       setCategoryId(null);
       categoryTouched.current = false;
       setSuggestionApplied(false);
+    }
+    const currentSuggested = categories.find((c) => c.id === suggestedId);
+    if (currentSuggested && currentSuggested.kind !== next) {
+      setSuggestedId(null);
     }
   };
 

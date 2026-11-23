@@ -186,4 +186,52 @@ describe('categoryRepository.getRankedByUsage (Category Freshiency)', () => {
     const categories = await categoryService.getRankedByUsage('EXPENSE', { now });
     expect(categories[0].id).toBe('cat-entertainment');
   });
+
+  it('strictly partitions expense and income usage statistics without cross-contamination', async () => {
+    // 5 confirmed income transactions for Salary
+    for (let i = 0; i < 5; i++) {
+      await addTx({
+        categoryId: 'cat-income-salary',
+        amountPaise: 5000000,
+        at: now - (5 - i) * dayMs,
+        kind: 'INCOME',
+      });
+    }
+
+    // 10 confirmed expense transactions for Travel
+    for (let i = 0; i < 10; i++) {
+      await addTx({
+        categoryId: 'cat-travel',
+        amountPaise: 25000,
+        at: now - (10 - i) * dayMs,
+        kind: 'EXPENSE',
+      });
+    }
+
+    const expenseCategories = await categoryRepository.getRankedByUsage('EXPENSE', { now });
+    const incomeCategories = await categoryRepository.getRankedByUsage('INCOME', { now });
+
+    // In expense categories, Travel is #1, Salary is not present
+    expect(expenseCategories[0].id).toBe('cat-travel');
+    expect(expenseCategories.some((c) => c.kind === 'INCOME')).toBe(false);
+
+    // In income categories, Salary is #1, Travel is not present
+    expect(incomeCategories[0].id).toBe('cat-income-salary');
+    expect(incomeCategories.some((c) => c.kind === 'EXPENSE')).toBe(false);
+  });
+
+  it('treats manual transactions identically to captured transactions in rolling freshiency ranking', async () => {
+    // Manually added transaction
+    await addTx({
+      categoryId: 'cat-education',
+      amountPaise: 30000,
+      at: now - 1 * dayMs,
+      sourceType: 'MANUAL',
+      status: 'CONFIRMED',
+      kind: 'EXPENSE',
+    });
+
+    const categories = await categoryRepository.getRankedByUsage('EXPENSE', { now });
+    expect(categories[0].id).toBe('cat-education');
+  });
 });
