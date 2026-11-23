@@ -16,6 +16,14 @@ The workflow step inspecting changed files between merge base and head to route 
 
 The CI step that automatically increments `android.versionCode` and semantic version in project manifests upon a native rebuild. Related terms: `[Native Rebuild]`, `[GitHub Release]`.
 
+### `Category Chips`
+
+The horizontal quick-selection row in transaction review and entry screens displaying the active/recommended category followed by top categories ranked by recent usage, terminating in a "More" trigger. Related terms: `[Category Freshiency]`.
+
+### `Category Freshiency`
+
+A hybrid ranking strategy combining category usage frequency over a recent rolling time window (e.g., 90 days) with recency tie-breaking, ensuring frequently used categories stay prominently accessible without one-off outlier transactions permanently dominating quick selection slots. Related terms: `[Category Chips]`.
+
 ### `CI/CD Pipeline`
 
 The automated GitHub Actions workflow triggered on pull request merge to build either an Over-the-Air update or a native APK. Related terms: `[Pull Request (PR)]`, `[Auto-Detect]`, `[OTA Update]`, `[Native Rebuild]`.
