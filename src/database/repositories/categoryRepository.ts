@@ -136,4 +136,52 @@ export const categoryRepository = {
   async getAll(): Promise<Category[]> {
     return this.list();
   },
+
+  /**
+   * Returns categories ranked by Category Freshiency:
+   * 1. Rolling window confirmed transaction count DESC (default 90 days)
+   * 2. Recency tie-breaker: most recent confirmed transaction timestamp in rolling window DESC
+   * 3. All-time confirmed transaction count DESC
+   * 4. All-time recency tie-breaker: most recent confirmed transaction timestamp DESC
+   * 5. Catalog sortOrder ASC
+   * 6. Category name ASC
+   *
+   * Only CONFIRMED, non-pending-capture, non-dismissed transactions are counted.
+   * If kind is provided, filters strictly to categories of that kind.
+   */
+  async getRankedByUsage(
+    kind?: TransactionKind,
+    options?: { now?: number; windowDays?: number }
+  ): Promise<Category[]> {
+    const database = await openDatabase();
+    const now = options?.now ?? Date.now();
+    const windowDays = options?.windowDays ?? 90;
+    const windowStart = now - windowDays * 24 * 60 * 60 * 1000;
+
+    const query = `
+      SELECT c.*
+      FROM categories c
+      LEFT JOIN transactions t ON t.categoryId = c.id
+        AND t.kind = c.kind
+        AND t.status = 'CONFIRMED'
+        AND t.is_pending_capture = 0
+        AND t.is_dismissed = 0
+      ${kind ? 'WHERE c.kind = ?' : ''}
+      GROUP BY c.id
+      ORDER BY
+        COUNT(CASE WHEN t.transactionTimestamp >= ? THEN 1 END) DESC,
+        COALESCE(MAX(CASE WHEN t.transactionTimestamp >= ? THEN t.transactionTimestamp END), 0) DESC,
+        COUNT(t.id) DESC,
+        COALESCE(MAX(t.transactionTimestamp), 0) DESC,
+        c.sortOrder ASC,
+        c.name ASC
+    `;
+
+    const params = kind
+      ? [kind, windowStart, windowStart]
+      : [windowStart, windowStart];
+
+    const rows = await database.getAllAsync(query, params);
+    return rows.map(mapCategoryRow);
+  },
 };

@@ -781,6 +781,13 @@ export const categoryService = {
     return categoryRepository.getAll();
   },
 
+  async getRankedByUsage(
+    kind?: TransactionKind,
+    options?: { now?: number; windowDays?: number }
+  ): Promise<Category[]> {
+    return categoryRepository.getRankedByUsage(kind, options);
+  },
+
   async getById(id: string) {
     return categoryRepository.getById(id);
   },
