@@ -94,10 +94,18 @@ export function CategoryChips({
 }) {
   const styles = useStyles();
   const ordered = useMemo(() => {
-    const first = [value, suggestedId].filter((id, i, all): id is string => !!id && all.indexOf(id) === i);
-    const head = first.map((id) => categories.find((c) => c.id === id)).filter((c): c is Category => !!c);
-    const rest = categories.filter((c) => !first.includes(c.id));
-    return [...head, ...rest].slice(0, Math.max(limit, head.length));
+    if (categories.length === 0) return [];
+
+    // Contextual Slot 1 Pinning:
+    // 1. If active selection exists and matches a category, Slot 1 = selection
+    // 2. Else if high-confidence recommendation exists, Slot 1 = recommendation
+    // 3. Else Slot 1 = top freshiency-ranked category (categories[0])
+    const selectedCat = value ? categories.find((c) => c.id === value) : undefined;
+    const suggestedCat = !selectedCat && suggestedId ? categories.find((c) => c.id === suggestedId) : undefined;
+    const slot1 = selectedCat ?? suggestedCat ?? categories[0];
+
+    const rest = categories.filter((c) => c.id !== slot1.id);
+    return [slot1, ...rest].slice(0, limit);
   }, [categories, value, suggestedId, limit]);
 
   return (
@@ -108,17 +116,23 @@ export function CategoryChips({
       keyboardShouldPersistTaps="handled"
       style={styles.bleed}
     >
-      {ordered.map((c) => (
-        <Chip
-          key={c.id}
-          label={c.name}
-          categoryIcon={c.icon}
-          color={c.color}
-          selected={c.id === value}
-          trailingIcon={c.id === value ? 'check' : undefined}
-          onPress={() => onChange(c.id === value ? null : c.id)}
-        />
-      ))}
+      {ordered.map((c) => {
+        const selected = c.id === value;
+        const isSuggested = !value && c.id === suggestedId;
+        const trailingIcon = selected ? 'check' : isSuggested ? 'sparkles' : undefined;
+        return (
+          <Chip
+            key={c.id}
+            label={c.name}
+            categoryIcon={c.icon}
+            color={c.color}
+            selected={selected}
+            trailingIcon={trailingIcon}
+            accessibilityLabel={`${c.name}${selected ? ', selected' : isSuggested ? ', recommended' : ''}`}
+            onPress={() => onChange(selected ? null : c.id)}
+          />
+        );
+      })}
       {onMore ? <Chip label="More" icon="layoutGrid" onPress={onMore} style={{ height: 44 }} /> : null}
     </ScrollView>
   );

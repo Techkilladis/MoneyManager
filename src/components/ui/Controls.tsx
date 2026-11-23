@@ -29,13 +29,14 @@ interface ChipProps {
   /** Trailing icon (e.g. "x" on a removable filter). */
   trailingIcon?: IconName;
   style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
 }
 
 /**
  * Pill chip. Plain chips select as ink (period filters); category and person
  * chips select as a moss wash so their colour badge stays visible.
  */
-export function Chip({ label, selected = false, onPress, color, icon, categoryIcon, trailingIcon, style }: ChipProps) {
+export function Chip({ label, selected = false, onPress, color, icon, categoryIcon, trailingIcon, style, accessibilityLabel }: ChipProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const soft = categoryIcon !== undefined || !!color;
@@ -52,6 +53,7 @@ export function Chip({ label, selected = false, onPress, color, icon, categoryIc
       }
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      accessibilityLabel={accessibilityLabel ?? label}
       style={({ pressed }) => [
         styles.chip,
         categoryIcon !== undefined && styles.chipWithBadge,
