@@ -249,7 +249,7 @@ function ReviewCard({
   useEffect(() => {
     Promise.all([
       transactionService.getFormattedTransaction(id),
-      categoryService.getAll(),
+      categoryService.getRankedByUsage(),
       memberService.getAll(),
       accountService.getAll(),
     ])
