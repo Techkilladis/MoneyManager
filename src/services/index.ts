@@ -6,6 +6,7 @@ import { memberRepository } from '../database/repositories/memberRepository';
 import { merchantRepository } from '../database/repositories/merchantRepository';
 import { accountRepository, CreateAccountInput, UpdateAccountInput } from '../database/repositories/accountRepository';
 import { formatCurrency, formatDate, FormattedTransaction, HomeData, Category, Member } from '../domain/transaction';
+import { bankNamesMatch, extractPendingAccount, findMatchingAccount } from '../domain/account';
 import { initializeDatabase } from '../database/db';
 import { seedDevelopmentData } from './seedData';
 import { notificationDetectionService, PendingUpiEvent } from './notificationDetection';
@@ -44,9 +45,12 @@ export async function captureInput(event: PendingUpiEvent): Promise<CreateTransa
     }
     if (!matched) {
       const allAccs = await accountRepository.getAll();
-      const byMask = allAccs.filter((a) => a.mask === event.accountMask);
-      if (byMask.length === 1) {
-        matched = byMask[0];
+      matched = findMatchingAccount(allAccs, event.bankName, event.accountMask);
+      if (!matched) {
+        const byMask = allAccs.filter((a) => a.type !== 'CASH' && a.mask === event.accountMask);
+        if (byMask.length === 1 && !event.bankName) {
+          matched = byMask[0];
+        }
       }
     }
 
@@ -156,6 +160,9 @@ export const transactionService = {
           const result = await transactionRepository.createWithIdempotency(input);
           if (result.isNew) created++;
           if (result.relinked) relinked++;
+          if (!result.isNew && result.transaction.status === 'CONFIRMED') {
+            await notificationDetectionService.consumePendingUpiEvent(event.id);
+          }
         } catch (error) {
           console.warn(`[Sync] Skipped native event ${event.id}:`, error);
         }
@@ -347,24 +354,15 @@ export const transactionService = {
 
     let pendingAccount: { bankName?: string; mask?: string } | null = null;
     if (!account && tx.parserMetadata) {
-      try {
-        const meta = JSON.parse(tx.parserMetadata);
-        if (meta && meta.pendingAccount && !meta.pendingAccount.resolved) {
-          if (meta.pendingAccount.mask) {
-            const allAccs = await accountRepository.getAll();
-            const pBank = meta.pendingAccount.bankName?.toLowerCase();
-            const matched = allAccs.find(
-              (a) => a.mask === meta.pendingAccount.mask && (!pBank || !a.bankName || a.bankName.toLowerCase() === pBank)
-            );
-            if (matched) {
-              account = matched;
-            } else {
-              pendingAccount = meta.pendingAccount;
-            }
-          }
+      const pending = extractPendingAccount(tx.parserMetadata);
+      if (pending && !pending.resolved && pending.mask) {
+        const allAccs = await accountRepository.getAll();
+        const matched = findMatchingAccount(allAccs, pending.bankName, pending.mask);
+        if (matched) {
+          account = matched;
+        } else {
+          pendingAccount = pending;
         }
-      } catch {
-        // Ignore JSON error
       }
     }
 
@@ -425,15 +423,14 @@ export const transactionService = {
       "SELECT id, parserMetadata, accountId FROM transactions WHERE is_pending_capture = 1 AND status = 'PENDING'"
     );
     let updatedCount = 0;
-    const normBank = bankName?.trim().toLowerCase();
+    const normMask = mask.trim();
 
     for (const row of pendingRows) {
       if (!row.parserMetadata) continue;
       try {
         const meta = JSON.parse(row.parserMetadata);
-        if (meta?.pendingAccount && meta.pendingAccount.mask === mask) {
-          const rowBank = meta.pendingAccount.bankName?.trim().toLowerCase();
-          if (!normBank || !rowBank || rowBank === normBank) {
+        if (meta?.pendingAccount && (meta.pendingAccount.mask ?? '').trim() === normMask) {
+          if (bankNamesMatch(bankName, meta.pendingAccount.bankName)) {
             meta.pendingAccount.resolved = true;
             await db.runAsync(
               'UPDATE transactions SET accountId = ?, parserMetadata = ? WHERE id = ?',

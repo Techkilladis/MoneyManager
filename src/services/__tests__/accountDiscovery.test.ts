@@ -136,4 +136,27 @@ describe('In-Flight Account Discovery & Assignment', () => {
     expect(confirmed?.status).toBe('CONFIRMED');
     expect(confirmed?.account?.id).toBe(account.id);
   });
+
+  it('links pending transactions when user edits bankName variant (e.g. HDFC Credit Card vs HDFC Bank)', async () => {
+    const input = await captureInput({
+      ...sampleEvent,
+      id: 'evt-card',
+      bankName: 'HDFC Bank',
+      accountMask: '4321',
+    });
+    const tx = await transactionRepository.create(input);
+
+    const card = await accountRepository.create({
+      name: 'HDFC Millennia',
+      bankName: 'HDFC Credit Card',
+      mask: '4321',
+      type: 'CREDIT_CARD',
+    });
+
+    const updatedCount = await transactionService.assignAccountToPending('HDFC Credit Card', '4321', card.id);
+    expect(updatedCount).toBe(1);
+
+    const updated = await transactionRepository.getById(tx.id);
+    expect(updated?.accountId).toBe(card.id);
+  });
 });

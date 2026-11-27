@@ -1,4 +1,5 @@
 import { addTx, d, freshDatabase } from '../../../test/db';
+import { accountRepository } from '@/database/repositories/accountRepository';
 import {
   getAccountTotals,
   getCategoryShares,
@@ -208,6 +209,54 @@ describe('series and breakdowns', () => {
     const cashShares = await getCategorySharesByAccount(start, end, 'account-cash');
     expect(cashShares.map((s) => [s.name, s.totalPaise, s.share])).toEqual([
       ['Food', 5000, 1.0],
+    ]);
+  });
+
+  it('resolves pendingAccount metadata and empty accountId consistently in getAccountTotals and getCategorySharesByAccount', async () => {
+    const start = d(2026, 10, 1, 0).getTime();
+    const end = d(2026, 11, 1, 0).getTime();
+
+    const savings = await accountRepository.create({
+      name: 'ICICI Savings',
+      bankName: 'ICICI Bank',
+      mask: '172',
+      type: 'SAVINGS',
+    });
+    const card = await accountRepository.create({
+      name: 'HDFC Regalia',
+      bankName: 'HDFC Credit Card',
+      mask: '4321',
+      type: 'CREDIT_CARD',
+    });
+
+    await addTx({ amountPaise: 5000, at: d(2026, 10, 2), categoryId: 'cat-food', accountId: 'account-cash' });
+    await addTx({ amountPaise: 3000, at: d(2026, 10, 3), categoryId: 'cat-travel', accountId: '' });
+    await addTx({ amountPaise: 10000, at: d(2026, 10, 4), categoryId: 'cat-shopping', accountId: savings.id });
+    // Confirmed transaction whose accountId remained null but parserMetadata has pendingAccount matching the 3rd card account
+    await addTx({
+      amountPaise: 12000,
+      at: d(2026, 10, 5),
+      categoryId: 'cat-bills',
+      accountId: null,
+      parserMetadata: JSON.stringify({ pendingAccount: { bankName: 'HDFC Bank', mask: '4321' } }),
+    });
+
+    const totals = await getAccountTotals(start, end);
+    expect(totals.map((t) => [t.accountId, t.totalPaise])).toEqual([
+      [card.id, 12000],
+      [savings.id, 10000],
+      ['account-cash', 8000],
+    ]);
+
+    const cardShares = await getCategorySharesByAccount(start, end, card.id);
+    expect(cardShares.map((s) => [s.name, s.totalPaise, s.share])).toEqual([
+      ['Bills', 12000, 1],
+    ]);
+
+    const cashShares = await getCategorySharesByAccount(start, end, 'account-cash');
+    expect(cashShares.map((s) => [s.name, s.totalPaise])).toEqual([
+      ['Food', 5000],
+      ['Travel', 3000],
     ]);
   });
 });
