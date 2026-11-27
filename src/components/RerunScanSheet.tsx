@@ -18,6 +18,7 @@ export interface RerunScanSheetProps {
 export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetProps) {
   const [loading, setLoading] = useState(false);
   const [discoveryQueue, setDiscoveryQueue] = useState<DiscoveredAccount[]>([]);
+  const [pendingResult, setPendingResult] = useState<RerunScanResult | null>(null);
   const toast = useToast();
   const styles = useStyles();
 
@@ -41,6 +42,7 @@ export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetP
       onComplete?.(res);
 
       if (res.unconfigured && res.unconfigured.length > 0) {
+        setPendingResult(res);
         setDiscoveryQueue(res.unconfigured);
       } else {
         onClose();
@@ -64,6 +66,10 @@ export function RerunScanSheet({ visible, onClose, onComplete }: RerunScanSheetP
     const remaining = discoveryQueue.slice(1);
     setDiscoveryQueue(remaining);
     if (remaining.length === 0) {
+      if (pendingResult) {
+        onComplete?.(pendingResult);
+        setPendingResult(null);
+      }
       onClose();
     }
   };

@@ -13,6 +13,7 @@ import { categoryRepository } from '../database/repositories/categoryRepository'
 import { memberRepository } from '../database/repositories/memberRepository';
 import { accountRepository } from '../database/repositories/accountRepository';
 import { FormattedTransaction, formatDate } from '../domain/transaction';
+import { extractPendingAccount, findMatchingAccount } from '../domain/account';
 import { formatCurrency } from '../database/db';
 import { notificationDetectionService } from './notificationDetection';
 import { getMonthlyBudgets } from './budget';
@@ -56,22 +57,14 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
   let pendingAccount: { bankName?: string; mask?: string } | null = null;
 
   if (!account && tx.parserMetadata) {
-    try {
-      const meta = JSON.parse(tx.parserMetadata);
-      if (meta && meta.pendingAccount && !meta.pendingAccount.resolved) {
-        const pBank = meta.pendingAccount.bankName?.toLowerCase();
-        const pMask = meta.pendingAccount.mask;
-        const matched = Array.from(lookup.accounts.values()).find(
-          (a) => a.mask === pMask && (!pBank || !a.bankName || a.bankName.toLowerCase() === pBank)
-        );
-        if (matched) {
-          account = matched;
-        } else {
-          pendingAccount = meta.pendingAccount;
-        }
+    const pending = extractPendingAccount(tx.parserMetadata);
+    if (pending && !pending.resolved) {
+      const matched = findMatchingAccount(Array.from(lookup.accounts.values()), pending.bankName, pending.mask);
+      if (matched) {
+        account = matched;
+      } else {
+        pendingAccount = pending;
       }
-    } catch {
-      // Ignore JSON parse errors
     }
   }
 
@@ -224,6 +217,22 @@ export async function getCategoryShares(
   });
 }
 
+function resolveTransactionAccountId(
+  rawAccountId: string | null | undefined,
+  parserMetadata: string | null | undefined,
+  accounts: Account[]
+): string {
+  if (rawAccountId && rawAccountId.trim() !== '') {
+    return rawAccountId;
+  }
+  const pending = extractPendingAccount(parserMetadata);
+  if (pending?.mask) {
+    const matched = findMatchingAccount(accounts, pending.bankName, pending.mask);
+    if (matched) return matched.id;
+  }
+  return 'account-cash';
+}
+
 export async function getCategorySharesByAccount(
   start: number,
   end: number,
@@ -234,27 +243,51 @@ export async function getCategorySharesByAccount(
   const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
   const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
 
-  const accountClause =
-    accountId === 'account-cash' ? '(accountId = ? OR accountId IS NULL)' : 'accountId = ?';
+  const [rows, lookup] = await Promise.all([
+    db.getAllAsync<{
+      categoryId: string | null;
+      rawAccountId: string | null;
+      rawMeta: string | null;
+      total: number;
+      count: number;
+    }>(
+      `SELECT categoryId,
+              CASE WHEN accountId IS NULL OR accountId = '' THEN NULL ELSE accountId END AS rawAccountId,
+              CASE WHEN accountId IS NULL OR accountId = '' THEN parserMetadata ELSE NULL END AS rawMeta,
+              SUM(${amount}) AS total,
+              COUNT(*) AS count
+       FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+       GROUP BY categoryId, rawAccountId, rawMeta HAVING total > 0`,
+      [start, end]
+    ),
+    loadLookup(),
+  ]);
 
-  const rows = await db.getAllAsync<{ categoryId: string | null; total: number; count: number }>(
-    `SELECT categoryId, SUM(${amount}) AS total, COUNT(*) AS count
-     FROM transactions WHERE ${where} AND ${accountClause} AND transactionTimestamp >= ? AND transactionTimestamp < ?
-     GROUP BY categoryId HAVING total > 0 ORDER BY total DESC`,
-    [accountId, start, end]
-  );
-  const total = rows.reduce((s, r) => s + r.total, 0);
-  const lookup = await loadLookup();
-  return rows.map((r) => {
-    const cat = r.categoryId ? lookup.categories.get(r.categoryId) : undefined;
+  const allAccounts = Array.from(lookup.accounts.values());
+  const byCat = new Map<string | null, { total: number; count: number }>();
+  for (const r of rows) {
+    if (resolveTransactionAccountId(r.rawAccountId, r.rawMeta, allAccounts) !== accountId) continue;
+    const prev = byCat.get(r.categoryId);
+    if (prev) {
+      prev.total += r.total;
+      prev.count += r.count;
+    } else {
+      byCat.set(r.categoryId, { total: r.total, count: r.count });
+    }
+  }
+
+  const sorted = Array.from(byCat.entries()).sort((a, b) => b[1].total - a[1].total);
+  const total = sorted.reduce((s, [, v]) => s + v.total, 0);
+  return sorted.map(([categoryId, agg]) => {
+    const cat = categoryId ? lookup.categories.get(categoryId) : undefined;
     return {
-      categoryId: r.categoryId,
+      categoryId,
       name: cat?.name ?? 'Uncategorized',
       icon: cat?.icon ?? null,
       color: cat?.color ?? '#9CA3AF',
-      totalPaise: r.total,
-      count: r.count,
-      share: total > 0 ? r.total / total : 0,
+      totalPaise: agg.total,
+      count: agg.count,
+      share: total > 0 ? agg.total / total : 0,
     };
   });
 }
@@ -281,29 +314,53 @@ export async function getAccountTotals(
   const where = kind === 'INCOME' ? INCOME_WHERE : SPEND_WHERE;
   const amount = kind === 'INCOME' ? 'amountPaise' : SPEND_AMOUNT;
 
-  const rows = await db.getAllAsync<{ accId: string; total: number; count: number }>(
-    `SELECT COALESCE(accountId, 'account-cash') AS accId, SUM(${amount}) AS total, COUNT(*) AS count
-     FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
-     GROUP BY accId HAVING total > 0 ORDER BY total DESC`,
-    [start, end]
-  );
+  const [rows, lookup] = await Promise.all([
+    db.getAllAsync<{
+      rawAccountId: string | null;
+      rawMeta: string | null;
+      total: number;
+      count: number;
+    }>(
+      `SELECT CASE WHEN accountId IS NULL OR accountId = '' THEN NULL ELSE accountId END AS rawAccountId,
+              CASE WHEN accountId IS NULL OR accountId = '' THEN parserMetadata ELSE NULL END AS rawMeta,
+              SUM(${amount}) AS total,
+              COUNT(*) AS count
+       FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
+       GROUP BY rawAccountId, rawMeta HAVING total > 0`,
+      [start, end]
+    ),
+    loadLookup(),
+  ]);
 
-  const grandTotal = rows.reduce((s, r) => s + r.total, 0);
-  const lookup = await loadLookup();
+  const allAccounts = Array.from(lookup.accounts.values());
+  const aggregated = new Map<string, { total: number; count: number }>();
+  for (const r of rows) {
+    const accId = resolveTransactionAccountId(r.rawAccountId, r.rawMeta, allAccounts);
+    const prev = aggregated.get(accId);
+    if (prev) {
+      prev.total += r.total;
+      prev.count += r.count;
+    } else {
+      aggregated.set(accId, { total: r.total, count: r.count });
+    }
+  }
 
-  return rows.map((r) => {
-    const acc = lookup.accounts.get(r.accId);
+  const sorted = Array.from(aggregated.entries()).sort((a, b) => b[1].total - a[1].total);
+  const grandTotal = sorted.reduce((s, [, v]) => s + v.total, 0);
+
+  return sorted.map(([accId, agg]) => {
+    const acc = lookup.accounts.get(accId);
     return {
-      accountId: r.accId,
-      name: acc?.name ?? (r.accId === 'account-cash' ? 'Cash' : 'Unknown Account'),
+      accountId: accId,
+      name: acc?.name ?? (accId === 'account-cash' ? 'Cash' : 'Unknown Account'),
       bankName: acc?.bankName ?? null,
       mask: acc?.mask ?? null,
       type: acc?.type ?? 'CASH',
       color: acc?.color ?? '#34C759',
       icon: acc?.icon ?? 'banknote',
-      totalPaise: r.total,
-      count: r.count,
-      share: grandTotal > 0 ? r.total / grandTotal : 0,
+      totalPaise: agg.total,
+      count: agg.count,
+      share: grandTotal > 0 ? agg.total / grandTotal : 0,
     };
   });
 }

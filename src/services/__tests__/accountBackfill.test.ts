@@ -6,6 +6,7 @@ import {
   extractAccountMask,
   extractBankName,
 } from '../accountBackfill';
+import { notificationDetectionService } from '../notificationDetection';
 import { getSetting, setSetting } from '../settings';
 
 beforeEach(async () => {
@@ -251,6 +252,83 @@ describe('Historical Transaction Account Backfill', () => {
 
       const updatedPending = await transactionRepository.getById(pendingTx.id);
       expect(updatedPending?.accountId).toBe(account.id);
+    });
+
+    it('completeBackfillForAccount matches transactions even when user enters a bankName variant (e.g. HDFC Credit Card vs HDFC Bank)', async () => {
+      const tx = await addTx({
+        amountPaise: 149900,
+        merchant: 'Amazon',
+        at: Date.now() - 10000,
+        status: 'CONFIRMED',
+        accountId: 'account-cash',
+        parserMetadata: JSON.stringify({
+          pendingAccount: { bankName: 'HDFC Bank', mask: '5678' },
+        }),
+      });
+
+      const card = await accountRepository.create({
+        name: 'HDFC Millennia',
+        bankName: 'HDFC Credit Card',
+        mask: '5678',
+        type: 'CREDIT_CARD',
+      });
+
+      const updatedCount = await accountBackfillService.completeBackfillForAccount(
+        'HDFC Credit Card',
+        '5678',
+        card.id
+      );
+
+      expect(updatedCount).toBe(1);
+      const updated = await transactionRepository.getById(tx.id);
+      expect(updated?.accountId).toBe(card.id);
+    });
+
+    it('recovers account metadata from already-consumed native events during rerun backfill', async () => {
+      const card = await accountRepository.create({
+        name: 'HDFC Card',
+        bankName: 'HDFC Bank',
+        mask: '4321',
+        type: 'CREDIT_CARD',
+      });
+
+      const tx = await addTx({
+        amountPaise: 50000,
+        merchant: 'Swiggy',
+        at: 1730000000000,
+        sourceEventId: 'native-consumed-1',
+        sourceType: 'UPI_NOTIFICATION',
+        status: 'CONFIRMED',
+        accountId: 'account-cash',
+      });
+
+      const spy = jest.spyOn(notificationDetectionService, 'getAllPendingUpiEvents').mockResolvedValue([
+        {
+          id: 'native-consumed-1',
+          amountPaise: 50000,
+          merchant: 'Swiggy',
+          sourceApp: 'BANK_SMS',
+          transactionTimestamp: 1730000000000,
+          parserName: 'BankSmsParser',
+          confidence: 0.8,
+          notificationId: 'notif-1',
+          status: 'CONSUMED',
+          createdAt: 1730000000000,
+          dedupeKey: 'dedupe-1',
+          direction: 'DEBIT',
+          accountMask: '4321',
+          bankName: 'HDFC Bank',
+        },
+      ]);
+
+      try {
+        const res = await accountBackfillService.runAutoBackfill({ force: true });
+        expect(res.linkedCount).toBe(1);
+        const updated = await transactionRepository.getById(tx.id);
+        expect(updated?.accountId).toBe(card.id);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

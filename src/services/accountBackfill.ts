@@ -1,5 +1,7 @@
 import { openDatabase } from '@/database/db';
 import { accountRepository } from '@/database/repositories/accountRepository';
+import { bankNamesMatch, extractPendingAccount, findMatchingAccount } from '@/domain/account';
+import { notificationDetectionService, PendingUpiEvent } from './notificationDetection';
 import { getSetting, setSetting } from './settings';
 import { dataEvents } from './events';
 
@@ -40,6 +42,66 @@ export interface BackfillOptions {
   force?: boolean; // When true, runs backfill even if hasRunAccountBackfill is true
 }
 
+interface UnassignedConfirmedRow {
+  id: string;
+  sourceEventId: string | null;
+  amountPaise: number;
+  kind: string;
+  transactionTimestamp: number;
+  rawNotification: string | null;
+  parserMetadata: string | null;
+  sourceApp: string | null;
+}
+
+/** Extracts account mask & bank name from metadata, raw SMS, or native event history. */
+function resolveRowAccountHints(
+  row: UnassignedConfirmedRow,
+  nativeById: Map<string, PendingUpiEvent>,
+  nativeEvents: PendingUpiEvent[]
+): { mask: string | null; bankName: string | null; fromNative: boolean } {
+  const pending = extractPendingAccount(row.parserMetadata);
+  if (pending?.mask) {
+    return { mask: pending.mask, bankName: pending.bankName ?? null, fromNative: false };
+  }
+
+  if (row.rawNotification) {
+    const mask = extractAccountMask(row.rawNotification);
+    if (mask) {
+      return { mask, bankName: extractBankName(row.rawNotification, row.sourceApp), fromNative: false };
+    }
+  }
+
+  const byId = row.sourceEventId ? nativeById.get(row.sourceEventId) : undefined;
+  if (byId?.accountMask) {
+    return { mask: byId.accountMask, bankName: byId.bankName ?? null, fromNative: true };
+  }
+
+  const byFuzzy = nativeEvents.find(
+    (ev) =>
+      ev.accountMask &&
+      ev.amountPaise === row.amountPaise &&
+      (ev.direction === 'CREDIT' ? 'INCOME' : 'EXPENSE') === row.kind &&
+      Math.abs(ev.transactionTimestamp - row.transactionTimestamp) < 300_000
+  );
+  if (byFuzzy?.accountMask) {
+    return { mask: byFuzzy.accountMask, bankName: byFuzzy.bankName ?? null, fromNative: true };
+  }
+
+  return { mask: null, bankName: null, fromNative: false };
+}
+
+async function loadNativeEventLookup(rows: UnassignedConfirmedRow[]): Promise<{
+  byId: Map<string, PendingUpiEvent>;
+  all: PendingUpiEvent[];
+}> {
+  const needsNative = rows.some((r) => !extractPendingAccount(r.parserMetadata)?.mask && !r.rawNotification);
+  if (!needsNative) return { byId: new Map(), all: [] };
+  const all = await notificationDetectionService.getAllPendingUpiEvents().catch(() => []);
+  const byId = new Map<string, PendingUpiEvent>();
+  for (const ev of all) byId.set(ev.id, ev);
+  return { byId, all };
+}
+
 export const accountBackfillService = {
   /** Check if the historical account backfill has already completed. */
   async isBackfillCompleted(): Promise<boolean> {
@@ -47,7 +109,7 @@ export const accountBackfillService = {
   },
 
   /**
-   * Scans confirmed transactions with rawNotification text or parser metadata.
+   * Scans confirmed transactions with rawNotification text, parser metadata, or native event history.
    * Auto-links transactions to matching existing accounts without modifying status or timestamps.
    * Collects unique unconfigured accounts that need user configuration.
    */
@@ -58,55 +120,45 @@ export const accountBackfillService = {
     }
 
     const db = await openDatabase();
-    const rows = await db.getAllAsync<{
-      id: string;
-      rawNotification: string | null;
-      parserMetadata: string | null;
-      sourceApp: string | null;
-    }>(
-      `SELECT id, rawNotification, parserMetadata, sourceApp FROM transactions 
+    const rows = await db.getAllAsync<UnassignedConfirmedRow>(
+      `SELECT id, sourceEventId, amountPaise, kind, transactionTimestamp, rawNotification, parserMetadata, sourceApp
+       FROM transactions
        WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '' OR accountId = 'account-cash')`
     );
 
-    const accounts = await accountRepository.getAll();
+    const [accounts, nativeLookup] = await Promise.all([
+      accountRepository.getAll(),
+      loadNativeEventLookup(rows),
+    ]);
     let linkedCount = 0;
     const unconfiguredMap = new Map<string, DiscoveredAccount>();
 
     for (const row of rows) {
-      let mask: string | null = null;
-      let bankName: string | null = null;
-
-      // Check parser metadata first
-      if (row.parserMetadata) {
-        try {
-          const meta = JSON.parse(row.parserMetadata);
-          if (meta?.pendingAccount?.mask) {
-            mask = meta.pendingAccount.mask;
-            bankName = meta.pendingAccount.bankName ?? null;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      // If not in metadata, extract from rawNotification
-      if (!mask && row.rawNotification) {
-        mask = extractAccountMask(row.rawNotification);
-        bankName = extractBankName(row.rawNotification, row.sourceApp);
-      }
-
+      const { mask, bankName, fromNative } = resolveRowAccountHints(row, nativeLookup.byId, nativeLookup.all);
       if (!mask) continue;
 
-      // Check if matches an existing account
-      const normBank = bankName?.toLowerCase();
-      const matched = accounts.find(
-        (a) => a.mask === mask && (!normBank || !a.bankName || a.bankName.toLowerCase() === normBank)
-      );
-
+      const matched = findMatchingAccount(accounts, bankName, mask);
       if (matched) {
         await db.runAsync('UPDATE transactions SET accountId = ? WHERE id = ?', [matched.id, row.id]);
         linkedCount++;
       } else {
+        // Persist recovered pendingAccount hints so later account setup and History/Insights stay in sync.
+        if (fromNative && !extractPendingAccount(row.parserMetadata)?.mask) {
+          let metaObj: Record<string, unknown> = {};
+          if (row.parserMetadata) {
+            try {
+              metaObj = JSON.parse(row.parserMetadata) as Record<string, unknown>;
+            } catch {
+              metaObj = {};
+            }
+          }
+          metaObj.pendingAccount = { bankName: bankName || undefined, mask };
+          await db.runAsync('UPDATE transactions SET parserMetadata = ? WHERE id = ?', [
+            JSON.stringify(metaObj),
+            row.id,
+          ]);
+        }
+
         const key = `${bankName ?? ''}:${mask}`;
         const existing = unconfiguredMap.get(key);
         if (existing) {
@@ -134,7 +186,7 @@ export const accountBackfillService = {
   },
 
   /**
-   * Once an account is created, completes backfill for all matching confirmed transactions.
+   * Once an account is created, completes backfill for all matching confirmed and pending transactions.
    */
   async completeBackfillForAccount(
     bankName: string | undefined,
@@ -142,53 +194,34 @@ export const accountBackfillService = {
     accountId: string
   ): Promise<number> {
     const db = await openDatabase();
-    const rows = await db.getAllAsync<{
-      id: string;
-      rawNotification: string | null;
-      parserMetadata: string | null;
-      sourceApp: string | null;
-    }>(
-      `SELECT id, rawNotification, parserMetadata, sourceApp FROM transactions 
+    const rows = await db.getAllAsync<UnassignedConfirmedRow>(
+      `SELECT id, sourceEventId, amountPaise, kind, transactionTimestamp, rawNotification, parserMetadata, sourceApp
+       FROM transactions
        WHERE status = 'CONFIRMED' AND (accountId IS NULL OR accountId = '' OR accountId = 'account-cash')`
     );
 
+    const [accounts, nativeLookup] = await Promise.all([
+      accountRepository.getAll(),
+      loadNativeEventLookup(rows),
+    ]);
     let updatedCount = 0;
-    const normBank = bankName?.toLowerCase();
+    const normMask = mask.trim();
 
     for (const row of rows) {
-      let rowMask: string | null = null;
-      let rowBank: string | null = null;
+      const { mask: rowMask, bankName: rowBank } = resolveRowAccountHints(row, nativeLookup.byId, nativeLookup.all);
+      if (!rowMask || rowMask.trim() !== normMask) continue;
 
-      if (row.parserMetadata) {
-        try {
-          const meta = JSON.parse(row.parserMetadata);
-          if (meta?.pendingAccount?.mask) {
-            rowMask = meta.pendingAccount.mask;
-            rowBank = meta.pendingAccount.bankName ?? null;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!rowMask && row.rawNotification) {
-        rowMask = extractAccountMask(row.rawNotification);
-        rowBank = extractBankName(row.rawNotification, row.sourceApp);
-      }
-
-      if (rowMask === mask) {
-        const rowNormBank = rowBank?.toLowerCase();
-        if (!normBank || !rowNormBank || rowNormBank === normBank) {
-          await db.runAsync('UPDATE transactions SET accountId = ? WHERE id = ?', [accountId, row.id]);
-          updatedCount++;
-        }
+      const resolved = findMatchingAccount(accounts, rowBank, rowMask);
+      if (resolved?.id === accountId || bankNamesMatch(bankName, rowBank)) {
+        await db.runAsync('UPDATE transactions SET accountId = ? WHERE id = ?', [accountId, row.id]);
+        updatedCount++;
       }
     }
 
     // Synchronously update pending captures
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { transactionService } = require('./index');
-    await transactionService.assignAccountToPending(bankName, mask, accountId);
+    const pendingUpdated = await transactionService.assignAccountToPending(bankName, normMask, accountId);
 
     // Re-check if any unconfigured remain
     const remaining = await this.runAutoBackfill({ force: true });
@@ -196,7 +229,7 @@ export const accountBackfillService = {
       await setSetting('hasRunAccountBackfill', true);
     }
 
-    if (updatedCount > 0) {
+    if (updatedCount > 0 || pendingUpdated > 0) {
       dataEvents.emit();
     }
 

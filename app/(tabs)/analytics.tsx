@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, useWindowDimensions, View } from 'react-native';
 import { router } from 'expo-router';
 import { space } from '@/design/tokens';
@@ -11,6 +11,7 @@ import { accountIcon, formatAccountLabel } from '@/domain/account';
 import { BarChart, BarDatum, Donut } from '@/components/Charts';
 import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, startOfDay } from '@/utils/format';
 import {
+  Button,
   Card,
   CategoryAvatar,
   Divider,
@@ -131,8 +132,6 @@ export default function InsightsScreen() {
   const [carouselIndex, setCarouselIndex] = useState(0);
   const carouselRef = useRef<ScrollView>(null);
 
-  const range = useMemo(() => rangeFor(mode, offset), [mode, offset]);
-
   const [prevPeriodKey, setPrevPeriodKey] = useState(`${mode}:${offset}`);
   if (prevPeriodKey !== `${mode}:${offset}`) {
     setPrevPeriodKey(`${mode}:${offset}`);
@@ -144,38 +143,41 @@ export default function InsightsScreen() {
   }, [mode, offset]);
 
   const fetcher = useCallback(async () => {
+    // Recompute period bounds on every load so offset === 0 stays fresh across day/month boundaries.
+    const currentRange = rangeFor(mode, offset);
     // For the current (unfinished) period, compare against the same elapsed
     // span of the previous one, not its full length.
     const prevFull = rangeFor(mode, offset - 1);
-    const elapsed = Date.now() - range.start;
+    const elapsed = Date.now() - currentRange.start;
     const prev =
-      offset === 0 && elapsed < range.end - range.start
+      offset === 0 && elapsed < currentRange.end - currentRange.start
         ? { start: prevFull.start, end: Math.min(prevFull.end, prevFull.start + elapsed) }
         : prevFull;
-    const period = { start: range.start, end: range.end, label: range.label };
+    const period = { start: currentRange.start, end: currentRange.end, label: currentRange.label };
     const [totals, prevTotals, series, categories, merchants, members, largest, budgets, income, incomeSources, accountTotals] = await Promise.all([
-      ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: range.start, end: range.end }),
+      ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: currentRange.start, end: currentRange.end }),
       ledgerService.getHistoryTotals({ kind: 'EXPENSE', start: prev.start, end: prev.end }),
-      loadSeries(mode, range.start, range.end),
-      ledgerService.getCategoryShares(range.start, range.end),
+      loadSeries(mode, currentRange.start, currentRange.end),
+      ledgerService.getCategoryShares(currentRange.start, currentRange.end),
       analyticsService.getMerchantSpending(period, 5),
       analyticsService.getMemberSpending(period),
-      ledgerService.getLargestExpense(range.start, range.end),
-      mode === 'month' ? budgetService.getMonthlyBudgets(new Date(range.start)) : Promise.resolve([]),
-      ledgerService.incomeBetween(range.start, range.end),
-      ledgerService.getCategoryShares(range.start, range.end, 'INCOME'),
-      ledgerService.getAccountTotals(range.start, range.end),
+      ledgerService.getLargestExpense(currentRange.start, currentRange.end),
+      mode === 'month' ? budgetService.getMonthlyBudgets(new Date(currentRange.start)) : Promise.resolve([]),
+      ledgerService.incomeBetween(currentRange.start, currentRange.end),
+      ledgerService.getCategoryShares(currentRange.start, currentRange.end, 'INCOME'),
+      ledgerService.getAccountTotals(currentRange.start, currentRange.end),
     ]);
 
     const accountBreakdowns = await Promise.all(
       accountTotals.map(async (acc) => ({
         account: acc,
-        categories: await ledgerService.getCategorySharesByAccount(range.start, range.end, acc.accountId),
+        categories: await ledgerService.getCategorySharesByAccount(currentRange.start, currentRange.end, acc.accountId),
       }))
     );
 
-    const elapsedDays = Math.max(1, Math.ceil((Math.min(Date.now(), range.end) - range.start) / DAY_MS));
+    const elapsedDays = Math.max(1, Math.ceil((Math.min(Date.now(), currentRange.end) - currentRange.start) / DAY_MS));
     return {
+      rangeLabel: currentRange.label,
       totals,
       prevTotals,
       series,
@@ -191,7 +193,7 @@ export default function InsightsScreen() {
       elapsedDays,
       partial: prev !== prevFull,
     };
-  }, [mode, offset, range]);
+  }, [mode, offset]);
 
   const { data, error, refreshing, refresh, reload } = useScreenData(fetcher);
 
@@ -263,7 +265,7 @@ export default function InsightsScreen() {
 
         <View style={styles.periodNav}>
           <IconButton icon="chevronLeft" accessibilityLabel="Previous period" onPress={() => setOffset((o) => o - 1)} />
-          <Text variant="bodyStrong">{range.label}</Text>
+          <Text variant="bodyStrong">{data.rangeLabel}</Text>
           <IconButton
             icon="chevronRight"
             accessibilityLabel="Next period"
@@ -272,6 +274,18 @@ export default function InsightsScreen() {
             onPress={() => setOffset((o) => Math.min(0, o + 1))}
           />
         </View>
+
+        {error ? (
+          <Card style={{ marginBottom: space.md }}>
+            <Text variant="bodyStrong" color={colors.negative}>
+              Could not refresh insights
+            </Text>
+            <Text variant="caption" style={{ marginTop: 2 }}>
+              {error}
+            </Text>
+            <Button title="Retry" variant="secondary" size="sm" onPress={reload} style={{ marginTop: space.sm, alignSelf: 'flex-start' }} />
+          </Card>
+        ) : null}
 
         {/* Key figure */}
         <KeyFigure label="Total spent" value={whole} fraction={fraction}>
