@@ -631,4 +631,18 @@ describe('updateService - SemVer Comparison', () => {
       expect(updateService.GITHUB_RELEASES_LATEST_URL).toBe(GITHUB_RELEASES_LATEST_URL);
     });
   });
+
+  describe('app.json OTA channel configuration for CNG/Gradle builds', () => {
+    it('configures updates.requestHeaders expo-channel-name matching eas.json production channel', () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const appConfig = require('../../../app.json');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const easConfig = require('../../../eas.json');
+
+      expect(appConfig.expo.updates.url).toBeTruthy();
+      expect(appConfig.expo.updates.requestHeaders?.['expo-channel-name']).toBe(
+        easConfig.build.production.channel
+      );
+    });
+  });
 });
