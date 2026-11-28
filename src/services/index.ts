@@ -100,6 +100,23 @@ function afterSpendingChange() {
   void alertsService.checkBudgetAlerts();
 }
 
+async function markPendingAccountResolved(txId: string, parserMetadata: string | null) {
+  if (!parserMetadata) return;
+  try {
+    const meta = JSON.parse(parserMetadata) as Record<string, any>;
+    if (meta?.pendingAccount && !meta.pendingAccount.resolved) {
+      meta.pendingAccount.resolved = true;
+      const database = await openDatabase();
+      await database.runAsync('UPDATE transactions SET parserMetadata = ? WHERE id = ?', [
+        JSON.stringify(meta),
+        txId,
+      ]);
+    }
+  } catch {
+    // Ignore malformed parserMetadata
+  }
+}
+
 export interface SyncPendingResult {
   created: number;
   relinked: number;
@@ -353,14 +370,14 @@ export const transactionService = {
     ]);
 
     let pendingAccount: { bankName?: string; mask?: string } | null = null;
-    if (!account && tx.parserMetadata) {
+    if ((!account || account.id === 'account-cash') && tx.parserMetadata) {
       const pending = extractPendingAccount(tx.parserMetadata);
       if (pending && !pending.resolved && pending.mask) {
         const allAccs = await accountRepository.getAll();
         const matched = findMatchingAccount(allAccs, pending.bankName, pending.mask);
         if (matched) {
           account = matched;
-        } else {
+        } else if (!account) {
           pendingAccount = pending;
         }
       }
@@ -581,6 +598,9 @@ export const transactionService = {
     if (input.categoryId !== existing.categoryId || input.memberId !== existing.memberId) {
       await this.learnMerchant(input.merchant, input.categoryId, input.memberId);
     }
+    if (input.accountId === 'account-cash' && existing.parserMetadata) {
+      await markPendingAccountResolved(id, existing.parserMetadata);
+    }
     afterSpendingChange();
     return updated;
   },
@@ -701,6 +721,9 @@ export const transactionService = {
       }
 
       if (existing.kind === 'EXPENSE') afterSpendingChange();
+      if (accountId === 'account-cash' && existing.parserMetadata) {
+        await markPendingAccountResolved(id, existing.parserMetadata);
+      }
       return { success: true, transaction: updated };
     } catch (error) {
       console.error('[transactionService] Confirm failed:', error);

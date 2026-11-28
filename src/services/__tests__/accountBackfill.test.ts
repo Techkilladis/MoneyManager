@@ -32,6 +32,12 @@ describe('Historical Transaction Account Backfill', () => {
       expect(extractBankName(msg)).toBe('HDFC Bank');
       expect(extractAccountMask(msg)).toBe('5678');
     });
+
+    it('extracts A/c No. and Card ending in formats', () => {
+      expect(extractAccountMask('Sent Rs.120.00 from A/c No. XX1224 to Cafe')).toBe('1224');
+      expect(extractAccountMask('Rs 500 spent on HDFC Bank Card ending in 5678 at AMAZON')).toBe('5678');
+      expect(extractAccountMask('Ac *172 debited for Rs 90.00')).toBe('172');
+    });
   });
 
   describe('runAutoBackfill', () => {
@@ -326,6 +332,54 @@ describe('Historical Transaction Account Backfill', () => {
         expect(res.linkedCount).toBe(1);
         const updated = await transactionRepository.getById(tx.id);
         expect(updated?.accountId).toBe(card.id);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('falls back to native events even when rawNotification exists without an account mask', async () => {
+      const indian = await accountRepository.create({
+        name: 'Indian Bank',
+        bankName: 'Indian Bank',
+        mask: '1224',
+        type: 'SAVINGS',
+      });
+
+      const tx = await addTx({
+        amountPaise: 25000,
+        merchant: 'Velan Fruit',
+        at: 1730000000000,
+        rawNotification: 'Paid Rs 250.00 via UPI',
+        sourceEventId: 'native-with-mask-1',
+        sourceType: 'UPI_NOTIFICATION',
+        status: 'CONFIRMED',
+        accountId: 'account-cash',
+      });
+
+      const spy = jest.spyOn(notificationDetectionService, 'getAllPendingUpiEvents').mockResolvedValue([
+        {
+          id: 'native-with-mask-1',
+          amountPaise: 25000,
+          merchant: 'Velan Fruit',
+          sourceApp: 'BANK_SMS',
+          transactionTimestamp: 1730000000000,
+          parserName: 'BankSmsParser',
+          confidence: 0.9,
+          notificationId: 'notif-2',
+          status: 'CONSUMED',
+          createdAt: 1730000000000,
+          dedupeKey: 'dedupe-2',
+          direction: 'DEBIT',
+          accountMask: '1224',
+          bankName: 'Indian Bank',
+        },
+      ]);
+
+      try {
+        const res = await accountBackfillService.runAutoBackfill({ force: true });
+        expect(res.linkedCount).toBe(1);
+        const updated = await transactionRepository.getById(tx.id);
+        expect(updated?.accountId).toBe(indian.id);
       } finally {
         spy.mockRestore();
       }

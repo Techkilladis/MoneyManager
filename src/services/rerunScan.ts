@@ -50,7 +50,7 @@ export const rerunScanService = {
     const totalCaptured = syncResult.created;
 
     // 6. Broadcast changes
-    if (totalCaptured > 0 || totalRelinked > 0) {
+    if (totalCaptured > 0 || totalRelinked > 0 || backfillResult.unconfigured.length > 0) {
       dataEvents.emit();
     }
 

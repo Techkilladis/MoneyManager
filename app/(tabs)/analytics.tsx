@@ -467,7 +467,13 @@ export default function InsightsScreen() {
               {1 + data.accountBreakdowns.length > 1 ? (
                 <View style={styles.carouselDots}>
                   {Array.from({ length: 1 + data.accountBreakdowns.length }, (_, i) => (
-                    <View key={i} style={[styles.carouselDot, i === carouselIndex && styles.carouselDotActive]} />
+                    <View
+                      key={i}
+                      style={[
+                        styles.carouselDot,
+                        i === Math.min(carouselIndex, data.accountBreakdowns.length) && styles.carouselDotActive,
+                      ]}
+                    />
                   ))}
                 </View>
               ) : null}

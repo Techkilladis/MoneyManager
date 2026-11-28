@@ -37,7 +37,7 @@ object SmsUpiParser {
     )
 
     private val ACCOUNT_MASK_REGEX = Regex(
-        """\b(?:Acct|Account|A/c|Card)\s*(?:ending)?\s*[:#\-]?\s*[*xX]*([0-9]{3,6})\b""",
+        """\b(?:Acct|Account|A/c|Ac|Card)\.?\s*(?:No\.?|Number|ending(?:\s+(?:in|with))?)?\s*[:#\-]?\s*[*xX]*([0-9]{3,6})\b""",
         I
     )
 

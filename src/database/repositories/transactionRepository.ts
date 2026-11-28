@@ -489,9 +489,10 @@ export const transactionRepository = {
           `UPDATE transactions 
            SET accountId = COALESCE(?, accountId),
                parserMetadata = COALESCE(?, parserMetadata),
+               sourceEventId = COALESCE(NULLIF(sourceEventId, ''), ?),
                updatedAt = ?
            WHERE id = ?`,
-          [targetAccountId, targetParserMetadata, timestamp, existing.id]
+          [targetAccountId, targetParserMetadata, input.sourceEventId ?? null, timestamp, existing.id]
         );
 
         const updated = await this.getById(existing.id);
@@ -534,6 +535,23 @@ export const transactionRepository = {
       );
       if (duplicate) {
         return handleExisting(mapTransactionRow(duplicate));
+      }
+
+      // Fallback when the user renamed the merchant during Quick Capture review:
+      // match an unlinked/cash UPI transaction of the exact same amount & kind within 5 minutes.
+      const unlinkedMatches = await database.getAllAsync<any>(
+        `SELECT * FROM transactions
+         WHERE sourceType = 'UPI_NOTIFICATION'
+         AND amountPaise = ?
+         AND kind = ?
+         AND ABS(transactionTimestamp - ?) < 300000
+         AND (accountId IS NULL OR accountId = '' OR accountId = 'account-cash')
+         ORDER BY ABS(transactionTimestamp - ?) ASC
+         LIMIT 2`,
+        [input.amountPaise, input.kind ?? 'EXPENSE', input.transactionTimestamp, input.transactionTimestamp]
+      );
+      if (unlinkedMatches.length === 1) {
+        return handleExisting(mapTransactionRow(unlinkedMatches[0]));
       }
     }
 

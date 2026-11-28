@@ -3,8 +3,9 @@ import { Alert, Platform, Pressable, ScrollView, View } from 'react-native';
 import { radius, space, swatches } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
 import { Account, AccountType } from '@/database/schema';
-import { accountBackfillService, accountService, transactionService } from '@/services';
+import { accountBackfillService, accountService, ledgerService, transactionService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
+import { formatINR, pluralize } from '@/utils/format';
 import { haptic } from '@/utils/haptics';
 import { RerunScanSheet } from '@/components/RerunScanSheet';
 import {
@@ -42,11 +43,12 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
 ];
 
 async function fetchAccounts() {
-  const [accs, backfillRes] = await Promise.all([
+  const [accs, backfillRes, overview] = await Promise.all([
     accountService.getAll(),
-    accountBackfillService.runAutoBackfill(),
+    accountBackfillService.runAutoBackfill({ force: true }),
+    ledgerService.getAccountOverview(),
   ]);
-  return { accounts: accs, unconfigured: backfillRes.unconfigured };
+  return { accounts: accs, unconfigured: backfillRes.unconfigured, overview };
 }
 
 export default function AccountsScreen() {
@@ -215,9 +217,14 @@ export default function AccountsScreen() {
         <Card padded={false}>
           {accounts.map((acc, index) => {
             const icon = accountIcon(acc.type);
-            const subtitle = acc.type === 'CASH'
+            const baseSubtitle = acc.type === 'CASH'
               ? 'Physical Cash'
               : `${formatAccountType(acc.type)}${acc.bankName ? ` • ${acc.bankName}` : ''}${acc.mask ? ` ••${acc.mask}` : ''}`;
+            const stats = data.overview[acc.id];
+            const activity = stats && stats.count > 0
+              ? `${pluralize(stats.count, 'entry', 'entries')}${stats.totalSpentPaise > 0 ? ` · ${formatINR(stats.totalSpentPaise, { decimals: 'never' })} spent` : stats.totalIncomePaise > 0 ? ` · ${formatINR(stats.totalIncomePaise, { decimals: 'never' })} received` : ''}`
+              : 'No entries linked yet';
+            const subtitle = `${baseSubtitle}\n${activity}`;
 
             return (
               <React.Fragment key={acc.id}>
