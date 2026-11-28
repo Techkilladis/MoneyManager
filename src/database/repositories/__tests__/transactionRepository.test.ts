@@ -175,4 +175,75 @@ describe('transactionRepository.createWithIdempotency', () => {
     expect(rescan.transaction.accountId).toBe('account-cash');
     expect(rescan.transaction.parserMetadata).toBe('{"pendingAccount":{"bankName":"SBI","mask":"9988"}}');
   });
+
+  it('re-links an unlinked/cash UPI transaction even if user renamed merchant during review', async () => {
+    const ts = 1700000000000;
+    const initial = await transactionRepository.create({
+      amountPaise: 7000,
+      merchant: 'Velan Fruit',
+      transactionTimestamp: ts,
+      sourceEventId: 'old-event-id',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'account-cash',
+      status: 'CONFIRMED',
+    });
+
+    const rescan = await transactionRepository.createWithIdempotency({
+      amountPaise: 7000,
+      merchant: 'Velan Fruit And Juice Shop',
+      transactionTimestamp: ts + 5000,
+      sourceEventId: 'new-event-id',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'acc-indian-1224',
+      status: 'PENDING',
+      is_pending_capture: 1,
+    });
+
+    expect(rescan.isNew).toBe(false);
+    expect(rescan.relinked).toBe(true);
+    expect(rescan.transaction.id).toBe(initial.id);
+    expect(rescan.transaction.accountId).toBe('acc-indian-1224');
+    expect(rescan.transaction.merchant).toBe('Velan Fruit');
+  });
+
+  it('ignores dismissed transactions during renamed-merchant fallback deduplication', async () => {
+    const ts = 1700000000000;
+    await transactionRepository.create({
+      amountPaise: 7000,
+      merchant: 'Dismissed Merchant',
+      transactionTimestamp: ts,
+      sourceEventId: 'dismissed-ev',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'account-cash',
+      status: 'PENDING',
+      is_pending_capture: 1,
+      is_dismissed: 1,
+    });
+
+    const active = await transactionRepository.create({
+      amountPaise: 7000,
+      merchant: 'Velan Fruit',
+      transactionTimestamp: ts + 1000,
+      sourceEventId: 'old-ev',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'account-cash',
+      status: 'CONFIRMED',
+    });
+
+    const rescan = await transactionRepository.createWithIdempotency({
+      amountPaise: 7000,
+      merchant: 'Velan Fruit And Juice Shop',
+      transactionTimestamp: ts + 5000,
+      sourceEventId: 'new-ev',
+      sourceType: 'UPI_NOTIFICATION',
+      accountId: 'acc-indian-1224',
+      status: 'PENDING',
+      is_pending_capture: 1,
+    });
+
+    expect(rescan.isNew).toBe(false);
+    expect(rescan.relinked).toBe(true);
+    expect(rescan.transaction.id).toBe(active.id);
+    expect(rescan.transaction.accountId).toBe('acc-indian-1224');
+  });
 });

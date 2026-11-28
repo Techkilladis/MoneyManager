@@ -27,7 +27,18 @@ object SmsIngest {
             val direction = result.direction.name
             val key = SmsUpiParser.smsKey(sender, timestamp, body.orEmpty())
             val store = PendingEventStore.getInstance(context)
-            if (store.isKnownSms(key, result.reference, result.amountPaise, direction, timestamp)) return false
+            if (store.isKnownSms(key, result.reference, result.amountPaise, direction, timestamp)) {
+                store.enrichKnownSmsAccount(
+                    dedupeKey = key,
+                    reference = result.reference,
+                    amountPaise = result.amountPaise,
+                    direction = direction,
+                    timestamp = timestamp,
+                    accountMask = result.accountMask,
+                    bankName = result.bankName
+                )
+                return false
+            }
 
             var confidence = 0.6
             if (result.counterparty != null) confidence += 0.2

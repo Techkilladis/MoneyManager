@@ -318,6 +318,33 @@ class SmsUpiParserTest {
     }
 
     @Test
+    fun parsesAdditionalAccountMaskFormats() {
+        val r1 = parse(
+            "Sent Rs.120.00 from A/c No. XX1224 on 20-11-26 to Cafe Coffee Day. RRN 123456789012.",
+            "INDBNK"
+        )
+        assertNotNull(r1)
+        assertEquals("1224", r1!!.accountMask)
+        assertEquals("Indian Bank", r1.bankName)
+
+        val r2 = parse(
+            "Rs 500 spent on HDFC Bank Card ending in 5678 at AMAZON via UPI Ref 123456789012.",
+            "AX-HDFCBK"
+        )
+        assertNotNull(r2)
+        assertEquals("5678", r2!!.accountMask)
+        assertEquals("HDFC Bank", r2.bankName)
+
+        val r3 = parse(
+            "Ac *172 debited for Rs 90.00 on 20-11-26; TEA SHOP credited. UPI:998877665544.",
+            "ICICIB"
+        )
+        assertNotNull(r3)
+        assertEquals("172", r3!!.accountMask)
+        assertEquals("ICICI Bank", r3.bankName)
+    }
+
+    @Test
     fun rejectsLoanAndPromotionalSpam() {
         val r1 = parse(
             "Congratulations! You are pre-approved for a personal loan of Rs 10,00,000 at 10.5% interest. Apply now!",

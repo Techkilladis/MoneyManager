@@ -1,6 +1,7 @@
 import { addTx, d, freshDatabase } from '../../../test/db';
 import { accountRepository } from '@/database/repositories/accountRepository';
 import {
+  getAccountOverview,
   getAccountTotals,
   getCategoryShares,
   getCategorySharesByAccount,
@@ -258,5 +259,52 @@ describe('series and breakdowns', () => {
       ['Food', 5000],
       ['Travel', 3000],
     ]);
+  });
+
+  it('resolves unresolved pendingAccount even when accountId is account-cash, while respecting resolved Cash overrides', async () => {
+    const start = d(2026, 10, 1, 0).getTime();
+    const end = d(2026, 11, 1, 0).getTime();
+
+    const icici = await accountRepository.create({
+      name: 'ICICI',
+      bankName: 'ICICI Bank',
+      mask: '172',
+      type: 'SAVINGS',
+    });
+    const indian = await accountRepository.create({
+      name: 'Indian Bank',
+      bankName: 'Indian Bank',
+      mask: '1224',
+      type: 'SAVINGS',
+    });
+
+    await addTx({ amountPaise: 50000, at: d(2026, 10, 2), categoryId: 'cat-food', accountId: icici.id });
+    await addTx({
+      amountPaise: 25000,
+      at: d(2026, 10, 3),
+      categoryId: 'cat-shopping',
+      accountId: 'account-cash',
+      parserMetadata: JSON.stringify({ pendingAccount: { bankName: 'Indian Bank', mask: '1224' } }),
+    });
+    // Explicitly overridden to Cash (resolved: true)
+    await addTx({
+      amountPaise: 10000,
+      at: d(2026, 10, 4),
+      categoryId: 'cat-food',
+      accountId: 'account-cash',
+      parserMetadata: JSON.stringify({ pendingAccount: { bankName: 'Indian Bank', mask: '1224', resolved: true } }),
+    });
+
+    const totals = await getAccountTotals(start, end);
+    expect(totals.map((t) => [t.accountId, t.totalPaise])).toEqual([
+      [icici.id, 50000],
+      [indian.id, 25000],
+      ['account-cash', 10000],
+    ]);
+
+    const overview = await getAccountOverview();
+    expect(overview[icici.id]).toEqual({ count: 1, totalSpentPaise: 50000, totalIncomePaise: 0 });
+    expect(overview[indian.id]).toEqual({ count: 1, totalSpentPaise: 25000, totalIncomePaise: 0 });
+    expect(overview['account-cash']).toEqual({ count: 1, totalSpentPaise: 10000, totalIncomePaise: 0 });
   });
 });

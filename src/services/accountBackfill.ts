@@ -5,7 +5,8 @@ import { notificationDetectionService, PendingUpiEvent } from './notificationDet
 import { getSetting, setSetting } from './settings';
 import { dataEvents } from './events';
 
-const ACCOUNT_MASK_REGEX = /\b(?:Acct|Account|A\/c|Card)\s*(?:ending)?\s*[:#\-]?\s*[*xX]*([0-9]{3,6})\b/i;
+const ACCOUNT_MASK_REGEX =
+  /\b(?:Acct|Account|A\/c|Ac|Card)\.?\s*(?:No\.?|Number|ending(?:\s+(?:in|with))?)?\s*[:#\-]?\s*[*xX]*([0-9]{3,6})\b/i;
 
 export function extractBankName(text: string, sender?: string | null): string | null {
   const s = (sender ?? '').toUpperCase();
@@ -60,6 +61,10 @@ function resolveRowAccountHints(
   nativeEvents: PendingUpiEvent[]
 ): { mask: string | null; bankName: string | null; fromNative: boolean } {
   const pending = extractPendingAccount(row.parserMetadata);
+  if (pending?.resolved) {
+    // User explicitly resolved/overrode this transaction's account (e.g. to Cash); do not re-link.
+    return { mask: null, bankName: null, fromNative: false };
+  }
   if (pending?.mask) {
     return { mask: pending.mask, bankName: pending.bankName ?? null, fromNative: false };
   }
@@ -94,7 +99,11 @@ async function loadNativeEventLookup(rows: UnassignedConfirmedRow[]): Promise<{
   byId: Map<string, PendingUpiEvent>;
   all: PendingUpiEvent[];
 }> {
-  const needsNative = rows.some((r) => !extractPendingAccount(r.parserMetadata)?.mask && !r.rawNotification);
+  const needsNative = rows.some(
+    (r) =>
+      !extractPendingAccount(r.parserMetadata)?.mask &&
+      !(r.rawNotification && extractAccountMask(r.rawNotification))
+  );
   if (!needsNative) return { byId: new Map(), all: [] };
   const all = await notificationDetectionService.getAllPendingUpiEvents().catch(() => []);
   const byId = new Map<string, PendingUpiEvent>();

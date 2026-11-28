@@ -119,23 +119,90 @@ class PendingEventStore private constructor(context: Context) {
     fun isKnownSms(dedupeKey: String, reference: String?, amountPaise: Long, direction: String, timestamp: Long = 0L): Boolean {
         synchronized(lock) {
             val db = dbHelper.readableDatabase
-            var sql = "SELECT 1 FROM pending_upi_events WHERE dedupeKey = ?"
-            val args = mutableListOf(dedupeKey)
-            if (reference != null && reference.isNotBlank()) {
-                sql += " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)"
-                args.add(reference)
-                args.add(amountPaise.toString())
-                args.add(direction)
-            } else if (timestamp > 0L) {
-                // Guard against timestamp drift between live receiver & inbox scan:
-                // match if same amount, direction, and timestamp within 5 minutes
-                sql += " OR (amountPaise = ? AND direction = ? AND ABS(transactionTimestamp - ?) < 300000)"
-                args.add(amountPaise.toString())
-                args.add(direction)
-                args.add(timestamp.toString())
-            }
-            db.rawQuery("$sql LIMIT 1", args.toTypedArray()).use { return it.moveToFirst() }
+            val (whereClause, args) = knownSmsWhere(dedupeKey, reference, amountPaise, direction, timestamp)
+            val stringArgs = args.map { it.toString() }.toTypedArray()
+            db.rawQuery("SELECT 1 FROM pending_upi_events WHERE $whereClause LIMIT 1", stringArgs).use { return it.moveToFirst() }
         }
+    }
+
+    /**
+     * Backfills missing accountMask or bankName on an already-known SMS event (e.g. events
+     * captured before v3 or parsed by an older parser version) during a rerun scan without
+     * overwriting existing non-empty values. Returns true if any row was updated.
+     */
+    fun enrichKnownSmsAccount(
+        dedupeKey: String,
+        reference: String?,
+        amountPaise: Long,
+        direction: String,
+        timestamp: Long,
+        accountMask: String?,
+        bankName: String?
+    ): Boolean {
+        if (accountMask.isNullOrBlank() && bankName.isNullOrBlank()) return false
+        synchronized(lock) {
+            val db = dbHelper.writableDatabase
+            val (whereClause, matchArgs) = knownSmsWhere(dedupeKey, reference, amountPaise, direction, timestamp)
+            val now = System.currentTimeMillis()
+            val sql = """
+                UPDATE pending_upi_events
+                SET accountMask = COALESCE(NULLIF(accountMask, ''), ?),
+                    bankName = COALESCE(NULLIF(bankName, ''), ?),
+                    updatedAt = ?
+                WHERE ($whereClause)
+                  AND (
+                    (? IS NOT NULL AND ? != '' AND (accountMask IS NULL OR accountMask = ''))
+                    OR (? IS NOT NULL AND ? != '' AND (bankName IS NULL OR bankName = ''))
+                  )
+            """.trimIndent()
+            val args = mutableListOf<Any?>(
+                accountMask,
+                bankName,
+                now
+            )
+            args.addAll(matchArgs)
+            args.add(accountMask)
+            args.add(accountMask)
+            args.add(bankName)
+            args.add(bankName)
+            return db.compileStatement(sql).use { stmt ->
+                args.forEachIndexed { idx, value ->
+                    val bindIdx = idx + 1
+                    when (value) {
+                        null -> stmt.bindNull(bindIdx)
+                        is Long -> stmt.bindLong(bindIdx, value)
+                        is Int -> stmt.bindLong(bindIdx, value.toLong())
+                        else -> stmt.bindString(bindIdx, value.toString())
+                    }
+                }
+                stmt.executeUpdateDelete() > 0
+            }
+        }
+    }
+
+    private fun knownSmsWhere(
+        dedupeKey: String,
+        reference: String?,
+        amountPaise: Long,
+        direction: String,
+        timestamp: Long
+    ): Pair<String, List<Any>> {
+        var sql = "dedupeKey = ?"
+        val args = mutableListOf<Any>(dedupeKey)
+        if (reference != null && reference.isNotBlank()) {
+            sql += " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)"
+            args.add(reference)
+            args.add(amountPaise)
+            args.add(direction)
+        } else if (timestamp > 0L) {
+            // Guard against timestamp drift between live receiver & inbox scan:
+            // match if same amount, direction, and timestamp within 5 minutes
+            sql += " OR (amountPaise = ? AND direction = ? AND ABS(transactionTimestamp - ?) < 300000)"
+            args.add(amountPaise)
+            args.add(direction)
+            args.add(timestamp)
+        }
+        return sql to args
     }
 
     /**

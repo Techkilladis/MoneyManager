@@ -56,13 +56,13 @@ export function toFormatted(tx: Transaction, lookup: Lookup): FormattedTransacti
   let account = tx.accountId ? lookup.accounts.get(tx.accountId) : undefined;
   let pendingAccount: { bankName?: string; mask?: string } | null = null;
 
-  if (!account && tx.parserMetadata) {
+  if ((!account || account.id === 'account-cash') && tx.parserMetadata) {
     const pending = extractPendingAccount(tx.parserMetadata);
     if (pending && !pending.resolved) {
       const matched = findMatchingAccount(Array.from(lookup.accounts.values()), pending.bankName, pending.mask);
       if (matched) {
         account = matched;
-      } else {
+      } else if (!account) {
         pendingAccount = pending;
       }
     }
@@ -222,15 +222,15 @@ function resolveTransactionAccountId(
   parserMetadata: string | null | undefined,
   accounts: Account[]
 ): string {
-  if (rawAccountId && rawAccountId.trim() !== '') {
+  if (rawAccountId && rawAccountId.trim() !== '' && rawAccountId !== 'account-cash') {
     return rawAccountId;
   }
   const pending = extractPendingAccount(parserMetadata);
-  if (pending?.mask) {
+  if (pending && !pending.resolved && pending.mask) {
     const matched = findMatchingAccount(accounts, pending.bankName, pending.mask);
     if (matched) return matched.id;
   }
-  return 'account-cash';
+  return rawAccountId && rawAccountId.trim() !== '' ? rawAccountId : 'account-cash';
 }
 
 export async function getCategorySharesByAccount(
@@ -253,7 +253,7 @@ export async function getCategorySharesByAccount(
     }>(
       `SELECT categoryId,
               CASE WHEN accountId IS NULL OR accountId = '' THEN NULL ELSE accountId END AS rawAccountId,
-              CASE WHEN accountId IS NULL OR accountId = '' THEN parserMetadata ELSE NULL END AS rawMeta,
+              CASE WHEN accountId IS NULL OR accountId = '' OR accountId = 'account-cash' THEN parserMetadata ELSE NULL END AS rawMeta,
               SUM(${amount}) AS total,
               COUNT(*) AS count
        FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
@@ -322,7 +322,7 @@ export async function getAccountTotals(
       count: number;
     }>(
       `SELECT CASE WHEN accountId IS NULL OR accountId = '' THEN NULL ELSE accountId END AS rawAccountId,
-              CASE WHEN accountId IS NULL OR accountId = '' THEN parserMetadata ELSE NULL END AS rawMeta,
+              CASE WHEN accountId IS NULL OR accountId = '' OR accountId = 'account-cash' THEN parserMetadata ELSE NULL END AS rawMeta,
               SUM(${amount}) AS total,
               COUNT(*) AS count
        FROM transactions WHERE ${where} AND transactionTimestamp >= ? AND transactionTimestamp < ?
@@ -363,6 +363,49 @@ export async function getAccountTotals(
       share: grandTotal > 0 ? agg.total / grandTotal : 0,
     };
   });
+}
+
+export interface AccountOverview {
+  count: number;
+  totalSpentPaise: number;
+  totalIncomePaise: number;
+}
+
+/** Confirmed transaction count and spend/income totals per resolved account. */
+export async function getAccountOverview(): Promise<Record<string, AccountOverview>> {
+  const db = await openDatabase();
+  const [rows, lookup] = await Promise.all([
+    db.getAllAsync<{
+      rawAccountId: string | null;
+      rawMeta: string | null;
+      kind: string;
+      total: number;
+      count: number;
+    }>(
+      `SELECT CASE WHEN accountId IS NULL OR accountId = '' THEN NULL ELSE accountId END AS rawAccountId,
+              CASE WHEN accountId IS NULL OR accountId = '' OR accountId = 'account-cash' THEN parserMetadata ELSE NULL END AS rawMeta,
+              kind,
+              SUM(CASE WHEN kind = 'INCOME' THEN amountPaise ELSE ${SPEND_AMOUNT} END) AS total,
+              COUNT(*) AS count
+       FROM transactions WHERE ${SETTLED_WHERE}
+       GROUP BY rawAccountId, rawMeta, kind`
+    ),
+    loadLookup(),
+  ]);
+
+  const allAccounts = Array.from(lookup.accounts.values());
+  const overview: Record<string, AccountOverview> = {};
+  for (const r of rows) {
+    const accId = resolveTransactionAccountId(r.rawAccountId, r.rawMeta, allAccounts);
+    const entry = (overview[accId] ??= { count: 0, totalSpentPaise: 0, totalIncomePaise: 0 });
+    entry.count += r.count;
+    if (r.kind === 'INCOME') {
+      entry.totalIncomePaise += r.total;
+    } else {
+      entry.totalSpentPaise += r.total;
+    }
+  }
+  return overview;
 }
 
 export async function getHomeSummary(): Promise<HomeSummary> {
