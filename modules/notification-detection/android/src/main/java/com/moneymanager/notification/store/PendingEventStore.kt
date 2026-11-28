@@ -120,7 +120,8 @@ class PendingEventStore private constructor(context: Context) {
         synchronized(lock) {
             val db = dbHelper.readableDatabase
             val (whereClause, args) = knownSmsWhere(dedupeKey, reference, amountPaise, direction, timestamp)
-            db.rawQuery("SELECT 1 FROM pending_upi_events WHERE $whereClause LIMIT 1", args).use { return it.moveToFirst() }
+            val stringArgs = args.map { it.toString() }.toTypedArray()
+            db.rawQuery("SELECT 1 FROM pending_upi_events WHERE $whereClause LIMIT 1", stringArgs).use { return it.moveToFirst() }
         }
     }
 
@@ -159,22 +160,23 @@ class PendingEventStore private constructor(context: Context) {
                 bankName,
                 now
             )
-            args.addAll(matchArgs.toList())
+            args.addAll(matchArgs)
             args.add(accountMask)
             args.add(accountMask)
             args.add(bankName)
             args.add(bankName)
-            val stmt = db.compileStatement(sql)
-            args.forEachIndexed { idx, value ->
-                val bindIdx = idx + 1
-                when (value) {
-                    null -> stmt.bindNull(bindIdx)
-                    is Long -> stmt.bindLong(bindIdx, value)
-                    is Int -> stmt.bindLong(bindIdx, value.toLong())
-                    else -> stmt.bindString(bindIdx, value.toString())
+            return db.compileStatement(sql).use { stmt ->
+                args.forEachIndexed { idx, value ->
+                    val bindIdx = idx + 1
+                    when (value) {
+                        null -> stmt.bindNull(bindIdx)
+                        is Long -> stmt.bindLong(bindIdx, value)
+                        is Int -> stmt.bindLong(bindIdx, value.toLong())
+                        else -> stmt.bindString(bindIdx, value.toString())
+                    }
                 }
+                stmt.executeUpdateDelete() > 0
             }
-            return stmt.executeUpdateDelete() > 0
         }
     }
 
@@ -184,23 +186,23 @@ class PendingEventStore private constructor(context: Context) {
         amountPaise: Long,
         direction: String,
         timestamp: Long
-    ): Pair<String, Array<String>> {
+    ): Pair<String, List<Any>> {
         var sql = "dedupeKey = ?"
-        val args = mutableListOf(dedupeKey)
+        val args = mutableListOf<Any>(dedupeKey)
         if (reference != null && reference.isNotBlank()) {
             sql += " OR (transactionReference = ? AND amountPaise = ? AND direction = ?)"
             args.add(reference)
-            args.add(amountPaise.toString())
+            args.add(amountPaise)
             args.add(direction)
         } else if (timestamp > 0L) {
             // Guard against timestamp drift between live receiver & inbox scan:
             // match if same amount, direction, and timestamp within 5 minutes
             sql += " OR (amountPaise = ? AND direction = ? AND ABS(transactionTimestamp - ?) < 300000)"
-            args.add(amountPaise.toString())
+            args.add(amountPaise)
             args.add(direction)
-            args.add(timestamp.toString())
+            args.add(timestamp)
         }
-        return sql to args.toTypedArray()
+        return sql to args
     }
 
     /**

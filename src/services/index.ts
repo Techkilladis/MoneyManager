@@ -111,6 +111,7 @@ async function markPendingAccountResolved(txId: string, parserMetadata: string |
         JSON.stringify(meta),
         txId,
       ]);
+      dataEvents.emit();
     }
   } catch {
     // Ignore malformed parserMetadata

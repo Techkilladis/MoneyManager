@@ -384,5 +384,31 @@ describe('Historical Transaction Account Backfill', () => {
         spy.mockRestore();
       }
     });
+
+    it('preserves explicit Cash override (resolved: true) during forced backfill', async () => {
+      await accountRepository.create({
+        name: 'Indian Bank',
+        bankName: 'Indian Bank',
+        mask: '1224',
+        type: 'SAVINGS',
+      });
+
+      const tx = await addTx({
+        amountPaise: 15000,
+        merchant: 'Local Store',
+        at: 1730000000000,
+        rawNotification: 'Sent Rs.150.00 from A/c *1224 to Local Store - Indian Bank',
+        status: 'CONFIRMED',
+        accountId: 'account-cash',
+        parserMetadata: JSON.stringify({
+          pendingAccount: { bankName: 'Indian Bank', mask: '1224', resolved: true },
+        }),
+      });
+
+      const res = await accountBackfillService.runAutoBackfill({ force: true });
+      expect(res.linkedCount).toBe(0);
+      const updated = await transactionRepository.getById(tx.id);
+      expect(updated?.accountId).toBe('account-cash');
+    });
   });
 });

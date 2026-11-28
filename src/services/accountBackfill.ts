@@ -61,6 +61,10 @@ function resolveRowAccountHints(
   nativeEvents: PendingUpiEvent[]
 ): { mask: string | null; bankName: string | null; fromNative: boolean } {
   const pending = extractPendingAccount(row.parserMetadata);
+  if (pending?.resolved) {
+    // User explicitly resolved/overrode this transaction's account (e.g. to Cash); do not re-link.
+    return { mask: null, bankName: null, fromNative: false };
+  }
   if (pending?.mask) {
     return { mask: pending.mask, bankName: pending.bankName ?? null, fromNative: false };
   }

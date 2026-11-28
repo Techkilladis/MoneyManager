@@ -1,6 +1,7 @@
 // Transaction Repository
 import { openDatabase, mapTransactionRow, generateId, now, runInTransaction } from '../db';
 import { Transaction, TransactionStatus, SourceType, TransactionKind } from '../schema';
+import { extractPendingAccount } from '../../domain/account';
 
 export interface CreateTransactionInput {
   amountPaise: number;
@@ -469,6 +470,11 @@ export const transactionRepository = {
   // Create transaction with idempotency and in-place account re-link check
   async createWithIdempotency(input: CreateTransactionInput): Promise<IdempotencyResult> {
     const handleExisting = async (existing: Transaction): Promise<IdempotencyResult> => {
+      const existingPending = extractPendingAccount(existing.parserMetadata);
+      if (existing.accountId === 'account-cash' && existingPending?.resolved) {
+        return { transaction: existing, isNew: false, relinked: false };
+      }
+
       const isCashOrUnassigned =
         existing.accountId === 'account-cash' ||
         existing.accountId === null ||
@@ -542,6 +548,7 @@ export const transactionRepository = {
       const unlinkedMatches = await database.getAllAsync<any>(
         `SELECT * FROM transactions
          WHERE sourceType = 'UPI_NOTIFICATION'
+         AND is_dismissed = 0
          AND amountPaise = ?
          AND kind = ?
          AND ABS(transactionTimestamp - ?) < 300000

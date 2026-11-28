@@ -3,7 +3,7 @@ import { RefreshControl, ScrollView, useWindowDimensions, View } from 'react-nat
 import { router } from 'expo-router';
 import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
-import { analyticsService, budgetService, ledgerService } from '@/services';
+import { accountBackfillService, analyticsService, budgetService, ledgerService } from '@/services';
 import { useScreenData } from '@/hooks/useScreenData';
 import type { CategoryShare } from '@/services/ledger';
 import { weekBounds } from '@/services/ledger';
@@ -143,6 +143,7 @@ export default function InsightsScreen() {
   }, [mode, offset]);
 
   const fetcher = useCallback(async () => {
+    await accountBackfillService.runAutoBackfill().catch(() => undefined);
     // Recompute period bounds on every load so offset === 0 stays fresh across day/month boundaries.
     const currentRange = rangeFor(mode, offset);
     // For the current (unfinished) period, compare against the same elapsed
