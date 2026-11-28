@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { space } from '@/design/tokens';
 import { makeStyles, useTheme } from '@/design/theme';
@@ -7,13 +7,12 @@ import { accountBackfillService, analyticsService, budgetService, ledgerService 
 import { useScreenData } from '@/hooks/useScreenData';
 import type { CategoryShare } from '@/services/ledger';
 import { weekBounds } from '@/services/ledger';
-import { accountIcon, formatAccountLabel } from '@/domain/account';
-import { BarChart, BarDatum, Donut } from '@/components/Charts';
+import { BarChart, BarDatum } from '@/components/Charts';
+import { SpendingBreakdownCarousel } from '@/components/SpendingBreakdownCarousel';
 import { formatCompactINR, formatDayLabel, formatINR, pluralize, splitINR, startOfDay } from '@/utils/format';
 import {
   Button,
   Card,
-  CategoryAvatar,
   Divider,
   EmptyState,
   ErrorView,
@@ -29,7 +28,6 @@ import {
   SegmentedControl,
   StatusChip,
   Text,
-  UncategorizedAvatar,
 } from '@/components/ui';
 
 type Mode = 'week' | 'month' | 'quarter' | 'year';
@@ -125,22 +123,8 @@ async function loadSeries(mode: Mode, start: number, end: number): Promise<BarDa
 export default function InsightsScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { width: windowWidth } = useWindowDimensions();
-  const cardWidth = windowWidth - space.lg * 2;
   const [mode, setMode] = useState<Mode>('month');
   const [offset, setOffset] = useState(0);
-  const [carouselIndex, setCarouselIndex] = useState(0);
-  const carouselRef = useRef<ScrollView>(null);
-
-  const [prevPeriodKey, setPrevPeriodKey] = useState(`${mode}:${offset}`);
-  if (prevPeriodKey !== `${mode}:${offset}`) {
-    setPrevPeriodKey(`${mode}:${offset}`);
-    setCarouselIndex(0);
-  }
-
-  useEffect(() => {
-    carouselRef.current?.scrollTo({ x: 0, animated: false });
-  }, [mode, offset]);
 
   const fetcher = useCallback(async () => {
     await accountBackfillService.runAutoBackfill().catch(() => undefined);
@@ -340,144 +324,12 @@ export default function InsightsScreen() {
 
             <View style={styles.block}>
               <SectionTitle title="Where it went" />
-              <ScrollView
-                ref={carouselRef}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                style={{ width: cardWidth }}
-                contentContainerStyle={{ alignItems: 'flex-start' }}
-                onMomentumScrollEnd={(e) => {
-                  const idx = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
-                  setCarouselIndex(idx);
-                }}
-              >
-                {/* Slide 0: All Accounts */}
-                <Card style={{ width: cardWidth }}>
-                  <View style={styles.accountSlideHeader}>
-                    <IconTile icon="landmark" color={colors.brand} size={36} />
-                    <View style={{ flex: 1 }}>
-                      <Text variant="labelStrong">All Accounts</Text>
-                      <Text variant="caption">
-                        {data.accountBreakdowns.length === 0
-                          ? 'Overall spending'
-                          : `${pluralize(data.accountBreakdowns.length, 'account', 'accounts')} with spending`}
-                      </Text>
-                    </View>
-                    <Text variant="labelStrong" numeric>
-                      {formatINR(totals.total, { decimals: 'never' })}
-                    </Text>
-                  </View>
-                  <Divider style={{ marginVertical: space.sm }} />
-                  <View style={styles.donutWrap}>
-                    <Donut
-                      slices={data.categories.map((c) => ({
-                        key: c.categoryId ?? 'none',
-                        value: c.totalPaise,
-                        color: c.color ?? colors.textTertiary,
-                      }))}
-                    >
-                      <Text variant="caption">{pluralize(data.categories.length, 'category', 'categories')}</Text>
-                      <Text variant="heading" numeric>
-                        {formatCompactINR(totals.total)}
-                      </Text>
-                    </Donut>
-                  </View>
-                  {data.categories.map((c) => (
-                    <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
-                      {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
-                      <View style={{ flex: 1, gap: 6 }}>
-                        <View style={styles.breakdownText}>
-                          <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
-                            {c.name}
-                          </Text>
-                          <Text variant="labelStrong" numeric>
-                            {formatINR(c.totalPaise, { decimals: 'never' })}
-                          </Text>
-                        </View>
-                        <View style={styles.breakdownText}>
-                          <View style={{ flex: 1 }}>
-                            <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
-                          </View>
-                          <Text variant="caption" numeric style={styles.pct}>
-                            {Math.round(c.share * 100)}%
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  ))}
-                </Card>
-
-                {/* Slides 1..N: Per-Account breakdown */}
-                {data.accountBreakdowns.map(({ account, categories: accCats }) => (
-                  <Card key={account.accountId} style={{ width: cardWidth }}>
-                    <View style={styles.accountSlideHeader}>
-                      <IconTile icon={accountIcon(account.type)} color={account.color} size={36} />
-                      <View style={{ flex: 1 }}>
-                        <Text variant="labelStrong">{formatAccountLabel(account)}</Text>
-                        <Text variant="caption">
-                          {Math.round(account.share * 100)}% of total spend
-                        </Text>
-                      </View>
-                      <Text variant="labelStrong" numeric>
-                        {formatINR(account.totalPaise, { decimals: 'never' })}
-                      </Text>
-                    </View>
-                    <Divider style={{ marginVertical: space.sm }} />
-                    <View style={styles.donutWrap}>
-                      <Donut
-                        slices={accCats.map((c) => ({
-                          key: c.categoryId ?? 'none',
-                          value: c.totalPaise,
-                          color: c.color ?? colors.textTertiary,
-                        }))}
-                      >
-                        <Text variant="caption">{pluralize(accCats.length, 'category', 'categories')}</Text>
-                        <Text variant="heading" numeric>
-                          {formatCompactINR(account.totalPaise)}
-                        </Text>
-                      </Donut>
-                    </View>
-                    {accCats.map((c) => (
-                      <View key={c.categoryId ?? 'none'} style={styles.breakdownRow}>
-                        {c.categoryId ? <CategoryAvatar icon={c.icon} color={c.color} size={36} /> : <UncategorizedAvatar size={36} />}
-                        <View style={{ flex: 1, gap: 6 }}>
-                          <View style={styles.breakdownText}>
-                            <Text variant="labelStrong" numberOfLines={1} style={{ flex: 1 }}>
-                              {c.name}
-                            </Text>
-                            <Text variant="labelStrong" numeric>
-                              {formatINR(c.totalPaise, { decimals: 'never' })}
-                            </Text>
-                          </View>
-                          <View style={styles.breakdownText}>
-                            <View style={{ flex: 1 }}>
-                              <ProgressBar value={c.share} color={c.color ?? colors.textTertiary} height={6} />
-                            </View>
-                            <Text variant="caption" numeric style={styles.pct}>
-                              {Math.round(c.share * 100)}%
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    ))}
-                  </Card>
-                ))}
-              </ScrollView>
-
-              {1 + data.accountBreakdowns.length > 1 ? (
-                <View style={styles.carouselDots}>
-                  {Array.from({ length: 1 + data.accountBreakdowns.length }, (_, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        styles.carouselDot,
-                        i === Math.min(carouselIndex, data.accountBreakdowns.length) && styles.carouselDotActive,
-                      ]}
-                    />
-                  ))}
-                </View>
-              ) : null}
+              <SpendingBreakdownCarousel
+                key={`${mode}:${offset}`}
+                totalPaise={totals.total}
+                categories={data.categories}
+                accountBreakdowns={data.accountBreakdowns}
+              />
             </View>
 
             {data.budgets.length > 0 ? (
@@ -720,11 +572,6 @@ const useStyles = makeStyles((colors) => ({
   block: {
     marginTop: space.xxl,
   },
-  donutWrap: {
-    alignItems: 'center',
-    paddingVertical: space.sm,
-    marginBottom: space.sm,
-  },
   breakdownRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -735,10 +582,6 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-  },
-  pct: {
-    width: 36,
-    textAlign: 'right',
   },
   budgetRow: {
     gap: space.xs,
@@ -763,30 +606,6 @@ const useStyles = makeStyles((colors) => ({
     backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  accountSlideHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingBottom: space.xs,
-  },
-  carouselDots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: space.xs,
-    marginTop: space.sm,
-  },
-  carouselDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.borderStrong,
-  },
-  carouselDotActive: {
-    width: 18,
-    borderRadius: 3,
-    backgroundColor: colors.brand,
   },
   insight: {
     flexDirection: 'row',
